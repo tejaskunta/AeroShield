@@ -1,0 +1,65 @@
+# --- datasets & weights: never commit these to git -------------------------
+# Datasets are huge and often licensed (PRD §10: CC BY 4.0 attribution).
+# Weights are build artifacts — publish them as GitHub Releases instead.
+datasets/
+runs/
+weights/
+*.pt
+*.onnx
+*.engine
+*.trt
+!yolov8n.pt.placeholder
+
+# Ultralytics drops pretrained checkpoints in the working dir on first run
+yolov8*.pt
+yolo11*.pt
+
+# --- python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# virtualenvs
+.venv/
+venv/
+env/
+ENV/
+
+# --- tooling ---------------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# --- experiment tracking ---------------------------------------------------
+wandb/
+mlruns/
+lightning_logs/
+events.out.tfevents.*
+
+# --- editors & OS ----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- secrets ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# --- jetson build logs -----------------------------------------------------
+jetson/build_engine.log
