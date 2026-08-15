@@ -1,0 +1,33 @@
+# SafeMine — Week 3 YOLOv8 training requirements (training PC only).
+#
+# These are for your RTX 4070 laptop. Do NOT install them on the Jetson Nano —
+# see jetson/README.md for why the Nano gets a completely different stack.
+#
+# IMPORTANT: install PyTorch FIRST, from NVIDIA's index, or pip will quietly
+# give you the CPU-only build and training will take hours instead of minutes:
+#
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#   pip install -r requirements.txt
+#
+# Verify with: python scripts/check_env.py
+
+# --- core ---
+ultralytics>=8.2.0,<9.0.0     # YOLOv8 training/val/export
+opencv-python>=4.8.0          # capture, preprocessing, drawing (PRD §7)
+numpy>=1.24.0,<2.2.0
+PyYAML>=6.0                   # reading data.yaml
+Pillow>=10.0.0                # image verification in verify_dataset.py
+
+# --- ONNX export path to the Jetson ---
+onnx>=1.15.0
+onnxslim>=0.1.31              # graph simplification (Ultralytics uses this now)
+onnxruntime>=1.17.0           # CPU-side verification of the exported graph
+
+# --- training niceties ---
+matplotlib>=3.7.0             # results.png, PR/F1 curves for the report
+pandas>=2.0.0                 # results.csv handling
+seaborn>=0.13.0               # confusion matrix rendering
+tqdm>=4.66.0
+
+# --- optional: experiment tracking ---
+# tensorboard>=2.15.0
