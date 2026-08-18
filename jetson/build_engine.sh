@@ -1,13 +1,13 @@
-#!/usr/bin/env bash
-# SafeMine - build a TensorRT engine from best.onnx, ON the Jetson Nano.
+﻿#!/usr/bin/env bash
+# AeroShield - build a TensorRT engine from best.onnx, ON the Jetson Nano.
 #
 # Run this on the NANO, never on the training PC. A TensorRT engine is compiled
 # against one specific GPU architecture and TensorRT version; an engine built on
 # an RTX 4070 will refuse to load on the Nano's Maxwell GPU.
 #
-#   scp weights/best.onnx  <user>@<nano-ip>:~/safemine/
+#   scp weights/best.onnx  <user>@<nano-ip>:~/AeroShield/
 #   ssh <user>@<nano-ip>
-#   cd ~/safemine && bash build_engine.sh best.onnx
+#   cd ~/AeroShield && bash build_engine.sh best.onnx
 #
 # Expect this to take 5-20 minutes. That is normal - TensorRT is benchmarking
 # every kernel it might use. It is not hung.
@@ -20,13 +20,13 @@ WORKSPACE_MB="${WORKSPACE_MB:-2048}"
 TRTEXEC="/usr/src/tensorrt/bin/trtexec"
 
 echo "=============================================================="
-echo "SafeMine - TensorRT engine build"
+echo "AeroShield - TensorRT engine build"
 echo "=============================================================="
 
 if [[ ! -f "$ONNX" ]]; then
   echo "ERROR: $ONNX not found in $(pwd)" >&2
   echo "       Copy it from the training PC first:" >&2
-  echo "       scp weights/best.onnx <user>@<nano-ip>:~/safemine/" >&2
+  echo "       scp weights/best.onnx <user>@<nano-ip>:~/AeroShield/" >&2
   exit 1
 fi
 
@@ -85,3 +85,4 @@ else
   echo "  * Dynamic shapes   -> re-export with dynamic=False (the default)" >&2
   exit 1
 fi
+

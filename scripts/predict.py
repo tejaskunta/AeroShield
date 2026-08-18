@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-SafeMine - inference sanity checker.
+AeroShield - inference sanity checker.
 
 Run this on a few real images right after training to visually confirm
 the model learned the right thing. It writes an annotated copy beside
@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Run SafeMine inference and save annotated images.")
+    ap = argparse.ArgumentParser(description="Run AeroShield inference and save annotated images.")
     ap.add_argument("--weights", default="weights/best.pt",
                     help="Absolute or repo-relative path to the .pt checkpoint")
     ap.add_argument("--source", required=True,
@@ -33,7 +33,7 @@ def main() -> int:
     ap.add_argument("--device", default="0")
     ap.add_argument("--project", default="runs/predict",
                     help="Directory to write the annotated images into")
-    ap.add_argument("--name", default="safemine")
+    ap.add_argument("--name", default="AeroShield")
     ap.add_argument("--save-video", action="store_true",
                     help="Save the annotated video, not just a summary")
     args = ap.parse_args()
@@ -80,10 +80,11 @@ def main() -> int:
     print("Open a few and check: are mines boxed, and non-mines left alone?")
     if total_detections == 0:
         print("\nZero detections. Before assuming the model is broken, retry with"
-              f" --conf 0.05 — {args.conf} may just be too strict for a fresh model.")
+              f" --conf 0.05 â€” {args.conf} may just be too strict for a fresh model.")
     print()
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

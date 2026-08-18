@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-SafeMine - standalone ONNX exporter.
+AeroShield - standalone ONNX exporter.
 
 week3_train_yolov8.py already exports at the end of training. Use this when
 that step failed, or when you want to re-export an older checkpoint with
@@ -96,12 +96,13 @@ def main() -> int:
 
     print("""
 Next - on the Jetson Nano:
-    scp weights/best.onnx  <user>@<nano-ip>:~/safemine/
+    scp weights/best.onnx  <user>@<nano-ip>:~/AeroShield/
     ssh <user>@<nano-ip>
-    cd ~/safemine && bash build_engine.sh best.onnx
+    cd ~/AeroShield && bash build_engine.sh best.onnx
 """)
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

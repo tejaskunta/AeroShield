@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-SafeMine - smoke test dataset generator.
+AeroShield - smoke test dataset generator.
 
 Creates a minimal synthetic dataset with two classes (metal, plastic) so you
 can test the full train > validate > export pipeline end-to-end without
@@ -92,3 +92,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

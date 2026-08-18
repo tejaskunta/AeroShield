@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-SafeMine - environment check.
+AeroShield - environment check.
 
 Run this FIRST, before you touch the training script. It answers the only
 question that matters on day one: "will this actually use my RTX 4070?"
@@ -29,7 +29,7 @@ def head(text: str) -> None:
 
 def main() -> int:
     print("=" * 68)
-    print("SafeMine environment check")
+    print("AeroShield environment check")
     print("=" * 68)
 
     head("System")
@@ -144,3 +144,4 @@ def suggest_batch(vram_gb: float) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

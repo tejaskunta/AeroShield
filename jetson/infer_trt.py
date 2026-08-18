@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-SafeMine - TensorRT inference on the Jetson Nano.
+AeroShield - TensorRT inference on the Jetson Nano.
 
 Runs the .engine built by build_engine.sh. This is Week 4/5 code, included now
 so the handoff from training is complete and testable the day the Nano is ready.
@@ -132,7 +132,7 @@ class TrtYolo:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="SafeMine TensorRT inference (Jetson Nano).")
+    ap = argparse.ArgumentParser(description="AeroShield TensorRT inference (Jetson Nano).")
     ap.add_argument("--engine", default="best.engine")
     ap.add_argument("--source", default="0", help="'0' for camera, or a path to an image/video")
     ap.add_argument("--conf", type=float, default=0.25)
@@ -194,7 +194,7 @@ def main() -> int:
                 cv2.imwrite(args.save, frame)
                 print(f"Saved -> {args.save}  ({len(boxes)} detections, {dt * 1000:.0f} ms)")
             if not args.headless:
-                cv2.imshow("SafeMine", frame)
+                cv2.imshow("AeroShield", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
             elif cap is None:
@@ -214,3 +214,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

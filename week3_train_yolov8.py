@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-SafeMine - Week 3: YOLOv8 training pipeline.
+AeroShield - Week 3: YOLOv8 training pipeline.
 
 Train -> validate -> export to ONNX, in one run.
 
@@ -80,7 +80,7 @@ def human_time(seconds: float) -> str:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="SafeMine Week 3 - train, validate and export YOLOv8.",
+        description="AeroShield Week 3 - train, validate and export YOLOv8.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--data", default=DATA_YAML,
@@ -99,7 +99,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--patience", type=int, default=20,
                    help="Early-stop after N epochs with no val improvement. 0 disables it")
     p.add_argument("--name", default=None,
-                   help="Run name under runs/detect/ (default: safemine_<timestamp>)")
+                   help="Run name under runs/detect/ (default: AeroShield_<timestamp>)")
     p.add_argument("--conf", type=float, default=0.25,
                    help="Validation confidence threshold. Lower = higher recall (see README)")
     p.add_argument("--opset", type=int, default=12,
@@ -190,7 +190,7 @@ def main() -> None:
 
     from ultralytics import YOLO
 
-    run_name = args.name or f"safemine_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_name = args.name or f"AeroShield_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     workers = args.workers if args.workers is not None else (4 if platform.system() == "Windows" else 8)
     cache = False if args.cache == "False" else args.cache
 
@@ -289,7 +289,7 @@ def main() -> None:
             "mAP50-95": float(box.map),
         }
         info(f"precision  {box.mp:.4f}")
-        info(f"recall     {box.mr:.4f}   <-- SafeMine optimises for this")
+        info(f"recall     {box.mr:.4f}   <-- AeroShield optimises for this")
         info(f"mAP@50     {box.map50:.4f}")
         info(f"mAP@50-95  {box.map:.4f}")
 
@@ -359,7 +359,7 @@ def main() -> None:
         "save_dir": str(save_dir),
         "metrics": metrics_summary,
     }
-    summary_path = save_dir / "safemine_summary.json"
+    summary_path = save_dir / "AeroShield_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     info(f"summary  -> {summary_path}")
 
@@ -381,3 +381,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

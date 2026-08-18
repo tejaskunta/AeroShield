@@ -1,41 +1,41 @@
-# SafeMine — dataset config template.
+﻿# AeroShield â€” dataset config template.
 #
 # Copy this to your dataset folder and edit, OR let the Week 2 pipeline
-# (step 04 — Split) generate it automatically:
+# (step 04 â€” Split) generate it automatically:
 #
 #   cp configs/data.yaml.example datasets/unified_dataset/data.yaml
 #
 # Then point the trainer at it:
 #   python week3_train_yolov8.py --data datasets/unified_dataset/data.yaml
 #
-# Validate it BEFORE you train — this catches the errors that otherwise
+# Validate it BEFORE you train â€” this catches the errors that otherwise
 # show up as "mAP is 0.0" forty minutes in:
 #   python scripts/verify_dataset.py --data datasets/unified_dataset/data.yaml
 
 # Dataset root. An ABSOLUTE path is strongly recommended: Ultralytics resolves
 # a relative `path` against its own settings datasets_dir, not against this
 # file, which is the #1 cause of "images not found".
-#   Windows: use forward slashes -> C:/Users/you/safemine-yolov8/datasets/unified_dataset
-path: /absolute/path/to/safemine-yolov8/datasets/unified_dataset
+#   Windows: use forward slashes -> C:/Users/you/AeroShield-yolov8/datasets/unified_dataset
+path: /absolute/path/to/AeroShield-yolov8/datasets/unified_dataset
 
 # Split folders, relative to `path` above.
-# Expected layout (YOLO convention — 'images' swaps to 'labels' automatically):
+# Expected layout (YOLO convention â€” 'images' swaps to 'labels' automatically):
 #
 #   unified_dataset/
-#   ├── train/
-#   │   ├── images/   frame_0001.jpg
-#   │   └── labels/   frame_0001.txt
-#   ├── val/
-#   │   ├── images/
-#   │   └── labels/
-#   └── test/
-#       ├── images/
-#       └── labels/
+#   â”œâ”€â”€ train/
+#   â”‚   â”œâ”€â”€ images/   frame_0001.jpg
+#   â”‚   â””â”€â”€ labels/   frame_0001.txt
+#   â”œâ”€â”€ val/
+#   â”‚   â”œâ”€â”€ images/
+#   â”‚   â””â”€â”€ labels/
+#   â””â”€â”€ test/
+#       â”œâ”€â”€ images/
+#       â””â”€â”€ labels/
 train: train/images
 val: val/images
 test: test/images
 
-# Number of classes — must equal the length of `names` below.
+# Number of classes â€” must equal the length of `names` below.
 nc: 3
 
 # Class names, in ID order. Index 0 = first line, and that ordering is baked
@@ -50,14 +50,15 @@ names:
   - debris_negative
 
 # ---------------------------------------------------------------------------
-# Label format reminder — one .txt per image, one line per object:
+# Label format reminder â€” one .txt per image, one line per object:
 #
 #   <class_id> <x_center> <y_center> <width> <height>
 #
-# All four coordinates are NORMALISED to 0.0–1.0 (divide by image width/height).
-# An image with no objects gets an EMPTY .txt file, not a missing one — a
+# All four coordinates are NORMALISED to 0.0â€“1.0 (divide by image width/height).
+# An image with no objects gets an EMPTY .txt file, not a missing one â€” a
 # missing label file means "background", which is a different training signal.
 #
 # Example (class 0, centred, 20% of the frame):
 #   0 0.500000 0.500000 0.200000 0.200000
 # ---------------------------------------------------------------------------
+

@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-SafeMine - dataset verifier.
+AeroShield - dataset verifier.
 
 Catches the mistakes that otherwise show up as "mAP is 0.0 and I don't know why"
 forty minutes into a training run:
@@ -274,3 +274,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

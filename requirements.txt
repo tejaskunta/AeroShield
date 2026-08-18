@@ -1,6 +1,6 @@
-# SafeMine — Week 3 YOLOv8 training requirements (training PC only).
+﻿# AeroShield â€” Week 3 YOLOv8 training requirements (training PC only).
 #
-# These are for your RTX 4070 laptop. Do NOT install them on the Jetson Nano —
+# These are for your RTX 4070 laptop. Do NOT install them on the Jetson Nano â€”
 # see jetson/README.md for why the Nano gets a completely different stack.
 #
 # IMPORTANT: install PyTorch FIRST, from NVIDIA's index, or pip will quietly
@@ -13,7 +13,7 @@
 
 # --- core ---
 ultralytics>=8.2.0,<9.0.0     # YOLOv8 training/val/export
-opencv-python>=4.8.0          # capture, preprocessing, drawing (PRD §7)
+opencv-python>=4.8.0          # capture, preprocessing, drawing (PRD Â§7)
 numpy>=1.24.0,<2.2.0
 PyYAML>=6.0                   # reading data.yaml
 Pillow>=10.0.0                # image verification in verify_dataset.py
@@ -31,3 +31,4 @@ tqdm>=4.66.0
 
 # --- optional: experiment tracking ---
 # tensorboard>=2.15.0
+
