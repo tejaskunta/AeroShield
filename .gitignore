@@ -1,6 +1,6 @@
 # --- datasets & weights: never commit these to git -------------------------
-# Datasets are huge and often licensed (PRD §10: CC BY 4.0 attribution).
-# Weights are build artifacts — publish them as GitHub Releases instead.
+# Datasets are huge and often licensed.
+# Weights are build artifacts and should be versioned via releases/artifacts.
 datasets/
 runs/
 weights/
@@ -17,6 +17,8 @@ yolo11*.pt
 # --- python ----------------------------------------------------------------
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 *$py.class
 *.so
 .Python
@@ -30,6 +32,7 @@ dist/
 venv/
 env/
 ENV/
+backend/venv/
 
 # --- tooling ---------------------------------------------------------------
 .pytest_cache/
@@ -58,6 +61,7 @@ desktop.ini
 .env
 .env.*
 !.env.example
+backend/.env
 *.key
 *.pem
 
