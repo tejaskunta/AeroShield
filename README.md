@@ -1,56 +1,51 @@
 ﻿# AeroShield
 
-AeroShield is an AI-based drone landmine detection and mapping system.
+## AI-Powered Drone Landmine Detection and Mapping System
 
-Current focus in this repository is the backend API foundation built with FastAPI, designed so a trained YOLO model can be integrated later without changing the API contract.
+AeroShield is an AI-driven drone system designed to autonomously survey predefined GPS grid missions, detect visible landmine-like objects and surface indicators using onboard computer vision, associate detections with GPS coordinates, and present them through a real-time web dashboard with geospatial analysis, safety assistance, and automated reporting.
 
-## Project Goal
+Important: AeroShield uses RGB imagery and is designed to detect visible landmine-like objects and surface indicators. It does not detect buried mines.
 
-Build a safe and practical system that can:
+---
 
-- Process drone images
-- Detect possible landmine-like objects
-- Attach GPS context to detections
-- Support mission workflows
-- Generate reports for field teams
+## Project Overview
 
-Important limitation: RGB camera detection identifies visible landmine-like objects and indicators on the surface, not buried mines.
+Traditional landmine detection can expose personnel to significant risk, requires substantial time, and is difficult in large or inaccessible areas. AeroShield explores a safer and more scalable approach by combining autonomous drone surveying, onboard AI inference, GPS geotagging, geospatial analysis, and decision-support tools.
 
-## Tech Stack (Planned)
+Core end-to-end pipeline:
 
-- FastAPI (backend API)
-- YOLO (object detection)
-- GPS metadata handling
-- MongoDB (data storage)
-- RAG + LLM (analysis assistance)
-- Web/Mobile dashboard
-- PDF reports
+```text
+Autonomous Drone Mission
+        -> RGB Image Capture
+        -> YOLO Detection on Jetson Nano
+        -> Grad-CAM Explanation
+        -> MAVLink GPS Geotagging
+        -> FastAPI Backend
+        -> PostgreSQL + PostGIS
+        -> Real-Time Web Dashboard
+        -> AI Assistance + Safe Path + Report
+```
 
-## Current Implementation Status
+The project is currently developed as a single-drone, web-dashboard MVP.
 
-### Phase 1 Complete
+---
 
-- FastAPI app initialized
-- Health and root endpoints added
-- Swagger docs enabled
+## Current Repository Status
 
-Endpoints:
+Implemented now:
 
-- `GET /` -> `{"message": "AeroShield API is running"}`
-- `GET /health` -> `{"status": "healthy"}`
+- FastAPI backend foundation
+- Root and health endpoints
+- Swagger docs
+- Detection upload endpoint with a dummy detector
 
-### Phase 2 Complete
+Current backend endpoints:
 
-- Detection API foundation added
-- Image upload endpoint created
-- Dummy/mock detector implemented (no YOLO loaded yet)
-- Image content-type validation added
+- GET /
+- GET /health
+- POST /api/detect
 
-Endpoint:
-
-- `POST /api/detect`
-
-Example response:
+Example detection response:
 
 ```json
 {
@@ -72,53 +67,191 @@ Example response:
 }
 ```
 
-## Backend Structure (Current)
+---
+
+## Key Features (Target Architecture)
+
+1. Autonomous grid survey using ArduPilot and Mission Planner.
+2. Onboard YOLO inference on Jetson Nano.
+3. Grad-CAM based explainability for detections.
+4. MAVLink GPS geotagging for every detection.
+5. Real-time dashboard updates via API plus websocket layer.
+6. RAG safety copilot grounded in demining documentation.
+7. Deterministic safe-path planner using A* and geospatial risk.
+8. Automated mission report generation.
+9. Voice-assisted query flow through browser speech input.
+
+---
+
+## System Architecture
 
 ```text
-backend/
-├── app/
-│   ├── main.py
-│   ├── api/
-│   │   └── detection.py
-│   ├── services/
-│   │   └── detection_service.py
-│   └── schemas/
-│       └── detection.py
-└── requirements.txt
+Mission Planner
+    -> Pixhawk 4 (ArduPilot)
+    -> Jetson Nano (OpenCV + YOLO + Grad-CAM + GPS geotagging)
+    -> REST to FastAPI
+    -> PostgreSQL + PostGIS
+    -> Dashboard + AI services (RAG, A*, report agents)
 ```
 
-## Quick Start (Windows PowerShell)
+---
 
-Run from project root (`AeroShield Project`):
+## Technology Stack
+
+### Hardware
+
+| Component | Technology |
+|---|---|
+| Drone frame | ZD550 550mm carbon fiber folding quadcopter |
+| Flight controller | Pixhawk 4 |
+| Flight firmware | ArduPilot |
+| GPS and compass | Holybro M10 |
+| Companion computer | NVIDIA Jetson Nano |
+| Camera | USB or CSI RGB camera |
+| Ground station | Mission Planner |
+
+### Software
+
+| Layer | Technology |
+|---|---|
+| Backend API | FastAPI |
+| Computer vision | OpenCV |
+| Object detection | YOLOv8 (Ultralytics) |
+| Jetson optimization | TensorRT |
+| Explainability | Grad-CAM |
+| Telemetry integration | pymavlink or MAVSDK |
+| Database | PostgreSQL + PostGIS |
+| Vector store | Chroma |
+| Agent framework | CrewAI |
+| LLM provider | Claude API or GPT API |
+| Frontend | React |
+| Mapping | Leaflet |
+| Real-time channel | Socket.IO |
+| Report generation | WeasyPrint |
+| Containerization | Docker Compose |
+| Version control | Git and GitHub |
+
+---
+
+## Project Structure
+
+The exact structure will evolve, but the target organization is:
+
+```text
+AeroShield/
+|-- backend/
+|   |-- app/
+|   |   |-- api/
+|   |   |-- services/
+|   |   |-- schemas/
+|   |   |-- database/
+|   |   |-- agents/
+|   |   |-- rag/
+|   |   |-- planner/
+|   |   `-- main.py
+|   |-- migrations/
+|   |-- reports/
+|   |-- tests/
+|   |-- requirements.txt
+|   `-- .env.example
+|-- frontend/
+|-- jetson/
+|-- ml/
+|-- docs/
+|-- docker-compose.yml
+|-- .gitignore
+`-- README.md
+```
+
+Current implemented backend files are in backend/app and backend/requirements.txt.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3
+- Git
+- PostgreSQL with PostGIS (for later phases)
+- Node.js and npm (for frontend phase)
+- Docker and Docker Compose (optional)
+
+### Clone
+
+```bash
+git clone https://github.com/tejaskunta/AeroShield.git
+cd "AeroShield Project"
+```
+
+### Backend Setup (Current)
+
+From project root (Windows PowerShell):
 
 ```powershell
 & ".\.venv\Scripts\python.exe" -m pip install -r .\backend\requirements.txt
 & ".\.venv\Scripts\python.exe" -m uvicorn app.main:app --reload --app-dir .\backend
 ```
 
-Alternative (if you work directly inside `backend`):
+From backend folder:
 
 ```powershell
 python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --reload
 ```
 
-## API Testing
-
-Open these URLs after starting the server:
+### API Docs and Health Checks
 
 - http://127.0.0.1:8000
 - http://127.0.0.1:8000/health
 - http://127.0.0.1:8000/docs
 
-To test detection endpoint in Swagger:
+### Test Detection Endpoint in Swagger
 
-1. Open `/docs`
-2. Expand `POST /api/detect`
-3. Click `Try it out`
-4. Upload an image file (`.jpg`, `.jpeg`, `.png`)
-5. Click `Execute`
+1. Open /docs.
+2. Expand POST /api/detect.
+3. Click Try it out.
+4. Upload a jpg, jpeg, or png image.
+5. Click Execute.
 
-## Next Planned Phase
+---
 
-Phase 3 will add mission and GPS API foundations (still without YOLO model loading), while keeping clean separation between routes, schemas, and services.
+## Development Strategy
+
+Development is incremental:
+
+1. Mock detection -> backend -> dashboard integration.
+2. Replace mock detector with real YOLO model.
+3. Integrate Jetson inference and MAVLink GPS geotagging.
+4. Add database, geospatial analysis, RAG assistant, and reports.
+
+SITL-first testing is recommended before physical flight tests.
+
+---
+
+## Limitations and Safety
+
+- RGB-only detection cannot detect buried mines.
+- Geolocation is affected by GPS error, camera calibration, attitude error, and terrain assumptions.
+- AeroShield is a research and decision-support prototype, not a certified mine-clearance system.
+
+---
+
+## Out of Scope for MVP v1
+
+- Mobile app
+- Dashboard-based manual drone control
+- Multi-drone coordination
+- Cloud YOLO inference
+- Live model retraining
+- Buried-mine detection
+
+Mission creation and flight control remain in Mission Planner. AI inference remains on Jetson.
+
+---
+
+## License
+
+Add the final project license here (for example, MIT).
+
+Also ensure all external datasets, models, and documents comply with their licenses and attribution requirements.
