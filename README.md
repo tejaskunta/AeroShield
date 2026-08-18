@@ -1,4 +1,4 @@
-# SafeMine — YOLOv8 Detection Model (Week 3)
+# AeroShield — YOLOv8 Detection Model (Week 3)
 
 Training pipeline for the SafeMine landmine-detection drone. Trains YOLOv8 on an
 RTX 4070, then hands off a TensorRT-ready ONNX model to a Jetson Nano.
