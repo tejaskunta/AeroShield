@@ -1,71 +1,69 @@
-# Python
+# --- datasets & weights: never commit these to git -------------------------
+# Datasets are huge and often licensed.
+# Weights are build artifacts and should be versioned via releases/artifacts.
+datasets/
+runs/
+weights/
+*.pt
+*.onnx
+*.engine
+*.trt
+!yolov8n.pt.placeholder
+
+# Ultralytics drops pretrained checkpoints in the working dir on first run
+yolov8*.pt
+yolo11*.pt
+
+# --- python ----------------------------------------------------------------
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 *$py.class
 *.so
 .Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# virtualenvs
 .venv/
 venv/
 env/
-.site/
+ENV/
+backend/venv/
 
-# OS
+# --- tooling ---------------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# --- experiment tracking ---------------------------------------------------
+wandb/
+mlruns/
+lightning_logs/
+events.out.tfevents.*
+
+# --- editors & OS ----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# Environment
+# --- secrets ---------------------------------------------------------------
 .env
 .env.*
-!*.example
+!.env.example
+backend/.env
+*.key
+*.pem
 
-# Logs
-*.log
-logs/
-log/
-
-# --- SafeMine-specific exclusions ---
-
-# Training artifacts (too large for git, produced by week3_train_yolov8.py)
-weights/*.pt
-weights/*.onnx
-weights/*.engine
-!weights/README.txt
-
-# Large model checkpoints in repo root (downloaded / trained weights)
-yolo26n.pt
-yolov8m.pt
-yolo26s.pt
-*.pt
-*.onnx
-*.engine
-!weights/README.txt
-
-# Full run history (keep only summary JSON + key plots)
-runs/detect/**/*
-!runs/detect/**/safemine_summary.json
-!runs/detect/**/results.csv
-
-# Dataset (external, sourced separately)
-datasets/
-Datasets/
-
-# Docker / CI
-pg_data/
-__pycache__/
-*.pyc
-
-# Coverage
-.coverage
-htmlcov/
-.coverage.*
-
-# Git
-.git/
+# --- jetson build logs -----------------------------------------------------
+jetson/build_engine.log

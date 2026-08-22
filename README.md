@@ -25,8 +25,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 
 python scripts/check_env.py                            # is CUDA actually working?
-python scripts/make_smoke_dataset.py                   # fake data
-python week3_train_yolov8.py --data datasets/smoke_test/data.yaml --epochs 3
+python week3_train_yolov8.py --data datasets/unified_dataset/data.yaml --epochs 3
 ```
 
 If that last command finishes and writes `weights/best.onnx`, your whole
@@ -222,21 +221,21 @@ Expected on the Nano P3450 @ 640px FP16: `yolov8n` ≈ 12–18 FPS,
 ## Repo layout
 
 ```
-safemine-yolov8/
-├── week3_train_yolov8.py       ← the main deliverable: train → val → export
-├── requirements.txt
-├── configs/data.yaml.example
+AeroShield/
+├── backend/                   ← FastAPI backend (detection API, future agents)
+├── frontend/                  ← React dashboard (to be developed)
+├── jetson/                    ← Jetson Nano deployment (TensorRT)
+├── ml/                        ← YOLOv8 training pipeline
 ├── scripts/
 │   ├── check_env.py            run this first
 │   ├── verify_dataset.py       run this before every training run
-│   ├── make_smoke_dataset.py   fake data to test the pipeline
 │   ├── export_onnx.py          standalone re-export
 │   └── predict.py              visual sanity check
-├── jetson/
-│   ├── README.md               ← the deployment guide
-│   ├── build_engine.sh         run ON the Nano
-│   └── infer_trt.py            TensorRT inference, no PyTorch required
-└── docs/TRAINING_NOTES.md      what to record for the report
+├── week3_train_yolov8.py       ← main training deliverable: train → val → export
+├── configs/data.yaml.example
+├── docs/TRAINING_NOTES.md      ← what to record for the report
+├── docker-compose.yml          ← (to be developed) service orchestration
+└── README.md
 ```
 
 ---
