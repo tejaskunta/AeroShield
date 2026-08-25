@@ -1,0 +1,204 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Leaflet's own stylesheet is imported in main.tsx (CSS @import must precede all
+   rules, so keeping it out of this file avoids a PostCSS ordering warning).
+   Our Leaflet overrides live at the bottom of this file. */
+
+/* ---------------------------------------------------------------------------
+   Tokens are declared in tailwind.config.ts. They are mirrored here as CSS
+   custom properties for the places Tailwind classes can't reach: Leaflet's
+   injected DOM, SVG stroke attributes, and Recharts props.
+   Keep the two in sync — tailwind.config.ts is the source of truth.
+--------------------------------------------------------------------------- */
+:root {
+  --ink: #131a21;
+  --ink-deep: #0e141a;
+  --ink-raised: #1b2530;
+  --ink-hover: #22303d;
+  --rule: #2c3a47;
+  --rule-bright: #3e5060;
+  --paper: #e8e4da;
+  --paper-dim: #8c97a1;
+  --paper-faint: #5c6873;
+  --hazard: #d7262f;
+  --caution: #c9922c;
+  --cleared: #4e9e86;
+}
+
+@layer base {
+  * {
+    @apply border-rule;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink font-body text-paper antialiased;
+    /* Operators sit with this for hours; stop the whole page from rubber-banding. */
+    overscroll-behavior: none;
+  }
+
+  /* Numerals must not shift width as telemetry ticks. */
+  .font-mono,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus treatment everywhere, always visible on keyboard. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-paper/70 ring-offset-2 ring-offset-ink;
+  }
+
+  ::selection {
+    background: var(--rule-bright);
+    color: var(--paper);
+  }
+
+  /* Scrollbars as instrument troughs rather than OS chrome. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--ink-deep);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--rule);
+    border: 2px solid var(--ink-deep);
+    border-radius: 0;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--rule-bright);
+  }
+}
+
+@layer components {
+  /* Panel header: the small tracked-out eyebrow used across every dock panel. */
+  .eyebrow {
+    @apply font-display text-eyebrow uppercase tracking-[0.14em] text-paper-dim;
+  }
+
+  /* A hairline that reads as a survey rule rather than a generic divider. */
+  .rule-line {
+    @apply h-px w-full bg-rule;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Leaflet overrides — Leaflet ships a light, rounded, drop-shadowed look that
+   fights this design. Strip it back to flat instrument chrome.
+--------------------------------------------------------------------------- */
+.leaflet-container {
+  background: var(--ink-deep);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  outline: none;
+}
+
+/* Attribution and zoom controls: flat, hairlined, no rounding or shadow. */
+.leaflet-control-attribution {
+  background: rgba(14, 20, 26, 0.86) !important;
+  color: var(--paper-faint) !important;
+  border-top: 1px solid var(--rule);
+  border-left: 1px solid var(--rule);
+  font-size: 9px;
+  padding: 2px 6px;
+}
+.leaflet-control-attribution a {
+  color: var(--paper-dim) !important;
+}
+
+.leaflet-bar,
+.leaflet-bar a {
+  background: rgba(27, 37, 48, 0.94) !important;
+  border-color: var(--rule) !important;
+  color: var(--paper) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.leaflet-bar a:hover {
+  background: var(--ink-hover) !important;
+}
+
+/* Tooltips as map labels: no bubble, no arrow, just a hairlined plate. */
+.leaflet-tooltip {
+  background: rgba(14, 20, 26, 0.92);
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--paper);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+}
+.leaflet-tooltip::before {
+  display: none;
+}
+
+/* Detection pins are our own SVG; kill Leaflet's default marker chrome. */
+.aeroshield-pin {
+  background: transparent;
+  border: 0;
+}
+
+/* Basemap tiles are photographic or bright; damp them so our hazard colours
+   remain the most saturated thing on screen. Without this, imagery competes
+   with the risk palette and the "red means hazard" rule stops reading. */
+.aeroshield-tiles {
+  filter: saturate(0.55) brightness(0.62) contrast(1.08);
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced motion: kill decorative motion (pings, spin-ups, marching dashes)
+   but keep positional updates — an operator still needs to see the drone move.
+--------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Print: the report sheet is the only thing worth putting on paper, so isolate
+   it and drop the console chrome. Uses visibility rather than display:none so
+   the sheet's own layout is untouched — toggling display on ancestors collapses
+   the flex chain the sheet sits inside.
+--------------------------------------------------------------------------- */
+@media print {
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .print-sheet,
+  .print-sheet * {
+    visibility: visible;
+  }
+
+  .print-sheet {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}
