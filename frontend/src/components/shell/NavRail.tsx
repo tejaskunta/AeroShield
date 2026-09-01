@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { BarChart3, FileText, Map, ScanSearch, ShieldQuestion } from 'lucide-react'
+import { BarChart3, FileText, ScanSearch, ShieldQuestion } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 /**
@@ -18,7 +18,6 @@ interface Screen {
 }
 
 export const SCREENS: Screen[] = [
-  { to: '/', label: 'Mission Control', short: 'MSN', icon: Map },
   { to: '/detections', label: 'Detection Center', short: 'DET', icon: ScanSearch },
   { to: '/analytics', label: 'Analytics', short: 'ANL', icon: BarChart3 },
   { to: '/copilot', label: 'Safety Copilot', short: 'SFY', icon: ShieldQuestion },
@@ -37,8 +36,7 @@ export function NavRail() {
           to={to}
           end={to === '/'}
           className={({ isActive }) =>
-            `group relative flex h-14 flex-col items-center justify-center gap-1 border-b border-rule/60 transition-colors ${
-              isActive ? 'bg-ink-raised text-paper' : 'text-paper-faint hover:bg-ink-raised hover:text-paper-dim'
+            `group relative flex h-14 flex-col items-center justify-center gap-1 border-b border-rule/60 transition-colors ${isActive ? 'bg-ink-raised text-paper' : 'text-paper-faint hover:bg-ink-raised hover:text-paper-dim'
             }`
           }
         >
