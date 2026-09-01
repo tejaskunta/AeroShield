@@ -1,222 +1,252 @@
-# SafeMine — YOLOv8 Detection Model (Week 3)
+# AeroShield
 
-Training pipeline for the SafeMine landmine-detection drone. Trains YOLOv8 on an
-RTX 4070, then hands off a TensorRT-ready ONNX model to a Jetson Nano.
+AeroShield is a mission-focused drone safety and detection console for AI-assisted landmine monitoring and route planning. The project combines a simulated mission dashboard, a FastAPI backend, and a frontend workflow for reviewing detections, risk patterns, telemetry, and safe corridors in a single operator view.
 
-```
-RTX 4070 (train) ──► best.pt ──► best.onnx ──► [Jetson Nano] ──► best.engine
-                                  portable                       device-locked
-```
-
-> **Scope note (PRD §2.2):** an RGB camera physically cannot see buried objects.
-> This model detects **visible landmine-like objects and surface indicators only**.
-> That's a design constraint, not a gap — state it explicitly in your report.
+This repository is currently structured as a simulator-first prototype: the frontend models mission traffic and detection activity in-browser, while the backend exposes a lightweight API foundation for future YOLO or sensor integration.
 
 ---
 
-## TL;DR
+## Project goal
 
-```bash
-git clone <your-repo-url> && cd safemine-yolov8
-python -m venv .venv && .venv\Scripts\activate        # Windows
-# python3 -m venv .venv && source .venv/bin/activate  # Linux/macOS
+AeroShield is designed to give an operator a clear understanding of:
 
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-pip install -r requirements.txt
+- current drone telemetry and mission state
+- hazard and caution detections across a mapped area
+- risk concentration and coverage movement
+- safe route planning around uncertain or flagged cells
+- mission reporting and operator review workflows
 
-python scripts/check_env.py                            # is CUDA actually working?
-python week3_train_yolov8.py --data datasets/unified_dataset/data.yaml --epochs 3
-```
-
-If that last command finishes and writes `weights/best.onnx`, your whole
-toolchain works. Now point it at real data.
+The system is intentionally built around an operator interface rather than a raw model pipeline alone. The UX is tuned for rapid decision-making in a monitoring environment.
 
 ---
 
-## Install (do this in order)
+## Current implementation status
 
-**Order matters.** `pip install ultralytics` pulls in a CPU-only PyTorch. If you
-let that happen first, `device=0` fails and you train on CPU at ~20× slower.
+### Frontend
 
-### 1. Python 3.10–3.12
+- React + TypeScript + Vite app
+- Mission control dashboard with live map and drone telemetry
+- Detection center and review workflow
+- Analytics and safety copilots screens
+- Mission reports and status summaries
+- Simulated mission stream with detections and path planning
 
-3.13 is too new for some wheels; 3.10 or 3.11 is the safe choice.
+### Backend
 
-### 2. PyTorch with CUDA — **first**
+- FastAPI service with health and root endpoints
+- detection API for uploaded image handling
+- mock detection service ready to be replaced by real model inference
 
-```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-```
+### Current model reality
 
-### 3. Everything else
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Verify
-
-```bash
-python scripts/check_env.py
-```
-
-You want to see `CUDA available : yes` and your 4070 listed. If it says
-`CPU-only torch`, run the uninstall/reinstall it prints and try again.
+- The app uses client-side simulation data in the frontend
+- The backend currently returns mock detection results instead of live YOLO predictions
+- The repo is best understood as a foundation for a real AI mission platform rather than a final production deployment
 
 ---
 
-## Prepare your dataset
+## Repository structure
 
-Expected layout (standard YOLO — Week 2 step 04 produces this):
-
-```
-datasets/unified_dataset/
-├── data.yaml
-├── train/{images,labels}/     ~70%
-├── val/{images,labels}/       ~15%
-└── test/{images,labels}/      ~15%
-```
-
-Each `labels/frame_0001.txt` matches `images/frame_0001.jpg`:
-
-```
-<class_id> <x_center> <y_center> <width> <height>    # all normalised 0.0–1.0
-```
-
-Start from [configs/data.yaml.example](configs/data.yaml.example), then **always
-verify before training**:
-
-```bash
-python scripts/verify_dataset.py --data datasets/unified_dataset/data.yaml
-```
-
-This catches unnormalised coordinates, class-id mismatches, missing labels, and
-classes present in train but absent from val — i.e. every reason a run silently
-returns mAP 0.0 after forty minutes.
-
----
-
-## Train
-
-```bash
-python week3_train_yolov8.py --data datasets/unified_dataset/data.yaml
-```
-
-Defaults: `yolov8s.pt`, 50 epochs, 640px, batch 16, `device=0`. On an RTX 4070
-with a few thousand images that's roughly **30–60 minutes**.
-
-The script runs five stages and prints a banner at each:
-
-| Stage | What happens |
-|---|---|
-| 0/5 Pre-flight | Verifies CUDA, GPU, VRAM, `data.yaml`, class list — fails fast |
-| 1/5 Load | Downloads `yolov8s.pt` on first run |
-| 2/5 Train | 50 epochs with live metrics; writes `last.pt` every epoch |
-| 3/5 Validate | Runs `best.pt` on **both** val and test splits |
-| 4/5 Export | ONNX, opset 12, fixed shapes — TensorRT 8.2-compatible |
-| 5/5 Collect | Copies artifacts to `weights/`, writes `safemine_summary.json` |
-
-### Useful flags
-
-```bash
---epochs 100          # longer run
---batch 8             # if you hit CUDA out-of-memory
---batch -1            # let Ultralytics auto-size the batch
---model yolov8n.pt    # smaller/faster — use if the Nano can't keep up
---conf 0.15           # lower validation threshold → higher recall
---patience 0          # disable early stopping
---name my_run         # name the run folder
---resume --name my_run  # resume an interrupted run
---device cpu          # no GPU (very slow — for testing logic only)
-```
-
-Ctrl-C is safe at any point: `last.pt` is written every epoch, and the script
-prints the exact `--resume` command to continue.
-
-### Outputs
-
-```
-runs/detect/safemine_<timestamp>/
-├── weights/best.pt, last.pt, best.onnx
-├── results.png                      ← training curves, put this in the report
-├── confusion_matrix_normalized.png  ← and this
-├── PR_curve.png, F1_curve.png
-├── results.csv                      ← per-epoch metrics
-└── safemine_summary.json            ← machine-readable run summary
-
-weights/best.pt, weights/best.onnx   ← stable copies, always the latest run
+```text
+AeroShield Project/
+├── README.md
+├── README_BACKEND_GUIDE.md
+├── requirements.txt
+├── week3_train_yolov8.py
+├── backend/
+│   ├── requirements.txt
+│   └── app/
+│       ├── main.py
+│       ├── api/
+│       │   └── detection.py
+│       ├── schemas/
+│       │   └── detection.py
+│       └── services/
+│           └── detection_service.py
+├── configs/
+│   └── data.yaml.example
+├── docs/
+│   └── TRAINING_NOTES.md
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── index.html
+│   └── src/
+│       ├── App.tsx
+│       ├── components/
+│       ├── hooks/
+│       ├── lib/
+│       ├── screens/
+│       └── types/
+├── jetson/
+│   ├── README.md
+│   ├── build_engine.sh
+│   └── infer_trt.py
+├── scripts/
+│   ├── check_env.py
+│   ├── export_onnx.py
+│   ├── predict.py
+│   └── verify_dataset.py
+├── weights/
+│   └── README.txt
+└── .gitignore
 ```
 
 ---
 
-## Tuning for recall
+## Tech stack
 
-Per PRD §9: **a missed mine is a safety failure; a false positive is an analyst
-annoyance.** These are not symmetric, and your thresholds should say so.
+### Frontend
 
-Read `PR_curve.png` and pick the confidence value where recall is high and
-precision is merely tolerable — not the value that maximises F1. F1 assumes the
-two error types cost the same. Here they don't.
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS
+- Leaflet + React Leaflet
+- Recharts
+- React Router
+
+### Backend
+
+- Python
+- FastAPI
+- Uvicorn
+- Python multipart upload support
+
+### AI / inference work
+
+- YOLOv8-related scripts and training assets are present in the project root and under the `scripts/` and `jetson/` directories
+- Model integration is in progress and not yet fully connected to the live backend API
+
+---
+
+## Quick start
+
+### 1. Clone and install backend dependencies
 
 ```bash
-# Re-validate at a lower threshold without retraining:
-python week3_train_yolov8.py --data <...> --conf 0.15
+cd "AeroShield Project"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r .\backend\requirements.txt
 ```
 
-Practical levers, in the order worth trying:
-
-1. **Lower the confidence threshold** — free, instant, biggest effect.
-2. **Add hard negatives** — photos of rocks, scrap and debris with *empty* label
-   files. This cuts false positives without costing recall.
-3. **Train longer / augment more** — genuinely helps, but slowest to iterate.
-4. **Go bigger (`yolov8m`)** — only if the Nano can still run it. Usually it can't.
-
-Record the threshold you ship and *why* in the final report.
-
----
-
-## Sanity-check the model
+### 2. Run the backend
 
 ```bash
-python scripts/predict.py --weights weights/best.pt \
-    --source datasets/unified_dataset/test/images
+cd "AeroShield Project"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --app-dir .\backend
 ```
 
-Writes annotated images to `runs/predict/safemine/`. Open a dozen. You are
-looking for two failure modes the metrics hide: boxes on the right objects for
-the *wrong* reasons, and whole categories of terrain the model ignores.
+The backend will be available at:
 
----
+- http://127.0.0.1:8000/
+- Swagger docs: http://127.0.0.1:8000/docs
 
-## Deploy to the Jetson Nano
+### 3. Install and run the frontend
 
 ```bash
-scp weights/best.onnx <user>@<nano-ip>:~/safemine/
+cd "AeroShield Project\frontend"
+npm install
+npm run dev -- --host 0.0.0.0
 ```
 
-Then follow **[jetson/README.md](jetson/README.md)**. The short version:
-build the `.engine` **on the Nano**, never on your laptop — a TensorRT engine is
-compiled for one specific GPU and TensorRT version and won't load anywhere else.
+Open:
 
-Expected on the Nano P3450 @ 640px FP16: `yolov8n` ≈ 12–18 FPS,
-`yolov8s` ≈ 5–9 FPS. If `yolov8s` is too slow, retrain with `--model yolov8n.pt`.
+- http://localhost:5173/
 
 ---
 
-## Troubleshooting
+## Frontend app overview
 
-| Symptom | Fix |
-|---|---|
-| `CUDA is NOT available` | CPU-only torch. Uninstall, reinstall from the cu124 index |
-| `CUDA out of memory` | `--batch 8`, then `--batch -1`. Close Chrome/games — they hold VRAM |
-| `Dataset not found` / images not found | Use an **absolute** `path:` in `data.yaml` |
-| mAP stays 0.0 | Run `scripts/verify_dataset.py`. Usually unnormalised coords or wrong class ids |
-| Recall is poor | Lower `--conf`, add hard negatives, train longer — in that order |
-| Slow training, GPU at 30% | Dataloader-bound: `--cache ram`, or raise `--workers` |
-| `page file too small` (Windows) | Lower `--workers` to 2, or increase the Windows page file |
-| Training loss is NaN | Bad boxes in the dataset — `verify_dataset.py` will find them |
+At the main mission dashboard, the app presents:
+
+- a mission map with detection overlays
+- a status rail with telemetry and detection counts
+- a drone summary with battery, link, GPS, altitude, and speed
+- a safe path planner with start/end selection and route plotting
+- a detections ticker for operator review
+
+Key screens are mounted via the router in [frontend/src/App.tsx](frontend/src/App.tsx):
+
+- Mission Control
+- Detection Center
+- Analytics
+- Safety Copilot
+- Mission Reports
 
 ---
+
+## Backend API
+
+The current FastAPI implementation exposes:
+
+```http
+GET /
+GET /health
+POST /api/detect
+```
+
+Example behavior:
+
+- `/` returns a simple service-running message
+- `/health` returns a health status payload
+- `/api/detect` accepts an uploaded image and returns a mock detection response
+
+The mock detection service is defined in [backend/app/services/detection_service.py](backend/app/services/detection_service.py) and is intended to be replaced later with real detection logic.
+
+---
+
+## Development notes
+
+### Frontend verification
+
+The current frontend was validated by running:
+
+```bash
+cd "AeroShield Project\frontend"
+npm run build
+```
+
+This completed successfully, confirming the app compiles cleanly in its current state.
+
+### Current design assumption
+
+The current project is simulation-led and operator-first. That means the interface and workflow are already shaped around real mission operations even though the underlying detection pipeline is not fully or continuously connected to a live model yet.
+
+---
+
+## Documentation
+
+Additional documentation in the repo:
+
+- [README_BACKEND_GUIDE.md](README_BACKEND_GUIDE.md) — backend-focused setup and API notes
+- [docs/TRAINING_NOTES.md](docs/TRAINING_NOTES.md) — training and dataset notes for the model-oriented part of the project
+- [jetson/README.md](jetson/README.md) — Jetson-side deployment notes
+
+---
+
+## Roadmap direction
+
+The likely next evolution of this project is:
+
+1. connect the backend to a real model inference path
+2. replace mock detection payloads with YOLO or TensorRT outputs
+3. wire live mission telemetry into the frontend
+4. tighten the analytics, risk scoring, and operator review workflows
+5. support deployment to field-ready drone mission tooling
+
+---
+
+## License
+
+This repository does not currently declare a project license in the root package metadata. Review your team or institutional requirements before distributing the project externally.
+
+---
+
+## Contribution
+
+Use the repository as a working prototype for a drone safety and detection platform. Contributions should keep the operator workflow practical and the model/inference integration clearly separated from the UI logic.
 
 ## Repo layout
 
