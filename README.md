@@ -1790,3 +1790,230 @@ Docker Hub → images
 ======================================================================
 END OF MASTER CHECKLIST
 ======================================================================
+Yes. If the exam gives you a WAR-based web application, follow this flow:
+
+Maven → WAR → Tomcat Docker image → Container → localhost
+
+Your uploaded material gives the traditional WAR/Tomcat pattern.
+
+1. Check pom.xml
+
+For a WAR project, the important part is:
+
+<packaging>war</packaging>
+
+Not:
+
+<packaging>jar</packaging>
+
+So Maven knows that it must create a .war file.
+
+2. Build the WAR
+
+Inside the project folder:
+
+mvn clean package
+
+Maven will create the WAR inside:
+
+target/
+
+Check it:
+
+Windows:
+
+dir target
+
+Linux/Mac:
+
+ls target
+
+You should see something like:
+
+library-management.war
+
+The important thing is that mvn clean package creates the WAR.
+
+3. Create the Dockerfile
+
+For a traditional WAR application, create:
+
+Dockerfile
+
+Use:
+
+FROM tomcat:9.0
+
+COPY target/*.war /usr/local/tomcat/webapps/ROOT.war
+
+EXPOSE 8080
+
+CMD ["catalina.sh", "run"]
+
+This is the WAR/Tomcat pattern given in your material.
+
+Understand it
+FROM tomcat:9.0
+
+Means:
+
+Start with a Docker image that already contains Tomcat.
+
+COPY target/*.war /usr/local/tomcat/webapps/ROOT.war
+
+This is the most important WAR line.
+
+Your Maven creates:
+
+target/library-management.war
+
+Docker copies it into Tomcat's:
+
+/usr/local/tomcat/webapps/
+
+as:
+
+ROOT.war
+
+ROOT.war means the application becomes the root web application /.
+
+EXPOSE 8080
+
+Tomcat normally listens on 8080 inside the container.
+
+Remember: EXPOSE doesn't actually publish the port to your PC.
+
+CMD ["catalina.sh", "run"]
+
+Starts Tomcat in the foreground.
+
+For WAR:
+
+Tomcat runs the application, not java -jar.
+
+4. Build Docker image
+
+Make sure you are in the project directory containing:
+
+pom.xml
+Dockerfile
+target/
+
+Then:
+
+docker build -t library-war:latest .
+
+Don't forget the .
+
+The dot tells Docker to use the current directory as the build context.
+
+5. Check image
+docker image ls
+
+You should see:
+
+library-war    latest
+6. Run the WAR container
+
+If your PC's port 8080 is free:
+
+docker run -d -p 8080:8080 --name library-war-container library-war:latest
+
+Then open:
+
+http://localhost:8080
+
+The mapping is:
+
+Your PC                 Container
+8080  ───────────────→  8080
+       -p 8080:8080
+If port 8080 is already occupied
+
+For example, Jenkins is using 8080:
+
+docker run -d -p 8083:8080 --name library-war-container library-war:latest
+
+Then open:
+
+http://localhost:8083
+
+Notice:
+
+8083:8080
+  ↑    ↑
+host   container
+
+Tomcat still uses 8080 inside the container.
+
+7. Check the container
+docker ps
+
+Then:
+
+docker logs library-war-container
+
+If there is a problem, the material recommends:
+
+docker ps
+docker ps -a
+docker logs library-war-container
+docker inspect library-war-container
+
+⭐ Full WAR exam answer
+
+If they ask:
+
+Dockerize the Maven WAR application using Tomcat and make it accessible on port 8080.
+
+Write this sequence:
+
+Maven
+mvn clean package
+dir target
+Dockerfile
+FROM tomcat:9.0
+
+COPY target/*.war /usr/local/tomcat/webapps/ROOT.war
+
+EXPOSE 8080
+
+CMD ["catalina.sh", "run"]
+Build
+docker build -t library-war:latest .
+Run
+docker run -d -p 8080:8080 --name library-war-container library-war:latest
+Test
+http://localhost:8080
+Check
+docker ps
+docker logs library-war-container
+🧠 JAR vs WAR — memorize this
+JAR
+ ↓
+mvn clean package
+ ↓
+target/app.jar
+ ↓
+FROM eclipse-temurin:17-jdk
+ ↓
+java -jar app.jar
+
+versus
+
+WAR
+ ↓
+mvn clean package
+ ↓
+target/app.war
+ ↓
+FROM tomcat:9.0
+ ↓
+COPY WAR → Tomcat/webapps
+ ↓
+catalina.sh run
+
+The biggest exam difference is:
+
+JAR → Java runs the JAR
+WAR → Tomcat deploys and runs the
