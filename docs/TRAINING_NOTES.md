@@ -68,11 +68,38 @@ direction to be wrong in.
 
 | Source | Estimate | Notes |
 |---|---|---|
-| GPS (Holybro M10) | ~1–3 m | Manufacturer spec, no RTK |
-| Attitude estimation | ___ | Roll/pitch error → ground projection error |
-| Flat-ground assumption | ___ | GSD formula breaks on slopes |
-| Camera calibration | ___ | Lens distortion, focal length error |
-| **Total (RSS)** | **___** | Report this, not the GPS number alone |
+| GPS (Holybro M10) | ~1–3 m | Manufacturer spec, no RTK. `geo.py` assumes 2.5 m |
+| Altitude (relative) | 5% of AGL | Barometric drift. Scales with offset from frame centre |
+| Heading / compass | 5° | After a good calibration. Bad calibration is far worse |
+| Box centroid jitter | ~4 px × GSD | Frame-to-frame wobble of the detection itself |
+| **Total (RSS)** | **run the command below** | Report this, not the GPS number alone |
+| Attitude (roll/pitch off nadir) | NOT MODELLED | Named as a limitation, not folded into the total |
+| Flat-ground assumption | NOT MODELLED | GSD formula breaks outright on slopes |
+| Lens distortion | NOT MODELLED | Worst at frame edges, where offset error is already largest |
+
+`jetson/geo.py` computes the first five rows and returns the total as
+`horizontal_error_m` on every geotagged detection. Get the numbers for your actual
+camera and flight altitude:
+
+```bash
+python3 jetson/geo.py --hfov 62.2 --width 1280 --height 720 --alt 30
+```
+
+It prints the GSD, the ground footprint, and how the error grows from frame centre to
+corner. Paste the corner figures into the table above — the corner is the honest
+worst case, and it is where detections at the edge of the swath actually land.
+
+The last three rows are deliberately left unmodelled rather than guessed at. Each
+needs data this project does not have (a terrain model, IMU attitude fused per frame,
+a camera calibration), and inventing a number for them would make the total look
+rigorous while being fiction. Report them as named limitations instead — PRD §10 asks
+for honesty about accuracy, and "we did not model this" is honest in a way that a
+made-up 0.5 m is not.
+
+**Field check worth doing once:** put an inert replica at a surveyed point, fly the
+grid, and compare the reported lat/lon against the truth. One measured number beats
+the whole table for the report, and it is the only way to catch a wrong `--hfov` —
+which shows up as every detection being off by the same factor, not as scatter.
 
 ---
 

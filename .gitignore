@@ -28,11 +28,11 @@ dist/
 .eggs/
 
 # virtualenvs
-.venv/
-venv/
-env/
-ENV/
-backend/venv/
+.venv*/
+venv*/
+env*/
+ENV*/
+backend/venv*/
 
 # --- tooling ---------------------------------------------------------------
 .pytest_cache/
@@ -67,3 +67,15 @@ backend/.env
 
 # --- jetson build logs -----------------------------------------------------
 jetson/build_engine.log
+
+# --- jetson runtime artifacts (Week 4) -------------------------------------
+# Offline uplink spool: detections captured while the radio link was down. Real
+# mission data, and potentially large - belongs on the drone, not in git.
+jetson/spool/
+# Local detection log written by live_detect.py (the fallback record of a flight).
+jetson/logs/
+
+# --- backend runtime artifacts (Week 5) ------------------------------------
+# Uploaded detection frames. Thousands of JPEGs per mission.
+backend/storage/
+

@@ -17,11 +17,15 @@ install on JetPack 4.6's Python 3.6 / PyTorch 1.10 ceiling. Raw TensorRT +
 pycuda has no such constraint, which is exactly why we export to ONNX.
 """
 
-from __future__ import annotations
-
+# NOTE: no `from __future__ import annotations` and no builtin generics (list[x], X | None)
+# anywhere in this folder. JetPack 4.6 pins the Nano to Python 3.6.9 (python3-libnvinfer and
+# python3-opencv are built against the system interpreter), and PEP 563 only landed in 3.7 -
+# the future-import is a hard SyntaxError there, before a single line executes. Same reason
+# there are no dataclasses in this folder: also 3.7+. Use typing.* and NamedTuple instead.
 import argparse
 import sys
 import time
+from typing import Tuple
 
 import cv2
 import numpy as np
@@ -71,7 +75,7 @@ class TrtYolo:
 
         _, _, self.in_h, self.in_w = self.input_shape
 
-    def preprocess(self, img: np.ndarray) -> tuple[np.ndarray, float, int, int]:
+    def preprocess(self, img: np.ndarray) -> Tuple[np.ndarray, float, int, int]:
         """Letterbox to the engine's fixed input size, BGR->RGB, 0-1, CHW."""
         h, w = img.shape[:2]
         r = min(self.in_h / h, self.in_w / w)

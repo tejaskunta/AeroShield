@@ -1,3 +1,35 @@
+# AeroShield backend - Week 5 (FastAPI + PostgreSQL/PostGIS).
+#
+#   python3 -m venv .venv && source .venv/bin/activate    # macOS / Linux
+#   .\.venv\Scripts\Activate.ps1                          # Windows PowerShell
+#   pip install -r requirements.txt
+#
+# The database itself comes from Docker (see ../docker-compose.yml), not from pip.
+
+# --- web layer ---------------------------------------------------------------
 fastapi==0.116.1
-uvicorn==0.35.0
-python-multipart==0.0.20
+uvicorn[standard]==0.35.0      # [standard] adds uvloop/httptools; also the ws deps Week 6 needs
+python-multipart==0.0.20       # multipart parsing for the detection image upload
+
+# --- config ------------------------------------------------------------------
+pydantic-settings>=2.4.0,<3.0.0   # .env -> typed Settings, no hand-rolled os.getenv
+
+# --- database ----------------------------------------------------------------
+# Async throughout: Week 6 pushes over Socket.IO and Weeks 7-10 make LLM/RAG
+# calls, all of which are I/O-bound. A synchronous session inside an `async def`
+# route blocks the whole event loop, so going async now avoids a rewrite later.
+sqlalchemy[asyncio]>=2.0.30,<3.0.0
+asyncpg>=0.29.0,<0.31.0
+geoalchemy2>=0.15.0,<0.18.0    # Geography(POINT, 4326) column + ST_* functions
+alembic>=1.13.0,<2.0.0
+
+# psycopg2 is NOT needed. asyncpg is the driver; Alembic is configured for async
+# in migrations/env.py. Installing psycopg2-binary alongside is a common way to
+# end up with two drivers and a confusing "wrong DBAPI" error.
+
+# --- dev / test --------------------------------------------------------------
+# Kept in this file rather than a separate requirements-dev.txt: Week 5's
+# deliverables include a working test suite, so these are not optional extras.
+pytest>=8.0.0,<9.0.0
+pytest-asyncio>=0.23.0,<0.25.0
+httpx>=0.27.0,<0.29.0          # ASGITransport - drives the app in-process, no live server
