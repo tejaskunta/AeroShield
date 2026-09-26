@@ -111,10 +111,9 @@ Rough figures for the Nano P3450 at 640×640, FP16:
 | Model | FPS | Verdict |
 |---|---|---|
 | `yolov8n` | ~12–18 | comfortable |
-| `yolov8s` | ~5–9 | usable for a grid mission |
 | `yolov8m` | ~2–3 | too slow |
 
-Start with `yolov8s` (what the training script defaults to). If the drone
+The shipped model is `yolov8m`. If the drone
 outruns the inference, retrain with `--model yolov8n.pt` — same script, same
 pipeline, no other change.
 

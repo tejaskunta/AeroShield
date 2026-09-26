@@ -222,7 +222,25 @@ Additional documentation in the repo:
 
 - [README_BACKEND_GUIDE.md](README_BACKEND_GUIDE.md) — backend-focused setup and API notes
 - [docs/TRAINING_NOTES.md](docs/TRAINING_NOTES.md) — training and dataset notes for the model-oriented part of the project
+- [docs/REVIEW_GUIDE.md](docs/REVIEW_GUIDE.md) — presentation path, training parameters, TensorRT explanation, demo command, and folder priorities
 - [jetson/README.md](jetson/README.md) — Jetson-side deployment notes
+
+## Recommended review order
+
+For a code review or project presentation, follow this path:
+
+1. [week3_train_yolov8.py](week3_train_yolov8.py) — training, validation, early stopping, and export
+2. [configs/data.yaml.example](configs/data.yaml.example) — YOLO dataset structure and class order
+3. [scripts/verify_dataset.py](scripts/verify_dataset.py) — label and image validation
+4. [scripts/predict.py](scripts/predict.py) — laptop inference with the PyTorch checkpoint
+5. [jetson/build_engine.sh](jetson/build_engine.sh) and [jetson/infer_trt.py](jetson/infer_trt.py) — TensorRT engine build and runtime
+6. [jetson/live_detect.py](jetson/live_detect.py) — camera-to-detection pipeline
+7. [backend/app/main.py](backend/app/main.py) — API assembly and production data flow
+8. [frontend/src/App.tsx](frontend/src/App.tsx) — dashboard screens and routes
+
+Generated folders such as `runs/`, runtime logs, upload storage, and local virtual
+environments are not required to understand the source code. Keep them backed up, but
+they can be archived outside the workspace to make the review view easier to navigate.
 
 ---
 
@@ -274,7 +292,7 @@ AeroShield/
 
 | Component | Tool |
 |---|---|
-| Detection model | YOLOv8s (Ultralytics), TensorRT-exported |
+| Detection model | YOLOv8m (Ultralytics), TensorRT-exported |
 | Training | PyTorch + CUDA 12.4, RTX 4070 8 GB |
 | Deployment | Jetson Nano P3450, JetPack 4.6, TensorRT 8.2, FP16 |
 | Explainability | Grad-CAM (Week 5 — needs `best.pt`, not the engine) |

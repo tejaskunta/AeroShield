@@ -88,7 +88,7 @@ def main() -> int:
                 print(f"{OK}  device {i}     : {p.name}, {vram:.1f} GB, sm_{p.major}{p.minor}")
                 if p.major >= 12 and torch.version.cuda and float(torch.version.cuda[:4]) < 12.0:
                     print(f"{WARN}  this GPU is newer than your CUDA build; expect kernel errors")
-                print(f"{OK}  suggested batch for yolov8s@640 : {suggest_batch(vram)}")
+                print(f"{OK}  suggested batch for yolov8m@640 : {suggest_batch(vram)}")
             # Real allocation test - is_available() can lie about a broken install.
             try:
                 x = torch.rand(2048, 2048, device="cuda")

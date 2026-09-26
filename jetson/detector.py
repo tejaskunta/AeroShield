@@ -230,6 +230,97 @@ class MockDetector(Detector):
         )]
 
 
+class OnnxDetector(Detector):
+    """ONNX inference using OpenCV DNN.
+
+    Runs on any laptop or PC with standard OpenCV, without requiring PyTorch
+    or Ultralytics. Runs the exact exported best.onnx model that targets the Jetson.
+    """
+
+    name = "onnx"
+
+    def __init__(self, weights: str = "weights/best.onnx", conf: float = 0.25,
+                 iou: float = 0.45, imgsz: int = 640,
+                 names: Optional[Sequence[str]] = None) -> None:
+        import cv2
+        try:
+            self.net = cv2.dnn.readNetFromONNX(weights)
+            # Optimize for CPU if possible
+            self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not load ONNX model from {0}: {1}".format(weights, exc)
+            )
+        # Overriding provided values with optimized ones for CPU/Nano real-time performance
+        self.conf = 0.15  # Lower confidence to prioritize recall over precision
+        self.iou = iou
+        # MUST BE 640: YOLOv8 ONNX exports hardcode the output grid sizes (80x80 etc).
+        # We cannot dynamically resize inputs for this model in OpenCV DNN.
+        self.imgsz = 640
+        self.names = names or ["landmine"]
+
+    def detect(self, frame) -> List[Detection]:
+        import cv2
+        import numpy as np
+
+        h, w = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(frame, 1.0 / 255.0, (self.imgsz, self.imgsz), swapRB=True, crop=False)
+        self.net.setInput(blob)
+        raw = self.net.forward()
+        if len(raw.shape) == 3:
+            raw = raw[0]
+        if raw.shape[0] < raw.shape[1]:
+            raw = raw.T    # Shape: (num_boxes, 4 + num_classes)
+
+        x_scale = float(w) / float(self.imgsz)
+        y_scale = float(h) / float(self.imgsz)
+
+        scores_all = raw[:, 4:]
+        cids = scores_all.argmax(axis=1)
+        max_scores = scores_all.max(axis=1)
+
+        keep = max_scores >= self.conf
+        if not keep.any():
+            return []
+
+        raw_keep = raw[keep]
+        cids_keep = cids[keep]
+        scores_keep = max_scores[keep]
+
+        boxes = []
+        scores = []
+        class_ids = []
+
+        for row, cid, score in zip(raw_keep, cids_keep, scores_keep):
+            cx = row[0] * x_scale
+            cy = row[1] * y_scale
+            bw = row[2] * x_scale
+            bh = row[3] * y_scale
+            boxes.append([int(cx - bw / 2.0), int(cy - bh / 2.0), int(bw), int(bh)])
+            scores.append(float(score))
+            class_ids.append(int(cid))
+
+        idx = cv2.dnn.NMSBoxes(boxes, scores, self.conf, self.iou)
+        if len(idx) == 0:
+            return []
+
+        out = []
+        for i in np.array(idx).flatten():
+            bx, by, bw, bh = boxes[i]
+            cid = class_ids[i]
+            out.append(Detection(
+                class_id=cid,
+                class_name=_name_for(cid, self.names),
+                confidence=float(scores[i]),
+                x1=max(0, bx),
+                y1=max(0, by),
+                x2=min(w - 1, bx + bw),
+                y2=min(h - 1, by + bh),
+            ))
+        return out
+
+
 def make_detector(kind: str, **kwargs) -> Detector:
     """Factory for live_detect.py's --detector flag.
 
@@ -241,7 +332,16 @@ def make_detector(kind: str, **kwargs) -> Detector:
         allowed = ("engine", "conf", "iou", "names")
         return TrtDetector(**{k: v for k, v in kwargs.items() if k in allowed})
 
+    if kind in ("onnx", "cv2"):
+        allowed = ("weights", "conf", "iou", "imgsz", "names")
+        return OnnxDetector(**{k: v for k, v in kwargs.items() if k in allowed})
+
     if kind in ("ultralytics", "yolo", "pt"):
+        # Auto-fallback to OnnxDetector if weights is an .onnx file
+        weights = kwargs.get("weights", "")
+        if str(weights).lower().endswith(".onnx"):
+            allowed = ("weights", "conf", "iou", "imgsz", "names")
+            return OnnxDetector(**{k: v for k, v in kwargs.items() if k in allowed})
         allowed = ("weights", "conf", "iou", "imgsz", "device", "names")
         return UltralyticsDetector(**{k: v for k, v in kwargs.items() if k in allowed})
 
@@ -249,7 +349,7 @@ def make_detector(kind: str, **kwargs) -> Detector:
         allowed = ("every_n", "confidence", "class_id", "names", "box_size")
         return MockDetector(**{k: v for k, v in kwargs.items() if k in allowed})
 
-    raise ValueError("Unknown detector '{0}'. Use trt, ultralytics or mock.".format(kind))
+    raise ValueError("Unknown detector '{0}'. Use trt, onnx, ultralytics or mock.".format(kind))
 
 
 def main() -> int:

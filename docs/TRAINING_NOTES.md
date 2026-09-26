@@ -124,7 +124,7 @@ single mAP number, and it's what a reviewer will ask about.
 | Engine precision | FP16 |
 | Measured FPS @ 640 | |
 | Engine build time | |
-| Model shipped | yolov8s / yolov8n |
+| Model shipped | yolov8m / yolov8n |
 
 **Flight-speed sanity check:** at ___ FPS and ___ m/s ground speed, the drone
 samples every ___ metres. Object tracking across frames is explicitly out of

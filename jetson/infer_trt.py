@@ -75,15 +75,23 @@ class TrtYolo:
 
         _, _, self.in_h, self.in_w = self.input_shape
 
-    def preprocess(self, img: np.ndarray) -> Tuple[np.ndarray, float, int, int]:
-        """Letterbox to the engine's fixed input size, BGR->RGB, 0-1, CHW."""
+    def preprocess(self, img: np.ndarray,
+                    target_shape: Tuple[int, int] = (320, 320)) -> Tuple[np.ndarray, float, int, int]:
+        """Letterbox to target_shape (default 320x320 for Nano throughput),
+        BGR->RGB, normalise 0-1, return NCHW blob + rescale metadata.
+
+        320x320 is ~4x fewer MACs than 640x640 and still resolves a mine-sized
+        object at 30 m AGL with a typical 60-deg HFOV camera.  Use 416x416 if
+        detail loss is visible at the deployment altitude.
+        """
+        in_h, in_w = target_shape
         h, w = img.shape[:2]
-        r = min(self.in_h / h, self.in_w / w)
+        r = min(in_h / h, in_w / w)
         nw, nh = int(round(w * r)), int(round(h * r))
         resized = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LINEAR)
 
-        canvas = np.full((self.in_h, self.in_w, 3), 114, dtype=np.uint8)
-        dw, dh = (self.in_w - nw) // 2, (self.in_h - nh) // 2
+        canvas = np.full((in_h, in_w, 3), 114, dtype=np.uint8)
+        dw, dh = (in_w - nw) // 2, (in_h - nh) // 2
         canvas[dh:dh + nh, dw:dw + nw] = resized
 
         blob = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
@@ -101,8 +109,14 @@ class TrtYolo:
         return o["host"].reshape(o["shape"])
 
     def postprocess(self, raw: np.ndarray, r: float, dw: int, dh: int,
-                    conf_thres: float, iou_thres: float):
-        """YOLOv8 head is (1, 4+nc, N): xywh in pixels + per-class scores."""
+                    conf_thres: float = 0.25, iou_thres: float = 0.30):
+        """YOLOv8 head is (1, 4+nc, N): xywh in pixels + per-class scores.
+
+        conf_thres=0.25  catches borderline detections and stops flickering
+                         (box appears 1 frame, vanishes the next).
+        iou_thres=0.30   aggressive NMS suppresses duplicate boxes on slow
+                         objects that span adjacent anchor cells at 320x320.
+        """
         pred = raw[0]
         if pred.shape[0] < pred.shape[1]:
             pred = pred.T                      # (N, 4+nc)
@@ -112,17 +126,17 @@ class TrtYolo:
         class_ids = scores_all.argmax(axis=1)
         scores = scores_all.max(axis=1)
 
-        keep = scores > conf_thres
+        keep = scores >= conf_thres           # >= so the threshold value itself passes
         if not keep.any():
             return [], [], []
         boxes_xywh, scores, class_ids = boxes_xywh[keep], scores[keep], class_ids[keep]
 
         # xywh (letterboxed pixels) -> xyxy in the ORIGINAL image
         cx, cy, bw, bh = boxes_xywh.T
-        x1 = (cx - bw / 2 - dw) / r
-        y1 = (cy - bh / 2 - dh) / r
-        x2 = (cx + bw / 2 - dw) / r
-        y2 = (cy + bh / 2 - dh) / r
+        x1 = (cx - bw / 2.0 - dw) / r
+        y1 = (cy - bh / 2.0 - dh) / r
+        x2 = (cx + bw / 2.0 - dw) / r
+        y2 = (cy + bh / 2.0 - dh) / r
         boxes = np.stack([x1, y1, x2 - x1, y2 - y1], axis=1)   # xywh for cv2 NMS
 
         idx = cv2.dnn.NMSBoxes(boxes.tolist(), scores.tolist(), conf_thres, iou_thres)
@@ -169,6 +183,9 @@ def main() -> int:
         frames = None
 
     fps_ema = 0.0
+    frame_count = 0
+    last_boxes, last_scores, last_ids = [], [], []   # cached from previous infer frame
+    INFER_EVERY = 3   # run the heavy ONNX pass only on every 3rd frame
     try:
         while True:
             if cap is not None:
@@ -178,31 +195,40 @@ def main() -> int:
             else:
                 frame = frames.pop(0)
 
-            t0 = time.time()
-            blob, r, dw, dh = model.preprocess(frame)
-            raw = model.infer(blob)
-            boxes, scores, ids = model.postprocess(raw, r, dw, dh, args.conf, args.iou)
-            dt = time.time() - t0
-            fps_ema = 0.9 * fps_ema + 0.1 * (1.0 / dt) if fps_ema else 1.0 / dt
+            frame_count += 1
+
+            # -- inference (every 3rd frame) or box-persistence (other 2) ------
+            if frame_count % INFER_EVERY == 1 or not last_boxes:
+                t0 = time.time()
+                blob, r, dw, dh = model.preprocess(frame, target_shape=(320, 320))
+                raw = model.infer(blob)
+                last_boxes, last_scores, last_ids = model.postprocess(
+                    raw, r, dw, dh, args.conf, args.iou)
+                dt = time.time() - t0
+                fps_ema = 0.9 * fps_ema + 0.1 * (1.0 / dt) if fps_ema else 1.0 / dt
+            # else: reuse last_boxes/scores/ids from the previous infer frame
+            # (gives smooth visual tracking without the GPU cost every frame)
+
+            boxes, scores, ids = last_boxes, last_scores, last_ids
 
             for (x1, y1, x2, y2), sc, cid in zip(boxes, scores, ids):
-                label = args.names[cid] if args.names and cid < len(args.names) else f"class{cid}"
+                label = args.names[cid] if args.names and cid < len(args.names) else "class{0}".format(cid)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"{label} {sc:.2f}", (x1, max(15, y1 - 6)),
+                cv2.putText(frame, "{0} {1:.2f}".format(label, sc), (x1, max(15, y1 - 6)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            cv2.putText(frame, f"{fps_ema:.1f} FPS  {len(boxes)} det",
+            cv2.putText(frame, "{0:.1f} FPS  {1} det".format(fps_ema, len(boxes)),
                         (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
             if args.save:
                 cv2.imwrite(args.save, frame)
-                print(f"Saved -> {args.save}  ({len(boxes)} detections, {dt * 1000:.0f} ms)")
+                print("Saved -> {0}  ({1} detections)".format(args.save, len(boxes)))
             if not args.headless:
                 cv2.imshow("SafeMine", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
             elif cap is None:
-                print(f"{len(boxes)} detections in {dt * 1000:.0f} ms")
+                print("{0} detections".format(len(boxes)))
 
             if cap is None and not frames:
                 break

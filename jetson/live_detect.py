@@ -103,13 +103,52 @@ class DetectionLog(object):
                 pass
 
 
-def open_source(source: str, width: int, height: int):
-    """Open a camera index, a video file or a still image.
+def open_source(source, width, height):
+    """Open a camera index, a video file, a still image, or the Jetson CSI camera.
 
     Returns (capture_or_None, single_frame_or_None).
+
+    Pass --source csi  to use the Jetson Nano CSI camera via the nvarguscamerasrc
+    GStreamer pipeline.  All other values are unchanged from before.
     """
+    # ------------------------------------------------------------------ CSI cam
+    # nvarguscamerasrc is only available on JetPack. cv2.VideoCapture(0) silently
+    # returns black frames on the Nano CSI port; GStreamer is mandatory there.
+    if source.lower() == "csi":
+        gst = (
+            "nvarguscamerasrc ! "
+            "video/x-raw(memory:NVMM), width=(int){w}, height=(int){h}, "
+            "format=(string)NV12, framerate=(fraction)30/1 ! "
+            "nvvidconv ! "
+            "video/x-raw, format=(string)BGRx ! "
+            "videoconvert ! "
+            "video/x-raw, format=(string)BGR ! "
+            "appsink"
+        ).format(w=width or 1280, h=height or 720)
+
+        try:
+            cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
+        except Exception as exc:
+            raise RuntimeError(
+                "cv2.VideoCapture raised while opening the GStreamer pipeline: {0}\n"
+                "    This usually means OpenCV was built without GStreamer support.\n"
+                "    On JetPack 4.6 use the system python3-opencv package.".format(exc)
+            )
+
+        if not cap.isOpened():
+            raise RuntimeError(
+                "Could not open the CSI camera via GStreamer.\n"
+                "    1. Start the camera daemon:  sudo systemctl start nvargus-daemon\n"
+                "    2. Confirm the CSI ribbon is seated and the camera is enabled\n"
+                "       in /boot/extlinux/extlinux.conf (dtb overlay).\n"
+                "    3. Re-run with --source csi after the daemon is running."
+            )
+        return cap, None
+
+    # ----------------------------------------------------------------- USB cam
     if source.isdigit():
         cap = cv2.VideoCapture(int(source))
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer lag
         if width:
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         if height:
@@ -124,16 +163,19 @@ def open_source(source: str, width: int, height: int):
             )
         return cap, None
 
+    # -------------------------------------------------------------- video file
     if source.lower().endswith((".mp4", ".avi", ".mov", ".mkv")):
         cap = cv2.VideoCapture(source)
         if not cap.isOpened():
             raise RuntimeError("Could not open video {0}".format(source))
         return cap, None
 
+    # ------------------------------------------------------------------- image
     frame = cv2.imread(source)
     if frame is None:
         raise RuntimeError("Could not read image {0}".format(source))
     return None, frame
+
 
 
 def parse_args() -> argparse.Namespace:
@@ -151,8 +193,8 @@ def parse_args() -> argparse.Namespace:
                      help="Stop after N frames (0 = until Ctrl-C). Use this for scripted tests")
 
     det = p.add_argument_group("detector")
-    det.add_argument("--detector", default="mock", choices=["trt", "ultralytics", "mock"],
-                     help="trt on the Nano, ultralytics on a PC, mock for plumbing tests")
+    det.add_argument("--detector", default="mock", choices=["trt", "onnx", "ultralytics", "mock"],
+                     help="trt on the Nano, onnx/ultralytics on a PC, mock for plumbing tests")
     det.add_argument("--engine", default="best.engine", help="TensorRT engine (--detector trt)")
     det.add_argument("--weights", default="weights/best.pt", help="PyTorch weights (--detector ultralytics)")
     det.add_argument("--device", default="cpu", help="'0' for GPU, 'cpu' (--detector ultralytics)")
@@ -310,6 +352,9 @@ def main() -> int:
         if args.save_frames and not os.path.isdir(args.save_frames):
             os.makedirs(args.save_frames)
 
+        active_display_dets = []
+        det_persist_counter = 0
+
         while True:
             if cap is not None:
                 ok, frame = cap.read()
@@ -401,13 +446,23 @@ def main() -> int:
                                   .format(captured_at, d.class_name, d.confidence))
 
             # -- display / save -------------------------------------------
+            # Box persistence for display: if a frame drops detection, keep showing
+            # the last valid bounding box for up to 5 frames to eliminate UI flicker.
+            if dets:
+                active_display_dets = dets
+                det_persist_counter = 5
+            elif det_persist_counter > 0:
+                det_persist_counter -= 1
+            else:
+                active_display_dets = []
+
             need_render = (not args.headless) or (args.save_frames and dets)
             if need_render:
                 shown = frame.copy()
                 gps_text = "no fix" if fix is None else "{0:.6f},{1:.6f} fix{2} sats{3}".format(
                     fix.lat, fix.lon, fix.fix_type, fix.satellites)
                 up_text = "off" if uplink is None else str(uplink.stats)
-                draw_hud(shown, dets, fps_ema, gps_text, up_text)
+                draw_hud(shown, active_display_dets, fps_ema, gps_text, up_text)
 
                 if args.save_frames and dets:
                     out_path = os.path.join(
