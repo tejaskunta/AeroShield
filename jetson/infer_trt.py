@@ -25,7 +25,7 @@ pycuda has no such constraint, which is exactly why we export to ONNX.
 import argparse
 import sys
 import time
-from typing import Tuple
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
@@ -76,15 +76,15 @@ class TrtYolo:
         _, _, self.in_h, self.in_w = self.input_shape
 
     def preprocess(self, img: np.ndarray,
-                    target_shape: Tuple[int, int] = (320, 320)) -> Tuple[np.ndarray, float, int, int]:
-        """Letterbox to target_shape (default 320x320 for Nano throughput),
+                    target_shape: Optional[Tuple[int, int]] = None) -> Tuple[np.ndarray, float, int, int]:
+        """Letterbox to target_shape (default: the engine's input size),
         BGR->RGB, normalise 0-1, return NCHW blob + rescale metadata.
 
         320x320 is ~4x fewer MACs than 640x640 and still resolves a mine-sized
         object at 30 m AGL with a typical 60-deg HFOV camera.  Use 416x416 if
         detail loss is visible at the deployment altitude.
         """
-        in_h, in_w = target_shape
+        in_h, in_w = target_shape or (self.in_h, self.in_w)
         h, w = img.shape[:2]
         r = min(in_h / h, in_w / w)
         nw, nh = int(round(w * r)), int(round(h * r))
@@ -200,7 +200,7 @@ def main() -> int:
             # -- inference (every 3rd frame) or box-persistence (other 2) ------
             if frame_count % INFER_EVERY == 1 or not last_boxes:
                 t0 = time.time()
-                blob, r, dw, dh = model.preprocess(frame, target_shape=(320, 320))
+                blob, r, dw, dh = model.preprocess(frame)
                 raw = model.infer(blob)
                 last_boxes, last_scores, last_ids = model.postprocess(
                     raw, r, dw, dh, args.conf, args.iou)

@@ -273,16 +273,20 @@ class OnnxDetector(Detector):
         import numpy as np
 
         h, w = frame.shape[:2]
-        blob = cv2.dnn.blobFromImage(frame, 1.0 / 255.0, (self.imgsz, self.imgsz), swapRB=True, crop=False)
+        # Letterbox exactly as TrtYolo.preprocess does, so both backends see the same geometry.
+        s = self.imgsz
+        r = min(s / float(h), s / float(w))
+        nw, nh = int(round(w * r)), int(round(h * r))
+        canvas = np.full((s, s, 3), 114, dtype=np.uint8)
+        dw, dh = (s - nw) // 2, (s - nh) // 2
+        canvas[dh:dh + nh, dw:dw + nw] = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        blob = cv2.dnn.blobFromImage(canvas, 1.0 / 255.0, (s, s), swapRB=True, crop=False)
         self.net.setInput(blob)
         raw = self.net.forward()
         if len(raw.shape) == 3:
             raw = raw[0]
         if raw.shape[0] < raw.shape[1]:
             raw = raw.T    # Shape: (num_boxes, 4 + num_classes)
-
-        x_scale = float(w) / float(self.imgsz)
-        y_scale = float(h) / float(self.imgsz)
 
         scores_all = raw[:, 4:]
         cids = scores_all.argmax(axis=1)
@@ -301,11 +305,12 @@ class OnnxDetector(Detector):
         class_ids = []
 
         for row, cid, score in zip(raw_keep, cids_keep, scores_keep):
-            cx = row[0] * x_scale
-            cy = row[1] * y_scale
-            bw = row[2] * x_scale
-            bh = row[3] * y_scale
-            boxes.append([int(cx - bw / 2.0), int(cy - bh / 2.0), int(bw), int(bh)])
+            # Undo letterbox padding, then rescale to the original frame.
+            x1 = (row[0] - row[2] / 2.0 - dw) / r
+            y1 = (row[1] - row[3] / 2.0 - dh) / r
+            x2 = (row[0] + row[2] / 2.0 - dw) / r
+            y2 = (row[1] + row[3] / 2.0 - dh) / r
+            boxes.append([int(x1), int(y1), int(x2 - x1), int(y2 - y1)])
             scores.append(float(score))
             class_ids.append(int(cid))
 
