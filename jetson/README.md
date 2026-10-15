@@ -37,6 +37,28 @@ ship with or install cleanly on JetPack 4.6. No PyTorch on the drone at all.
 
 ---
 
+## Current run (verified on the Nano, JetPack 4.6)
+
+The Nano's default `python3` is 3.10 and has no GStreamer. Run under Python 3.6
+with the apt OpenCV on the path:
+
+```bash
+export PYTHONPATH=/usr/lib/python3.6/dist-packages/cv2/python-3.6:/usr/lib/python3/dist-packages
+/usr/bin/python3.6 live_detect.py --detector trt --engine weights/best.engine \
+    --gps sim --source csi --names landmine --headless --no-uplink --max-frames 5
+```
+
+Uplink to the backend (API key read from `~/aeroshield/.env`, never printed):
+
+```bash
+make run MISSION=bench-jetson-1 MAX_FRAMES=60
+```
+
+`pycuda` is built for Python 3.6 in the user site (`pycuda<2022`). If the build
+fails with `cuda.h` missing, pass `CFLAGS="-I/usr/local/cuda/include"` and
+`LDFLAGS="-L/usr/local/cuda/lib64"`. If pip fails on `lsb_release`, run it under
+`/usr/bin/python3.6`.
+
 ## Step 1 — Copy the ONNX over
 
 From the training PC:
