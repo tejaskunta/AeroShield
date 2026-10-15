@@ -48,7 +48,7 @@ update `--names` on the Jetson to match.
 
 | Run name | Date | Model | Epochs | Batch | Images | mAP@50 | Recall | Precision | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| `landmine_yolov8m_75ep` | 2026-08-15 | yolov8m.pt | 75 | 8 | 5,723 tr / 455 val / 221 test | 0.9583 val · 0.9718 test | 0.9537 val · 0.9572 test | 0.9414 val · 0.9655 test | Shipped run. Single class (landmine). See `Aeroshield Weights/runs/detect/runs/detect/landmine_yolov8m_75ep/safemine_summary.json`; conf=0.25. |
+| `landmine_yolov8m_75ep` | 2026-08-15 | yolov8m.pt | 75 | 8 | 5,723 tr / 455 val / 221 test | 0.9583 val · 0.9718 test | 0.9537 val · 0.9572 test | 0.9414 val · 0.9655 test | Shipped run. Single class (landmine). See `model_archive/runs/detect/runs/detect/landmine_yolov8m_75ep/safemine_summary.json`; conf=0.25. |
 
 > **Format note.** "val · test" columns mean the re-validation at conf=0.25
 > (post-training `best_model.val(split=...)`), which is what `safemine_summary.json`

@@ -2,7 +2,7 @@
 
 A one-page set of questions a reviewer can ask, with the repo's actual answers.
 Every figure here is **verified from artifacts in this workspace** — from
-`Aeroshield Weights/runs/detect/runs/detect/landmine_yolov8m_75ep/` and its
+`model_archive/runs/detect/runs/detect/landmine_yolov8m_75ep/` and its
 `logs/train_resume.log` — not from memory.
 
 The one thing this sheet cannot answer is the split-leakage question; see
@@ -98,13 +98,13 @@ writes `runs/detect/<name>_val|_test/` curves, and writes a
 
 | Path | Contents |
 |---|---|
-| `runs/detect/run/weights/best.pt` + `best.onnx` | Training output (the canonical copy, from the real run: `Aeroshield Weights/runs/detect/runs/detect/landmine_yolov8m_75ep/weights/`) |
+| `runs/detect/run/weights/best.pt` + `best.onnx` | Training output (the canonical copy, from the real run: `model_archive/runs/detect/runs/detect/landmine_yolov8m_75ep/weights/`) |
 | `weights/best.pt`, `weights/best.onnx` | Stable copies copied by the script (byte-identical, gitignored) |
 | `weights/README.txt` | Note that `.pt`/`.onnx` are > 100 MB and excluded from git |
-| `Aeroshield Weights/` | A **second, duplicate** copy of the same artifacts + logs (the folder the training was actually run from on Windows) |
+| `model_archive/` | A **second, duplicate** copy of the same artifacts + logs (the folder the training was actually run from on Windows) |
 | `jetson/best.engine` | Absent — engine is built **on the Nano** (`build_engine.sh`), not here |
 
-**Important for the review:** `Aeroshield Weights/` is a *duplicate* of the
+**Important for the review:** `model_archive/` is a *duplicate* of the
 canonical folder, not a separate run. Present one copy in the paper/repo to
 avoid confusion; the other is safe to archive (nothing to delete — just move it
 out of the workspace if presenting).
@@ -208,7 +208,7 @@ not "it runs on the Nano".
 
 ## Q10. What's in the repo that could trip me up?
 
-- **`Aeroshield Weights/` duplicates `weights/`** — present one, archive the
+- **`model_archive/` duplicates `weights/`** — present one, archive the
   other. Not a defect, just clutter.
 - **`docs/REVIEW_GUIDE.md`** exists and is accurate — worth skimming first; the
   cheat sheet is its Q&A companion.

@@ -155,7 +155,7 @@ The fallback creates synthetic detections and does not test model accuracy.
 | `tests/` | Automated tests | Important |
 | `docs/` | Training, API, and review documentation | Useful |
 | `runs/` | Generated training runs and plots | Archive if not presenting metrics |
-| `Aeroshield Weights/` | Additional/duplicate training artifacts | Archive after confirming contents |
+| `model_archive/` | Additional/duplicate training artifacts | Archive after confirming contents |
 | `jetson/logs/` | Runtime logs | Archive unless showing evidence |
 | `jetson/spool/` | Offline upload queue | Preserve real mission data; archive test data |
 | `backend/storage/` | Uploaded runtime images | Archive unless needed for demo |

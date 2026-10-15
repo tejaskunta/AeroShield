@@ -262,12 +262,10 @@ class OnnxDetector(Detector):
             raise RuntimeError(
                 "Could not load ONNX model from {0}: {1}".format(weights, exc)
             )
-        # Overriding provided values with optimized ones for CPU/Nano real-time performance
-        self.conf = 0.15  # Lower confidence to prioritize recall over precision
+        self.conf = conf
         self.iou = iou
-        # MUST BE 640: YOLOv8 ONNX exports hardcode the output grid sizes (80x80 etc).
-        # We cannot dynamically resize inputs for this model in OpenCV DNN.
-        self.imgsz = 640
+        # Must match the export size: YOLOv8 ONNX exports hardcode the output grid sizes (80x80 etc).
+        self.imgsz = imgsz
         self.names = names or ["landmine"]
 
     def detect(self, frame) -> List[Detection]:
