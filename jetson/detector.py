@@ -158,6 +158,16 @@ class UltralyticsDetector(Detector):
             return list(raw)
         return None
 
+    @property
+    def model(self):
+        """The loaded Ultralytics YOLO object, for Grad-CAM reuse (gradcam.py).
+
+        live_detect.py --gradcam passes this into GradCamSession instead of
+        loading a second copy of the weights: double the memory, and the risk of
+        a heatmap attributed to a model that is not the one drawing the boxes.
+        """
+        return self._model
+
     def detect(self, frame) -> List[Detection]:
         results = self._model.predict(
             source=frame, conf=self.conf, iou=self.iou, imgsz=self.imgsz,

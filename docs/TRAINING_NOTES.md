@@ -24,10 +24,19 @@ what lighting/terrain conditions?
 
 ## Class definitions
 
+The **shipped run is single-class**: `nc=1`, class id 0 = `Landmine`
+(verified in `logs/train_resume.log` → "Classes (1): Landmine" and
+`Overriding model.yaml nc=80 with nc=1`).
+
+The `configs/data.yaml.example` in this repo is the **3-class design** offered
+as a template (`landmine_metal`, `landmine_plastic`, `debris_negative`). The
+trained model does not use it — it is an aspirational layout with hard
+negatives, not the thing the weights were trained on. Keep that straight in the
+report: quoting the example's classes would be wrong.
+
 | ID | Name | What counts | What doesn't |
 |---|---|---|---|
-| 0 | | | |
-| 1 | | | |
+| 0 | Landmine (single class) | Visible surface mine-like objects / indicators | Buried mines (RGB cannot see them); debris if you want a hard-negative class, retrain with `nc: 2`+ |
 | 2 | | | |
 
 Class order is baked into the weights. If you change it, you retrain — and you
@@ -39,7 +48,14 @@ update `--names` on the Jetson to match.
 
 | Run name | Date | Model | Epochs | Batch | Images | mAP@50 | Recall | Precision | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| | | | | | | | | | |
+| `landmine_yolov8m_75ep` | 2026-08-15 | yolov8m.pt | 75 | 8 | 5,723 tr / 455 val / 221 test | 0.9583 val · 0.9718 test | 0.9537 val · 0.9572 test | 0.9414 val · 0.9655 test | Shipped run. Single class (landmine). See `Aeroshield Weights/runs/detect/runs/detect/landmine_yolov8m_75ep/safemine_summary.json`; conf=0.25. |
+
+> **Format note.** "val · test" columns mean the re-validation at conf=0.25
+> (post-training `best_model.val(split=...)`), which is what `safemine_summary.json`
+> records. The epoch-internal `results.csv` in the same folder shows slightly
+> different val numbers (e.g. final-epoch mAP@50 ~0.9748) because that validation
+> runs at Ultralytics' internal default conf, not at 0.25 — quote the summary JSON,
+> not the CSV, and say which one you mean.
 
 Each run writes `safemine_summary.json` in its folder — copy the numbers from
 there rather than from the terminal scrollback.
@@ -50,13 +66,17 @@ there rather than from the terminal scrollback.
 
 The number you ship, and the reasoning behind it.
 
-- **Chosen confidence threshold:** `___`
-- **Recall at that threshold:** `___`
-- **Precision at that threshold:** `___`
+- **Chosen confidence threshold:** `0.25` (the shipped default; matches `--conf` in the training run and `conf=0.25` in `infer_trt.py`/`predict.py`).
+- **Recall at that threshold:** `0.9537` val · `0.9572` test (box-level, from `safemine_summary.json`)
+- **Precision at that threshold:** `0.9414` val · `0.9655` test
 - **Why not the F1-optimal point:** F1 assumes false positives and false
   negatives cost the same. For SafeMine they don't — a missed mine is a safety
   failure, a false positive is an analyst annoyance (PRD §9). So we deliberately
   operate left of the F1 peak, accepting more false positives to buy recall.
+- **TODO (reviewer item 2):** re-validate at `conf=0.1` on the test split
+  (`yolo detect val model=weights/best.pt data=<data.yaml> split=test conf=0.1`)
+  and record recall/precision/F2 at that threshold. The dataset lives on the
+  training PC, so this runs there — the numbers above are the conf=0.25 baseline.
 
 ---
 
@@ -108,8 +128,8 @@ which shows up as every detection being off by the same factor, not as scatter.
 Catalogue what the model gets wrong — this is more useful in a report than a
 single mAP number, and it's what a reviewer will ask about.
 
-- **False positives on:** (rocks? scrap metal? shadows? vegetation?)
-- **Misses on:** (partial occlusion? low contrast? small objects at altitude?)
+- **False positives on:** (rocks? scrap metal? shadows? vegetation?) — *not yet recorded; the confusion matrix PNG exists in `runs/.../landmine_yolov8m_75ep/confusion_matrix_normalized.png` — inspect it and paste the top confusion cells here.*
+- **Misses on:** (partial occlusion? low contrast? small objects at altitude?) — *not yet recorded; combine the confusion matrix with the PR curve (`BoxPR_curve.png`) and eyeball the worst false-negative images from `val_batch*_pred.jpg`.*
 - **Terrain not represented in training:** 
 - **Lighting conditions not represented:** 
 

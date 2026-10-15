@@ -33,3 +33,20 @@ alembic>=1.13.0,<2.0.0
 pytest>=8.0.0,<9.0.0
 pytest-asyncio>=0.23.0,<0.25.0
 httpx>=0.27.0,<0.29.0          # ASGITransport - drives the app in-process, no live server
+                               # Also the Groq client in app/services/llm.py - one dep, two jobs
+
+# --- intelligence layer: OPTIONAL (PRD 5.1) -----------------------------------
+# Intentionally commented out. Every feature that uses these degrades to a
+# deterministic offline path when they are absent — the copilot retrieves with a
+# lexical scorer, reports render as styled HTML — and the response fields
+# (`engine`, `renderer`) say which path ran. A classroom machine with no network
+# installs this file as-is and still demos the whole product.
+#
+# Install them to upgrade the premium paths:
+#
+# chromadb>=0.5.0,<0.7.0       # HNSW retrieval over the copilot corpus, replacing
+#                              # the lexical scorer. Same chunks, same citations.
+# weasyprint>=61.0             # PDF rendering for mission reports, replacing the
+#                              # HTML artifact. Needs system libs (Pango, cairo)
+#                              # that are awkward on stock macOS — if `import
+#                              # weasyprint` fails, the report honestly ships HTML.

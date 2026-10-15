@@ -12,6 +12,9 @@ Run it on a laptop with a webcam and no drone at all:
 
     python3 jetson/live_detect.py --detector mock --gps sim --headless --max-frames 60
     python3 jetson/live_detect.py --detector ultralytics --weights weights/best.pt --gps sim
+    python3 jetson/live_detect.py --detector ultralytics --gradcam --headless
+        # Grad-CAM overlays: laptop only (needs pytorch-grad-cam); the Nano
+        # cannot run a backward pass, so --gradcam there warns and is skipped
 
 Run it on the drone:
 
@@ -206,6 +209,14 @@ def parse_args() -> argparse.Namespace:
                      help="Class names in TRAINING order - must match data.yaml exactly")
     det.add_argument("--mock-every-n", type=int, default=15,
                      help="Frames between synthetic detections (--detector mock)")
+    det.add_argument("--gradcam", action="store_true",
+                     help="Attach Grad-CAM explainability overlays to detections. "
+                          "Laptop + --detector ultralytics + pytorch-grad-cam only; "
+                          "unavailable anywhere else, the run warns once and continues "
+                          "without overlays - detections are never lost to them")
+    det.add_argument("--gradcam-top-k", type=int, default=1,
+                     help="Explain this many boxes per frame; the overlay is filed "
+                          "against the first detection of the frame")
 
     gps = p.add_argument_group("gps")
     gps.add_argument("--gps", default="sim", choices=["mavlink", "sim", "none"])
@@ -303,6 +314,37 @@ def main() -> int:
         print("ERROR: {0}".format(exc), file=sys.stderr)
         return 1
 
+    # -- Grad-CAM (optional, laptop-only) ----------------------------------
+    # Built once, reused every frame: loading YOLOv8 weights is the expensive
+    # part, and the heatmap must come from the same model that drew the boxes -
+    # so when the detector already holds an Ultralytics model we hand its weights
+    # to the session instead of loading a second copy. Any failure here (no
+    # pytorch-grad-cam, mock/trt detector with no torch model) disables overlays
+    # with one warning; the detection pipeline itself is untouched.
+    gradcam_session = None
+    gradcam_mod = None
+    if args.gradcam:
+        try:
+            import gradcam as gradcam_mod
+        except ImportError as exc:
+            print("WARNING: --gradcam disabled: cannot import gradcam.py ({0})".format(exc),
+                  file=sys.stderr)
+            gradcam_mod = None
+        if gradcam_mod is not None:
+            try:
+                # Reuse the detector's weights when it holds an Ultralytics model;
+                # pass the path otherwise. A heatmap from a different model than
+                # the one drawing the boxes would be a lie.
+                gradcam_session = gradcam_mod.GradCamSession(
+                    weights=args.weights, device=args.device, imgsz=args.imgsz,
+                    model=getattr(detector, "model", None),
+                )
+                if not args.quiet:
+                    print("[gradcam] overlays enabled")
+            except gradcam_mod.GradCamUnavailable as exc:
+                print("WARNING: --gradcam disabled: {0}".format(exc), file=sys.stderr)
+                gradcam_session = None
+
     gps = make_provider(
         args.gps,
         url=args.gps_url,
@@ -386,6 +428,27 @@ def main() -> int:
                     if ok_enc:
                         image_bytes = buf.tobytes()
 
+                # One Grad-CAM overlay per frame, filed against the first
+                # detection in it. A heatmap per box would re-run the backward
+                # pass per box for marginal review value; top_k>1 is there for
+                # dense scenes if a demo needs it. If the stack fails mid-run
+                # (e.g. OOM on a gradient pass), overlays are disabled with one
+                # warning - the detection keeps flowing, which is the contract.
+                gradcam_bytes = None
+                if gradcam_session is not None and uplink is not None and not args.no_images:
+                    d0 = dets[0]
+                    box0 = (d0.x1, d0.y1, d0.x2, d0.y2, d0.class_id,
+                            float(d0.confidence), d0.class_name)
+                    try:
+                        overlays = gradcam_session.explain(frame, [box0],
+                                                           top_k=args.gradcam_top_k)
+                        if overlays:
+                            gradcam_bytes = gradcam_mod.encode_jpeg(overlays[0])
+                    except gradcam_mod.GradCamUnavailable as exc:
+                        print("WARNING: --gradcam disabled mid-run: {0}".format(exc),
+                              file=sys.stderr)
+                        gradcam_session = None
+
                 captured_at = utc_now_iso()
                 for d in dets:
                     detections_total += 1
@@ -431,10 +494,12 @@ def main() -> int:
 
                     log.write(record, uploaded=uplink is not None)
                     if uplink is not None:
-                        uplink.submit(record, image_bytes)
-                        # One image per frame, not per box - the second box in the
-                        # same frame would upload a byte-identical copy.
+                        uplink.submit(record, image_bytes, gradcam_bytes)
+                        # One image (and one overlay) per frame, not per box - the
+                        # second box in the same frame would upload a byte-identical
+                        # copy of both.
                         image_bytes = None
+                        gradcam_bytes = None
 
                     if not args.quiet:
                         if pos is not None:

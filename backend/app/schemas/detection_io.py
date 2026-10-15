@@ -188,6 +188,7 @@ class DetectionRead(BaseModel):
     horizontal_error_m: Optional[float]
 
     image_path: Optional[str]
+    gradcam_path: Optional[str]
     frame_width: Optional[int]
     frame_height: Optional[int]
 
@@ -195,8 +196,29 @@ class DetectionRead(BaseModel):
     model_version: Optional[str]
     source: Optional[str]
 
+    # Human adjudication (PRD 5.1). review_state is NULL in the database until an
+    # operator acts; the API presents that as 'unreviewed' so the client never has to
+    # special-case null. See ReviewPatch for the write side.
+    review_state: str = "unreviewed"
+    review_reason: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+
     captured_at: datetime
     created_at: datetime
+
+    @field_validator("review_state", mode="before")
+    @classmethod
+    def _null_review_is_unreviewed(cls, value: Optional[str]) -> str:
+        """Map a NULL stored review_state to 'unreviewed' on the way out.
+
+        The database stores NULL (never reviewed) rather than the string, so an
+        auditor can tell "no one looked" from "someone looked and set it". The API
+        contract is simpler: always one of the four states. A field validator rather
+        than a model validator because this runs against ORM attributes too, where
+        the incoming object is a Detection, not a dict.
+        """
+        return value if value else "unreviewed"
 
     @property
     def is_geotagged(self) -> bool:
@@ -246,3 +268,39 @@ class GeoJSONFeature(BaseModel):
 class GeoJSONFeatureCollection(BaseModel):
     type: str = "FeatureCollection"
     features: List[GeoJSONFeature]
+
+
+# --- review workflow (PRD 5.1) ------------------------------------------------
+
+REVIEW_STATES = ("unreviewed", "confirmed", "dismissed", "flagged")
+
+
+class ReviewPatch(BaseModel):
+    """PATCH /api/detections/{id}/review - one adjudication decision.
+
+    `reviewed_by` and `reviewed_at` are server-assigned, never client-supplied: the
+    whole point of the audit trail is that it records what the *server* saw, from the
+    authenticated principal. A client that could set its own reviewer name would make
+    the trail decorative.
+
+    Setting state back to 'unreviewed' is allowed (an operator who changed their mind
+    can undo), and it keeps the reason/timestamps of the last decision in the request
+    contract - the server stamps them the same way, so the trail shows the undo.
+    """
+
+    state: str = Field(description="One of: " + ", ".join(REVIEW_STATES))
+    reason: Optional[str] = Field(
+        default=None, max_length=500,
+        description="Why. Strongly encouraged for 'dismissed' (false positive type) "
+                    "and 'flagged' (needs EOD). Free text; the model's confidence is "
+                    "already on the row, so repeat it here only in words.",
+    )
+
+    @field_validator("state")
+    @classmethod
+    def _valid_state(cls, value: str) -> str:
+        if value not in REVIEW_STATES:
+            raise ValueError(
+                "state must be one of {0}, got {1!r}".format(list(REVIEW_STATES), value)
+            )
+        return value

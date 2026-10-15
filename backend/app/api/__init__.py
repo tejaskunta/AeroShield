@@ -7,7 +7,7 @@ shadow anything.
 
 from fastapi import APIRouter
 
-from app.api import auth, detection, detections, health, missions
+from app.api import auth, copilot, detection, detections, health, missions, reports
 
 api_router = APIRouter()
 
@@ -15,6 +15,12 @@ api_router = APIRouter()
 api_router.include_router(detections.router)
 api_router.include_router(missions.router)
 api_router.include_router(auth.router)
+
+# Intelligence layer (PRD section 5.1). Copilot answers read-side questions and
+# reports turn stored facts into a shareable document; both sit with the read
+# endpoints because neither runs inference on the server.
+api_router.include_router(copilot.router)
+api_router.include_router(reports.router)
 
 # Dev-only image-upload detector. Predates the ingest path and is kept for demos.
 api_router.include_router(detection.router)

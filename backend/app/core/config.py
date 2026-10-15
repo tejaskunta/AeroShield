@@ -62,6 +62,30 @@ class Settings(BaseSettings):
     # --- api keys ---------------------------------------------------------
     bootstrap_admin_key: str = ""
 
+    # --- intelligence layer (PRD section 5.1) ------------------------------
+    # Every AI feature degrades to a deterministic offline answer when its key or
+    # dependency is missing, so a classroom demo with no network still works.
+    # The mode is reported in responses (`grounded`, `engine`) rather than hidden.
+
+    # Groq is the LLM (PRD section 7 says "Claude or GPT API"; Groq serves
+    # Llama-3-class models with a free tier and very low latency, which suits a
+    # live demo). Empty key => no LLM call is attempted.
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    llm_timeout_s: float = 20.0
+
+    # Chroma persistent store for the copilot corpus. When chromadb is not
+    # installed or the dir is unwritable, retrieval falls back to a built-in
+    # deterministic scorer over the same corpus — same chunks, same citations,
+    # just cosine-similarity-with-hash-embeddings instead of HNSW.
+    chroma_dir: str = "chroma"
+    copilot_top_k: int = 4
+    copilot_min_score: float = 0.08
+
+    # Where generated PDFs/HTML reports are written (relative to backend root).
+    reports_dir: str = "storage/reports"
+
     @field_validator("database_url", "test_database_url")
     @classmethod
     def _require_async_driver(cls, value: str) -> str:
@@ -94,6 +118,18 @@ class Settings(BaseSettings):
     def storage_path(self) -> Path:
         """Absolute storage directory, created on demand by the storage service."""
         path = Path(self.storage_dir)
+        return path if path.is_absolute() else (BACKEND_ROOT / path)
+
+    @property
+    def reports_path(self) -> Path:
+        """Absolute directory for generated mission reports."""
+        path = Path(self.reports_dir)
+        return path if path.is_absolute() else (BACKEND_ROOT / path)
+
+    @property
+    def chroma_path(self) -> Path:
+        """Absolute Chroma persistent-store directory."""
+        path = Path(self.chroma_dir)
         return path if path.is_absolute() else (BACKEND_ROOT / path)
 
     @property

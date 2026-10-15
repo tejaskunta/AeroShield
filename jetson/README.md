@@ -147,12 +147,7 @@ Per PRD §8, after a detection fires on the Nano the pipeline continues:
 2. `POST` the detection + image to the FastAPI backend.
 3. Backend writes to PostgreSQL/PostGIS and pushes via Socket.io to the dashboard.
 
-<<<<<<< HEAD
-`infer_trt.py` stops at step 0 — it produces boxes, scores and class ids. The
-MAVLink geotagging and the REST POST are Week 4/5 work and belong in a separate
-module that imports `TrtYolo` from this file.
-=======
-`infer_trt.py` stops at step 0 â€” it produces boxes, scores and class ids. Steps 1
+`infer_trt.py` stops at step 0 — it produces boxes, scores and class ids. Steps 1
 and 2 are **now implemented** in this folder (Week 4), as separate modules that
 import `TrtYolo` from this file:
 
@@ -162,9 +157,9 @@ import `TrtYolo` from this file:
 | `geo.py` | bbox pixels â†’ lat/lon, with a 1-sigma error estimate |
 | `detector.py` | one interface over TensorRT / Ultralytics / mock |
 | `uplink.py` | queued POST to the backend, retries, offline disk spool + replay |
-| `live_detect.py` | wires all of the above together â€” **this is the Week 4 deliverable** |
+| `live_detect.py` | wires all of the above together — **this is the Week 4 deliverable** |
 
-Step 3 is Week 5 and lives in `backend/` â€” see `docs/API.md`.
+Step 3 is Week 5 and lives in `backend/` — see `docs/API.md`.
 
 ---
 
@@ -177,13 +172,13 @@ You cannot escape 3.6 here.
 
 That rules out, in every file in this folder:
 
-- `from __future__ import annotations` â€” PEP 563, Python 3.7+. A hard `SyntaxError`
+- `from __future__ import annotations` — PEP 563, Python 3.7+. A hard `SyntaxError`
   on 3.6, raised before any code runs.
-- builtin generics: `tuple[int, str]`, `list[float]` â€” PEP 585, Python 3.9+.
+- builtin generics: `tuple[int, str]`, `list[float]` — PEP 585, Python 3.9+.
   Use `typing.Tuple`, `typing.List`.
-- `X | None` unions â€” PEP 604, Python 3.10+. Use `typing.Optional`.
-- `dataclasses` â€” Python 3.7+. Use `typing.NamedTuple`.
-- the walrus operator `:=` â€” Python 3.8+.
+- `X | None` unions — PEP 604, Python 3.10+. Use `typing.Optional`.
+- `dataclasses` — Python 3.7+. Use `typing.NamedTuple`.
+- the walrus operator `:=` — Python 3.8+.
 
 f-strings are fine (3.6+), though this folder uses `.format()` throughout for
 consistency.
@@ -229,7 +224,7 @@ python3 jetson/live_detect.py \
     --mission-name field-test-1 --headless
 ```
 
-Against ArduPilot SITL first â€” PRD Â§10 says never debug flight logic on the real
+Against ArduPilot SITL first — PRD §10 says never debug flight logic on the real
 airframe:
 
 ```bash
@@ -264,5 +259,35 @@ and the backend deduplicates on it, so a half-finished replay cannot create doub
 touches the network, flushed on every write. If the backend was unreachable for a
 whole flight, those two files are the mission record.
 
+---
 
->>>>>>> 2e80446 (feat: complete backend API, database schemas, Jetson integration & documentation)
+## Grad-CAM overlays — laptop-only (PRD §5.1)
+
+`gradcam.py` produces the explainability heatmap that the dashboard shows under
+each detection (see `docs/API.md`, "Grad-CAM overlays"). It is deliberately **not
+part of the drone pipeline**:
+
+- It needs PyTorch and `pytorch-grad-cam`, and it runs a forward *and* a backward
+  pass. The Nano has neither the libraries (this folder avoids `ultralytics` and
+  PyTorch entirely — see above) nor the 4 GB of memory for a gradient pass.
+- The TensorRT path cannot produce a heatmap at all, which is why the overlay is a
+  separate `PUT /api/detections/{id}/gradcam` rather than something computed inline
+  during flight.
+
+So the workflow is: fly with `--detector trt`, then analyse afterwards on the
+training machine:
+
+```bash
+# On the laptop, over frames from a flight (or a live webcam run):
+python3 jetson/live_detect.py --detector ultralytics --weights weights/best.pt \
+    --gradcam --source 0 --mission-name bench-1 \
+    --backend-url http://127.0.0.1:8000 --api-key $AEROSHIELD_API_KEY
+```
+
+`--gradcam` is off by default. On the Nano it warns once and disables itself
+(catch on `import gradcam`) rather than crashing a flight, so the same command
+line is safe to copy onto the drone. Order matters on the wire: `live_detect.py`
+uploads the frame first and the heatmap second, because the backend answers
+`409` to a Grad-CAM PUT for a detection that has no image yet — a box without a
+frame is exactly the kind of half-artifact this guard exists to prevent.
+

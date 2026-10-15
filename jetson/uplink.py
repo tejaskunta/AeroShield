@@ -151,9 +151,10 @@ class BackendUplink(object):
         # Whatever is left never reached the server - put it on disk.
         while True:
             try:
-                record, image = self._queue.get_nowait()
+                record, image, gradcam = self._queue.get_nowait()
             except queue.Empty:
                 break
+            # gradcam is deliberately not spooled - see _send_gradcam's docstring.
             self._spool(record, image)
 
         if self._session is not None:
@@ -210,16 +211,22 @@ class BackendUplink(object):
             print("[uplink] could not read mission id: {0}".format(exc), file=sys.stderr)
             return None
 
-    def submit(self, record: Dict, image: Optional[bytes] = None) -> None:
+    def submit(self, record: Dict, image: Optional[bytes] = None,
+               gradcam: Optional[bytes] = None) -> None:
         """Enqueue one detection. Never blocks, never raises.
 
         On a full queue the record goes straight to the spool. Dropping it would
         mean losing a detection because the network was slow, which is the one
         outcome this whole module exists to prevent.
+
+        `gradcam` is an optional explainability overlay (JPEG bytes) computed on a
+        laptop, never on the Nano. Like the frame it rides along best-effort and is
+        NOT spooled: the record and its image are the durable artefacts, a missing
+        heatmap must never cost the detection row.
         """
         record.setdefault("client_detection_id", new_client_id())
         try:
-            self._queue.put_nowait((record, image))
+            self._queue.put_nowait((record, image, gradcam))
         except queue.Full:
             self._spool(record, image)
 
@@ -289,16 +296,22 @@ class BackendUplink(object):
     def _worker(self) -> None:
         while not self._stop.is_set():
             try:
-                record, image = self._queue.get(timeout=0.25)
+                record, image, gradcam = self._queue.get(timeout=0.25)
             except queue.Empty:
                 continue
 
-            sent, fatal = self._send(record, image)
+            sent, fatal = self._send(record, image, gradcam)
             if not sent and not fatal:
                 self._spool(record, image)
 
-    def _send(self, record: Dict, image: Optional[bytes]) -> Tuple[bool, bool]:
-        """POST one record, then PUT its image. Returns (sent, fatal)."""
+    def _send(self, record: Dict, image: Optional[bytes],
+              gradcam: Optional[bytes] = None) -> Tuple[bool, bool]:
+        """POST one record, then PUT its image and (optional) Grad-CAM overlay.
+
+        Returns (sent, fatal). The overlay is uploaded AFTER the image because the
+        backend rejects a heatmap for a detection that has no frame yet (409); by
+        then the row exists, so a heatmap failure is a pure log-and-drop.
+        """
         url = "{0}/api/detections".format(self.base_url)
 
         for attempt in range(1, self.max_attempts + 1):
@@ -324,6 +337,8 @@ class BackendUplink(object):
                 self.stats.sent += 1
                 if image and self.send_images:
                     self._send_image(resp, image)
+                if gradcam and self.send_images:
+                    self._send_gradcam(resp, gradcam)
                 return True, False
 
             # 5xx or anything else: retry, then spool.
@@ -363,6 +378,36 @@ class BackendUplink(object):
                       .format(detection_id, resp.status_code), file=sys.stderr)
         except Exception as exc:            # noqa: BLE001
             print("[uplink] image upload for detection {0} failed: {1}"
+                  .format(detection_id, exc), file=sys.stderr)
+
+    def _send_gradcam(self, detection_response, heat: bytes) -> None:
+        """Attach a Grad-CAM overlay. Best-effort, exactly like the frame.
+
+        The heatmap is computed off-device (a laptop with pytorch-grad-cam), so on
+        a Nano run there simply is no overlay and this is never called. When it is,
+        a failure is logged and dropped: the detection row and its frame already
+        landed, and a missing explainability image must never cost the record or
+        trigger a metadata re-send. The backend returns 409 if the detection has no
+        image yet, which is why _send calls this after _send_image.
+        """
+        try:
+            detection_id = detection_response.json()["id"]
+        except Exception:                   # noqa: BLE001
+            return
+
+        url = "{0}/api/detections/{1}/gradcam".format(self.base_url, detection_id)
+        try:
+            resp = self._session.put(
+                url,
+                files={"heatmap": ("gradcam.jpg", heat, "image/jpeg")},
+                timeout=self.timeout_s * 3,
+                verify=self.verify_tls,
+            )
+            if not (200 <= resp.status_code < 300):
+                print("[uplink] gradcam upload for detection {0} returned HTTP {1}"
+                      .format(detection_id, resp.status_code), file=sys.stderr)
+        except Exception as exc:            # noqa: BLE001
+            print("[uplink] gradcam upload for detection {0} failed: {1}"
                   .format(detection_id, exc), file=sys.stderr)
 
     def _spool(self, record: Dict, image: Optional[bytes]) -> None:

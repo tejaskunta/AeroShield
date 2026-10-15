@@ -64,8 +64,8 @@ recovered - if it is lost, revoke it and mint another.
 
 | Scope | Grants |
 |---|---|
-| `drone:ingest` | POST detections, PUT detection images |
-| `detections:read` | Read detections, missions, stats, images, GeoJSON |
+| `drone:ingest` | POST detections, PUT detection images and Grad-CAM overlays |
+| `detections:read` | Read detections, missions, stats, images, GeoJSON. Also reviews, copilot queries, and report generation/download |
 | `missions:write` | Create and update missions |
 | `admin` | Manage API keys, delete detections. **Implies every other scope.** |
 
@@ -103,8 +103,11 @@ in without touching a single route.
 | GET | `/api/detections` | `detections:read` |
 | GET | `/api/detections/geojson` | `detections:read` |
 | GET | `/api/detections/{id}` | `detections:read` |
+| PATCH | `/api/detections/{id}/review` | `detections:read` |
 | PUT | `/api/detections/{id}/image` | `drone:ingest` |
 | GET | `/api/detections/{id}/image` | `detections:read` |
+| PUT | `/api/detections/{id}/gradcam` | `drone:ingest` |
+| GET | `/api/detections/{id}/gradcam` | `detections:read` |
 | DELETE | `/api/detections/{id}` | `admin` |
 
 **Ingest is idempotent on `client_detection_id`.** A replay returns `200` with
@@ -134,6 +137,90 @@ flight.
 `near` radius is **metres**, because the column is `geography(POINT, 4326)` and not
 `geometry`. With geometry the same number would mean *degrees* and silently match
 half the planet - a bug the test suite pins down explicitly.
+
+### Review (PRD 5.1)
+
+`PATCH /api/detections/{id}/review` records a human decision about one detection -
+the step that turns model output into evidence.
+
+```json
+{ "state": "confirmed", "reason": "visible AP blast marker" }
+```
+
+`state` is one of `unreviewed` / `confirmed` / `dismissed` / `flagged`; anything else
+is a 422, because a typo must not store a bogus verdict. The response is the full
+detection read, with `reviewed_by` and `reviewed_at` **stamped server-side** from the
+authenticated principal and the server clock. A client that could name its own
+reviewer would make the audit trail decorative.
+
+Two scope choices are deliberate:
+
+- **`detections:read`, not `drone:ingest`** - adjudication is a dashboard action. The
+  drone key cannot mark its own detections confirmed, which is the difference between
+  a review and a self-assessment.
+- **`unreviewed` is a state, not a null** - absence of a decision is itself a decision
+  state, and the mission report tallies it as such.
+
+### Grad-CAM overlays (PRD 5.1)
+
+`PUT /api/detections/{id}/gradcam` (drone key) stores the explainability heatmap;
+`GET` (dashboard key) serves it back. The server never computes one - pytorch-grad-cam
+runs on the laptop or training PC that holds the weights, and the overlay rides the
+uplink beside the frame it explains.
+
+The upload order is enforced, not assumed: **a heatmap without its frame is a 409**.
+The overlay is meaningless without the pixels it was computed over, and the dashboard's
+wipe slider is built from exactly those two layers. `jetson/uplink.py` therefore
+uploads the frame first and the heatmap second. Like the frame, the overlay is
+idempotent - re-running the analysis replaces it.
+
+### Copilot (PRD 5.1)
+
+| Method | Path | Scope |
+|---|---|---|
+| POST | `/api/copilot/query` | `detections:read` |
+
+`{"question": "What standoff for a suspected metal mine?"}` returns
+`{"text", "citations", "grounded", "engine"}` - the same shape as the frontend's
+`CopilotMessage`, so the UI swap is body-only.
+
+The pipeline: retrieve passages from the standards corpus (Chroma when installed, a
+deterministic lexical scorer over the same chunks when not) -> if nothing clears the
+relevance floor, **refuse** (`grounded: false`, `engine: "ungrounded"`, an explicit
+"consult your field manual" reply) -> otherwise compose with Groq if a key is set,
+or stitch the retrieved passages extractively if not. A Groq answer is
+string-similarity-checked against its own sources and discarded if it drifted - the
+model composes, retrieval decides, and the guardrail can overrule the model.
+
+`engine` (`"groq"` / `"extractive"` / `"ungrounded"`) reports which path ran, so a
+demo can never accidentally claim a premium path it did not use.
+
+### Mission reports (PRD 5.1)
+
+| Method | Path | Scope |
+|---|---|---|
+| GET | `/api/reports` | `detections:read` |
+| POST | `/api/reports` | `detections:read` |
+| GET | `/api/reports/{report_id}/document` | `detections:read` |
+
+`POST` takes `{"mission_id": 12, "mark_final": false, "area_surveyed_m2": null,
+"coverage_pct": null}` and returns the report: headline tallies from the review
+states, the detection register (capped at 250 rows, said so when truncated), and a
+narrative written by Groq or by a deterministic template that cannot invent a number
+(`engine` says which). The document is a real PDF when WeasyPrint is importable and
+styled HTML when it is not (`renderer` says which) - the classroom machine has neither
+a key nor WeasyPrint, and still produces a complete, downloadable report.
+
+Reports are **files, not rows**: a self-describing pair (`RPT-....json` sidecar +
+document) under `storage/reports/`. `area_surveyed_m2`/`coverage_pct` belong to the
+survey plan, which lives on the ground station - the API passes them through and
+stores `null` when absent, never a fabricated zero. `generated_by` comes from the
+credential. The `report_id` arrives from a URL, so document download applies the same
+path-traversal containment as the image endpoints.
+
+Generating is deliberately `detections:read` rather than a write scope: a report
+changes nothing in the database, and requiring `missions:write` would stop the plain
+dashboard key from producing the artifact it exists for.
 
 ### Missions
 
@@ -211,6 +298,7 @@ Gulf of Guinea. Use `GET /api/missions/{id}/stats` to see the
 | 401 | Missing, unknown or revoked API key |
 | 403 | Valid key without the required scope. The message names the scopes the key *does* have. |
 | 404 | No such detection/mission, or an image that was never uploaded |
+| 409 | Grad-CAM heatmap uploaded for a detection that has no frame yet — upload the image first (`PUT /api/detections/{id}/image`), then the overlay |
 | 413 | Image over `AEROSHIELD_MAX_IMAGE_MB` |
 | 422 | Schema validation failure - inverted bbox, out-of-range confidence, one-sided coordinates, naive timestamp, malformed `near` |
 

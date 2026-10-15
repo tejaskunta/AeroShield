@@ -114,6 +114,11 @@ class Detection(Base):
     # Path relative to the storage root, not an absolute path: absolute paths break
     # the moment the app moves into a container with a different mount point.
     image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # The Grad-CAM heatmap for this frame, same relative-path convention. Produced on
+    # the edge device (pytorch-grad-cam over weights/best.pt), never on the server:
+    # the server has no GPU and no model. Null when the frame went through the fast
+    # uplink path without the explainability pass.
+    gradcam_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     frame_width: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     frame_height: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
@@ -123,6 +128,24 @@ class Detection(Base):
     # retrain, and to explain a sudden change in false-positive rate.
     model_version: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # --- human review (PRD 5.1: detections are adjudicated, not auto-trusted) --
+    # Nullable rather than defaulted to 'unreviewed' in the DB: a detection that has
+    # never been looked at has a NULL review_state, and "NULL" vs "explicitly marked
+    # unreviewed" are the same for now but not necessarily once an auditor asks who
+    # touched what. The repository presents NULL as 'unreviewed'.
+    #
+    # Stored on the detection rather than a separate review table: one decision per
+    # detection is the whole workflow (state + reason + who + when), and a second
+    # table for a single-row-per-detection fact is a join for no benefit. If a review
+    # HISTORY is ever needed (who changed their mind, when), that is a new append-only
+    # table, not a mutation of these columns.
+    review_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    review_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # --- time -------------------------------------------------------------
     # captured_at is when the frame was taken (drone clock); created_at is when the
@@ -150,6 +173,14 @@ class Detection(Base):
         CheckConstraint(
             "(latitude IS NULL) = (longitude IS NULL)",
             name="latlon_both_or_neither",
+        ),
+        # A review state is one of four values or absent (NULL = never reviewed).
+        # Enumerated in the DB so a buggy client cannot store "maybe" and have the
+        # dashboard's risk colouring silently fall through to a default.
+        CheckConstraint(
+            "review_state IS NULL OR review_state IN "
+            "('unreviewed', 'confirmed', 'dismissed', 'flagged')",
+            name="review_state_valid",
         ),
 
         # PostGIS proximity queries (PRD section 7). Without GiST, ST_DWithin is a

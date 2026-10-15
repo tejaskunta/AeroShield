@@ -6,7 +6,7 @@ allowed to set them - if they can only be written together, they cannot drift ap
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Sequence, Tuple
 from uuid import UUID
 
@@ -181,6 +181,65 @@ async def attach_image(db: AsyncSession, detection: Detection, relative_path: st
     return detection
 
 
+async def attach_gradcam(db: AsyncSession, detection: Detection,
+                         relative_path: str) -> Detection:
+    """Record the Grad-CAM heatmap's path against a detection.
+
+    Same idempotent overwrite semantics as attach_image: re-running the
+    explainability pass for a frame replaces the previous heatmap rather than
+    accumulating versions. The model_version on the row tells you which weights an
+    overlay came from.
+    """
+    detection.gradcam_path = relative_path
+    await db.commit()
+    await db.refresh(detection)
+    return detection
+
+
+async def set_review(db: AsyncSession, detection: Detection, state: str,
+                     reason: Optional[str], reviewed_by: str) -> Detection:
+    """Apply a human adjudication to a detection (PRD 5.1 review workflow).
+
+    The timestamp is taken here, server-side, at write time - not from the client.
+    An audit trail whose times come from the party being audited is not a trail.
+    `reviewed_by` is the caller's API-key name, injected by the endpoint from the
+    authenticated Principal for the same reason.
+    """
+    detection.review_state = state
+    detection.review_reason = reason
+    detection.reviewed_by = reviewed_by
+    detection.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(detection)
+    return detection
+
+
+async def review_tallies(db: AsyncSession,
+                         mission_id: Optional[int]) -> "dict[str, int]":
+    """Count a mission's detections by review state, for the report's headline row.
+
+    COALESCE maps NULL (never reviewed) to 'unreviewed' so the four states the report
+    and dashboard understand are all present, and the caller never has to know that
+    the database stores the default as NULL. A mission with no detections returns all
+    zeros rather than an empty dict, so the report template can index every key.
+    """
+    state = func.coalesce(Detection.review_state, "unreviewed")
+    query = (
+        select(state.label("state"), func.count(Detection.id))
+        .group_by("state")
+    )
+    if mission_id is not None:
+        query = query.where(Detection.mission_id == mission_id)
+
+    rows = (await db.execute(query)).all()
+    tallies = {"total": 0, "confirmed": 0, "dismissed": 0, "flagged": 0, "unreviewed": 0}
+    for name, count in rows:
+        tallies["total"] += count
+        if name in tallies:
+            tallies[name] = count
+    return tallies
+
+
 async def delete(db: AsyncSession, detection: Detection) -> None:
     """Remove a detection row. The caller deletes the image file."""
     await db.delete(detection)
@@ -222,6 +281,16 @@ async def to_geojson(detections: Sequence[Detection]) -> GeoJSONFeatureCollectio
                     "image_url": (
                         "/api/detections/{0}/image".format(detection.id)
                         if detection.image_path else None
+                    ),
+                    # The map colours markers by review state (confirmed = red,
+                    # dismissed = grey, etc.), so the risk picture reflects human
+                    # adjudication, not raw model output. NULL (never reviewed) is
+                    # presented as 'unreviewed' to match the read schema.
+                    "review_state": detection.review_state or "unreviewed",
+                    "has_gradcam": detection.gradcam_path is not None,
+                    "gradcam_url": (
+                        "/api/detections/{0}/gradcam".format(detection.id)
+                        if detection.gradcam_path else None
                     ),
                 },
             )

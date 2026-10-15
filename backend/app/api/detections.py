@@ -36,6 +36,7 @@ from app.schemas.detection_io import (
     DetectionIngestResult,
     DetectionRead,
     GeoJSONFeatureCollection,
+    ReviewPatch,
 )
 from app.services import detection_repository, mission_service, storage
 
@@ -331,6 +332,130 @@ async def get_detection_image(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Image file for detection {0} is recorded but missing from "
+                   "storage.".format(detection_id),
+        )
+
+    media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(path, media_type=media_type)
+
+
+@router.patch(
+    "/{detection_id}/review",
+    response_model=DetectionRead,
+    summary="Adjudicate a detection (confirm / dismiss / flag)",
+)
+async def review_detection(
+    detection_id: int,
+    payload: ReviewPatch,
+    db: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(require_scope(SCOPE_DETECTIONS_READ)),
+) -> DetectionRead:
+    """Record a human decision about one detection (PRD 5.1).
+
+    The review workflow is what turns model output into evidence: a confirmed
+    detection feeds the mission report and the safe-path planner's hazard field; a
+    dismissed one stops inflating the risk map. `detections:read` is the right scope
+    because adjudication is a dashboard action, not an ingest action - the drone key
+    deliberately cannot mark its own detections confirmed.
+
+    reviewed_by and reviewed_at are stamped server-side from the authenticated
+    principal and the server clock. A client-supplied reviewer name would make the
+    audit trail decorative.
+    """
+    detection = await detection_repository.get(db, detection_id)
+    if detection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No detection with id {0}".format(detection_id),
+        )
+
+    updated = await detection_repository.set_review(
+        db, detection,
+        state=payload.state,
+        reason=payload.reason,
+        reviewed_by=principal.name,
+    )
+    logger.info("detection %s reviewed: %s by %s",
+                detection_id, payload.state, principal.name)
+    return DetectionRead.model_validate(updated)
+
+
+@router.put(
+    "/{detection_id}/gradcam",
+    response_model=DetectionRead,
+    summary="Attach the Grad-CAM heatmap for a detection",
+)
+async def upload_gradcam(
+    detection_id: int,
+    heatmap: UploadFile = File(
+        ..., description="Grad-CAM overlay for the detection's frame, JPEG or PNG"
+    ),
+    db: AsyncSession = Depends(get_db),
+    _: Principal = Depends(require_scope(SCOPE_DRONE_INGEST)),
+) -> DetectionRead:
+    """Store the explainability overlay produced on the edge device.
+
+    The Jetson (or the training laptop running the batch explainability pass)
+    computes the heatmap with pytorch-grad-cam over the same weights that made the
+    detection, then uploads it here. The server never runs the model - PRD 2.2 keeps
+    inference off it - so this endpoint is a file sink with a scope check, not a
+    compute endpoint.
+
+    Idempotent like the frame upload: re-running the analysis replaces the overlay.
+    """
+    detection = await detection_repository.get(db, detection_id)
+    if detection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No detection with id {0}. POST the detection before its heatmap."
+                   .format(detection_id),
+        )
+    if not detection.image_path:
+        # A heatmap of nothing is unexplainable later. The frame must exist so the
+        # dashboard's wipe slider has the two layers it is built from.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Detection {0} has no frame image. Upload the source frame first; "
+                   "the heatmap is meaningless without the pixels it explains."
+                   .format(detection_id),
+        )
+
+    data = await heatmap.read()
+    relative_path = storage.save_gradcam(
+        data, detection_id=detection.id, mission_id=detection.mission_id
+    )
+    updated = await detection_repository.attach_gradcam(db, detection, relative_path)
+    return DetectionRead.model_validate(updated)
+
+
+@router.get("/{detection_id}/gradcam", summary="Fetch the stored Grad-CAM heatmap")
+async def get_gradcam(
+    detection_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: Principal = Depends(require_scope(SCOPE_DETECTIONS_READ)),
+) -> FileResponse:
+    """Serve the heatmap overlay. Same rules as the frame: scoped, storage-backed."""
+    detection = await detection_repository.get(db, detection_id)
+    if detection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No detection with id {0}".format(detection_id),
+        )
+    if not detection.gradcam_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Detection {0} has no Grad-CAM overlay. The frame may have gone "
+                   "through the fast uplink path without the explainability pass."
+                   .format(detection_id),
+        )
+
+    path = storage.resolve_image_path(detection.gradcam_path)
+    if path is None:
+        logger.error("detection %s references missing heatmap %s",
+                     detection_id, detection.gradcam_path)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Grad-CAM file for detection {0} is recorded but missing from "
                    "storage.".format(detection_id),
         )
 

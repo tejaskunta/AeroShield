@@ -12,9 +12,11 @@ import { Composer, Conversation, CitationsRail } from '@/components/copilot/Conv
  * is worse than no answer, so the design refuses to let prose appear without its
  * sources visible beside it — and marks any answer that has none.
  *
- * The corpus is a fixture and the "retrieval" is keyword overlap. That is stated on
- * the rail and in the empty state rather than dressed up, because a copilot that
- * looks more capable than it is would be the most dangerous thing in this app.
+ * With a dashboard key set, answers come from the backend's RAG pipeline (Chroma
+ * retrieval, Groq or extractive summariser). Without one, `askCopilot` falls back
+ * to a keyword-overlap fixture corpus — and that fallback is stated on the rail
+ * and in the empty state rather than dressed up, because a copilot that looks
+ * more capable than it is would be the most dangerous thing in this app.
  */
 export function SafetyCopilot() {
   const [messages, setMessages] = useState<CopilotMessage[]>([COPILOT_INTRO])

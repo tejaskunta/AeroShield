@@ -89,9 +89,17 @@ async def client(db, tmp_path) -> AsyncGenerator[AsyncClient, None]:
     admin key.
 
     Storage is redirected into tmp_path so image tests do not litter backend/storage.
+
+    Reports are redirected too, and it has to be explicit: `reports_dir` defaults to
+    "storage/reports" resolved against the BACKEND ROOT, not against `storage_dir`, so
+    overriding storage_dir alone would still let a report test write into the real
+    tree. Both are absolute paths under tmp_path, so every generated artifact lands in
+    the per-test directory pytest reclaims.
     """
     original_storage = settings.storage_dir
+    original_reports = settings.reports_dir
     settings.storage_dir = str(tmp_path / "storage")
+    settings.reports_dir = str(tmp_path / "storage" / "reports")
 
     async def _override_get_db():
         yield db
@@ -104,6 +112,7 @@ async def client(db, tmp_path) -> AsyncGenerator[AsyncClient, None]:
 
     app.dependency_overrides.clear()
     settings.storage_dir = original_storage
+    settings.reports_dir = original_reports
 
 
 async def _make_key(db: AsyncSession, name: str, scopes) -> str:

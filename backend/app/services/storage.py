@@ -79,13 +79,30 @@ def save_detection_image(data: bytes, detection_id: int,
     idempotent: re-uploading the image for the same detection overwrites in place
     rather than accumulating copies.
     """
+    return _save_image(data, detection_id, mission_id, suffix="")
+
+
+def save_gradcam(data: bytes, detection_id: int,
+                 mission_id: Optional[int] = None) -> str:
+    """Write one Grad-CAM heatmap, beside the frame it explains.
+
+    Same storage rules as the frame (relative path, idempotent, atomic write), with a
+    '-gradcam' filename suffix so the two artifacts for a detection sit in the same
+    mission directory and are distinguishable in a listing.
+    """
+    return _save_image(data, detection_id, mission_id, suffix="-gradcam")
+
+
+def _save_image(data: bytes, detection_id: int,
+                mission_id: Optional[int], suffix: str) -> str:
+    """Shared write path for frames and heatmaps. See the two callers."""
     extension = validate_image(data)
 
     subdir = "mission-{0}".format(mission_id) if mission_id else "unassigned"
     directory = _storage_root() / subdir
     directory.mkdir(parents=True, exist_ok=True)
 
-    filename = "detection-{0}.{1}".format(detection_id, extension)
+    filename = "detection-{0}{1}.{2}".format(detection_id, suffix, extension)
     path = directory / filename
 
     # Write to a temporary name then rename. An interrupted upload must not leave a
