@@ -50,7 +50,7 @@ The system is intentionally built around an operator interface rather than a raw
 ```text
 AeroShield Project/
 ├── README.md
-├── README_BACKEND_GUIDE.md
+├── docs/README_BACKEND_GUIDE.md
 ├── requirements.txt
 ├── week3_train_yolov8.py
 ├── backend/
@@ -220,7 +220,7 @@ The current project is simulation-led and operator-first. That means the interfa
 
 Additional documentation in the repo:
 
-- [README_BACKEND_GUIDE.md](README_BACKEND_GUIDE.md) — backend-focused setup and API notes
+- [README_BACKEND_GUIDE.md](docs/README_BACKEND_GUIDE.md) — backend-focused setup and API notes
 - [docs/TRAINING_NOTES.md](docs/TRAINING_NOTES.md) — training and dataset notes for the model-oriented part of the project
 - [docs/REVIEW_GUIDE.md](docs/REVIEW_GUIDE.md) — presentation path, training parameters, TensorRT explanation, demo command, and folder priorities
 - [jetson/README.md](jetson/README.md) — Jetson-side deployment notes

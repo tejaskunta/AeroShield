@@ -2,7 +2,7 @@
 
 A one-page set of questions a reviewer can ask, with the repo's actual answers.
 Every figure here is **verified from artifacts in this workspace** — from
-`model_archive/runs/detect/runs/detect/landmine_yolov8m_75ep/` and its
+`model_archive/runs/landmine_yolov8m_75ep/` and its
 `logs/train_resume.log` — not from memory.
 
 The one thing this sheet cannot answer is the split-leakage question; see
@@ -98,7 +98,7 @@ writes `runs/detect/<name>_val|_test/` curves, and writes a
 
 | Path | Contents |
 |---|---|
-| `runs/detect/run/weights/best.pt` + `best.onnx` | Training output (the canonical copy, from the real run: `model_archive/runs/detect/runs/detect/landmine_yolov8m_75ep/weights/`) |
+| `runs/detect/run/weights/best.pt` + `best.onnx` | Training output (the canonical copy, from the real run: `model_archive/runs/landmine_yolov8m_75ep/weights/`) |
 | `weights/best.pt`, `weights/best.onnx` | Stable copies copied by the script (byte-identical, gitignored) |
 | `weights/README.txt` | Note that `.pt`/`.onnx` are > 100 MB and excluded from git |
 | `model_archive/` | A **second, duplicate** copy of the same artifacts + logs (the folder the training was actually run from on Windows) |
