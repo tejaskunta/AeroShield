@@ -80,22 +80,19 @@ class TrtYolo:
         """Letterbox to target_shape (default: the engine's input size),
         BGR->RGB, normalise 0-1, return NCHW blob + rescale metadata.
 
-        320x320 is ~4x fewer MACs than 640x640 and still resolves a mine-sized
-        object at 30 m AGL with a typical 60-deg HFOV camera.  Use 416x416 if
-        detail loss is visible at the deployment altitude.
+        Default engine shape is 512x288 (exact 16:9, ~36% of 640x640 pixels).
+        Re-export the existing weights with no retraining, then rebuild.
         """
         in_h, in_w = target_shape or (self.in_h, self.in_w)
         h, w = img.shape[:2]
         r = min(in_h / h, in_w / w)
         nw, nh = int(round(w * r)), int(round(h * r))
         resized = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LINEAR)
-
-        canvas = np.full((in_h, in_w, 3), 114, dtype=np.uint8)
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        blob = np.empty((1, 3, in_h, in_w), dtype=np.float32)
+        blob.fill(114.0 / 255.0)
         dw, dh = (in_w - nw) // 2, (in_h - nh) // 2
-        canvas[dh:dh + nh, dw:dw + nw] = resized
-
-        blob = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-        blob = np.transpose(blob, (2, 0, 1))[None]     # HWC -> NCHW
+        blob[0, :, dh:dh + nh, dw:dw + nw] = np.transpose(rgb, (2, 0, 1))
         return np.ascontiguousarray(blob), r, dw, dh
 
     def infer(self, blob: np.ndarray) -> np.ndarray:

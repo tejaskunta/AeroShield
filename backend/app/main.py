@@ -9,9 +9,11 @@ assembles the application: metadata, middleware, lifespan.
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from app.api import api_router
 from app.core.config import settings
@@ -22,6 +24,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
 )
 logger = logging.getLogger("aeroshield")
+
+DASHBOARD_HTML = Path(__file__).resolve().parent / "static" / "dashboard.html"
 
 DESCRIPTION = """
 Backend API for **AeroShield** - AI-assisted drone landmine detection and mapping.
@@ -186,3 +190,12 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+
+
+@app.get("/ui", include_in_schema=False, response_class=HTMLResponse)
+async def dashboard() -> HTMLResponse:
+    """Single-page detections dashboard. Static HTML; the API key is entered in the page.
+
+    `/` stays the JSON liveness payload that scripts depend on.
+    """
+    return HTMLResponse(DASHBOARD_HTML.read_text(encoding="utf-8"))

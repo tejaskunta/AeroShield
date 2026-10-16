@@ -147,6 +147,67 @@ down or drop to `yolov8n`.
 
 ---
 
+## Decoupled capture and inference — 30 FPS video
+
+By default `live_detect.py` does one `cap.read()` per `detect()` call, so **the
+video frame rate IS the detection rate**. At 640 that is ~1.2 FPS: the preview
+crawls, and no amount of engine tuning fixes it, because the loop is serial.
+
+`--decoupled` splits the work across two threads (`pipeline.py`):
+
+| Thread | Job | Rate |
+|---|---|---|
+| A — capture | `cap.read()`, draw, publish to MJPEG, write logs | camera rate (~28–30 FPS) |
+| B — inference | `detector.detect()` on the newest frame only | detection rate (~4–6 FPS with the rect engine) |
+
+Every shared slot is **depth 1**. Thread A overwrites the frame slot on every
+read and thread B always takes the newest frame, so the pipeline **drops frames
+instead of queueing** — lag cannot accumulate no matter how slow inference gets.
+
+```bash
+# Smooth ~30 FPS preview, boxes refreshed at the detection rate
+make stream DECOUPLED=1
+
+# Same, with a longer box lifetime after the last real detection
+make stream DECOUPLED=1 BOX_HOLD=3.0
+```
+
+Two things are worth being precise about:
+
+**Boxes are redrawn, not re-measured.** A box persists for `--box-hold` seconds
+after its last real detection (default 1.5 s) and is drawn on every captured
+frame. So you see smooth video with boxes that jump to a new position ~4–6 times
+a second. Boxes are *refreshed* at the detection rate; the video is at 30 FPS.
+
+**Only measured detections are uploaded.** Thread B is the sole producer of
+uplink records. A persisted box — one merely redrawn from an older frame — can
+never reach the backend as if it had been measured on the current frame. This
+matters: a stale box uploaded with a fresh GPS fix would silently corrupt the
+geotagged ground-truth log the whole project depends on.
+
+Note `--box-hold` is a **time window**, unlike the serial path's 5-frame counter.
+At 30 FPS, 5 frames is 0.16 s, which expires long before the next detection
+arrives ~0.25 s later — the boxes would flicker.
+
+### Proving it without a GPU
+
+`MockDetector` takes a `--mock-delay`, which makes every `detect()` call cost a
+fixed amount of wall-clock time. Set it to the real engine's latency and the
+CPU-only mock reproduces the exact load the pipeline will see:
+
+```bash
+# Simulate the 640 engine's 690 ms latency: capture must stay at ~28 FPS
+live_detect.py --detector mock --mock-delay 0.69 --mock-every-n 3 \
+    --decoupled --max-frames 400 --no-uplink --headless
+```
+
+Measured on the Nano with this exact command: **28.1 FPS capture over 400
+frames while each inference took 691 ms.** The serial loop would have managed
+~1.2 FPS. This needs no GPU, no model and no engine, so it is the fastest way to
+check the threading is intact after a change.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |

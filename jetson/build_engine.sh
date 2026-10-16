@@ -5,9 +5,15 @@
 # against one specific GPU architecture and TensorRT version; an engine built on
 # an RTX 4070 will refuse to load on the Nano's Maxwell GPU.
 #
-#   scp weights/best.onnx  <user>@<nano-ip>:~/safemine/
+#   scp weights/best.onnx  <user>@<nano-ip>:~/aeroshield/
 #   ssh <user>@<nano-ip>
-#   cd ~/safemine && bash build_engine.sh best.onnx
+#   cd ~/aeroshield && bash build_engine.sh best.onnx
+#
+# Rectangular engines: export at 512x288 first, then build from that ONNX.
+#   bash build_engine.sh weights/best_512x288.onnx weights/best_512x288.engine
+# FP16_IO=1 adds --inputIOFormats/--outputIOFormats fp16:chw. Build both ways
+# and keep the faster engine:
+#   FP16_IO=1 bash build_engine.sh weights/best_512x288.onnx weights/best_512x288_fp16io.engine
 #
 # Expect this to take 5-20 minutes. That is normal - TensorRT is benchmarking
 # every kernel it might use. It is not hung.
@@ -26,7 +32,7 @@ echo "=============================================================="
 if [[ ! -f "$ONNX" ]]; then
   echo "ERROR: $ONNX not found in $(pwd)" >&2
   echo "       Copy it from the training PC first:" >&2
-  echo "       scp weights/best.onnx <user>@<nano-ip>:~/safemine/" >&2
+  echo "       scp weights/best.onnx <user>@<nano-ip>:~/aeroshield/" >&2
   exit 1
 fi
 
@@ -56,12 +62,21 @@ echo
 
 # --fp16    : Maxwell has no INT8 tensor cores worth using, but FP16 roughly
 #             doubles throughput at negligible accuracy cost. Always use it here.
+#             INT8 is deliberately not offered: no FPS gain on Nano, worse mAP.
 # --workspace: scratch memory in MB. The Nano has 4 GB shared with the OS, so
 #             2048 is about the ceiling. Drop to 1024 if the build OOMs.
+# FP16_IO=1 : also try --inputIOFormats/--outputIOFormats fp16. Sometimes helps
+#             by skipping FP32 casts; sometimes hurts on Maxwell. Rebuild both
+#             ways and keep the faster engine (compare trtexec ms).
+EXTRA_FLAGS=""
+if [[ "${FP16_IO:-0}" == "1" ]]; then
+  EXTRA_FLAGS="--inputIOFormats=fp16:chw --outputIOFormats=fp16:chw"
+fi
 "$TRTEXEC" \
   --onnx="$ONNX" \
   --saveEngine="$ENGINE" \
   --fp16 \
+  $EXTRA_FLAGS \
   --workspace="$WORKSPACE_MB" \
   --verbose 2>&1 | tee build_engine.log
 
@@ -72,10 +87,15 @@ if [[ -f "$ENGINE" ]]; then
   echo "=============================================================="
   echo
   echo "Benchmark it:"
-  echo "  $TRTEXEC --loadEngine=$ENGINE --fp16"
+  echo "  $TRTEXEC --loadEngine=$ENGINE --fp16 --iterations=100 --avgRuns=10"
   echo
-  echo "Run live inference:"
-  echo "  python3 infer_trt.py --engine $ENGINE --source 0"
+  echo "Run live inference (from the repo root on the PC):"
+  echo "  make run ENGINE=weights/$(basename "$ENGINE")"
+  echo
+  echo "Or directly on the Nano (needs the OpenCV PYTHONPATH):"
+  echo "  PYTHONPATH=/usr/lib/python3.6/dist-packages/cv2/python-3.6:/usr/lib/python3/dist-packages \\"
+  echo "    /usr/bin/python3.6 live_detect.py --detector trt --engine weights/$(basename "$ENGINE") \\"
+  echo "    --gps sim --source csi --names landmine --headless"
 else
   echo "BUILD FAILED - see build_engine.log" >&2
   echo

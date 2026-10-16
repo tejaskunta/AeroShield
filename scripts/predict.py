@@ -21,15 +21,51 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def parse_imgsz(tokens):
+    """Parse --imgsz into an int or an (h, w) list for ultralytics.
+
+    Accepts the same forms as export_onnx.py / live_detect.py / detector.py so a
+    single spelling works everywhere:
+        640          -> 640
+        "288 512"    -> [288, 512]   ([H W])
+        "512x288"    -> [288, 512]   (WxH, flipped - models are H-first)
+    """
+    if isinstance(tokens, int):
+        return tokens
+    if not isinstance(tokens, (list, tuple)):
+        tokens = [tokens]
+
+    dims = []
+    for tok in tokens:
+        for part in str(tok).replace("x", " ").split():
+            try:
+                dims.append(int(part))
+            except ValueError:
+                print(f"ERROR: --imgsz must be ints, got {tokens}")
+                raise SystemExit(2)
+
+    if len(dims) == 1:
+        return dims[0]
+    if len(dims) == 2:
+        # "512x288" is written W x H by humans; pass H, W to ultralytics.
+        if "x" in "".join(str(t) for t in tokens):
+            return [dims[1], dims[0]]
+        return dims
+    print(f"ERROR: --imgsz takes 1 or 2 ints, got {tokens}")
+    raise SystemExit(2)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Run SafeMine inference and save annotated images.")
     ap.add_argument("--weights", default="weights/best.pt",
-                    help="Absolute or repo-relative path to the .pt checkpoint")
+                    help="Absolute or repo-relative path to the .pt checkpoint or .onnx export")
     ap.add_argument("--source", required=True,
                     help="Folder of images, a single image, or a video file")
     ap.add_argument("--conf", type=float, default=0.25,
                     help="Detection threshold. Lower = more recalls, higher = fewer false positives")
-    ap.add_argument("--imgsz", type=int, default=640)
+    ap.add_argument("--imgsz", nargs="+", default=["640"],
+                    help="640, '288 512' ([H W]) or '512x288' (WxH). Ignored for .onnx "
+                         "exports built at a fixed shape - the file's shape wins.")
     ap.add_argument("--device", default="0")
     ap.add_argument("--project", default="runs/predict",
                     help="Directory to write the annotated images into")
@@ -58,9 +94,12 @@ def main() -> int:
     print(f"Source        : {src}")
     print(f"Confidence    : {args.conf}")
 
+    imgsz = parse_imgsz(args.imgsz)
+    print(f"Image size    : {imgsz}")
+
     results = model.predict(
         source=src,
-        imgsz=args.imgsz,
+        imgsz=imgsz,
         conf=args.conf,
         device=args.device,
         project=args.project,

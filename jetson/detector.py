@@ -200,21 +200,34 @@ class MockDetector(Detector):
 
     Emits one box every `every_n` frames, drifting across the frame so successive
     detections land on different coordinates instead of stacking on one point.
+
+    `delay_s` makes detect() take a fixed amount of wall-clock time, which is
+    what you need to test the decoupled pipeline: a mock that returns instantly
+    never applies back-pressure, so a threading bug cannot show up. Set it to
+    the real engine's latency (e.g. 0.17 for the rect engine, 0.69 for 640) to
+    reproduce on the CPU, with no GPU and no model, exactly the load the
+    pipeline will see on the Nano.
     """
 
     name = "mock"
 
     def __init__(self, every_n: int = 15, confidence: float = 0.87,
                  class_id: int = 0, names: Optional[Sequence[str]] = None,
-                 box_size: int = 90) -> None:
+                 box_size: int = 90, delay_s: float = 0.0) -> None:
         self.every_n = max(1, every_n)
         self.confidence = confidence
         self.class_id = class_id
         self.names = names or ["landmine_metal", "landmine_plastic", "debris_negative"]
         self.box_size = box_size
+        self.delay_s = max(0.0, float(delay_s))
         self._frame_no = 0
 
     def detect(self, frame) -> List[Detection]:
+        # Sleep BEFORE the every_n gate so the cost is paid on every call, the
+        # way real inference is, not only on frames that happen to emit a box.
+        if self.delay_s:
+            time.sleep(self.delay_s)
+
         self._frame_no += 1
         if self._frame_no % self.every_n != 0:
             return []
@@ -264,8 +277,20 @@ class OnnxDetector(Detector):
             )
         self.conf = conf
         self.iou = iou
-        # Must match the export size: YOLOv8 ONNX exports hardcode the output grid sizes (80x80 etc).
-        self.imgsz = imgsz
+        # Must match the export size. Accepts 640, [288, 512] ([H W]),
+        # or "512x288" (WxH, flipped). 512x288 landscape is the Jetson
+        # default (exact 16:9, ~36% of 640x640 pixels).
+        if isinstance(imgsz, (list, tuple)):
+            self.in_h, self.in_w = int(imgsz[0]), int(imgsz[1])
+        elif isinstance(imgsz, str) and ("x" in imgsz.lower() or " " in imgsz):
+            s = imgsz.lower()
+            flip = "x" in s
+            parts = s.replace("x", " ").split()
+            a, b = int(parts[0]), int(parts[1])
+            self.in_h, self.in_w = (b, a) if flip else (a, b)
+        else:
+            self.in_h, self.in_w = int(imgsz), int(imgsz)
+        self.imgsz = [self.in_h, self.in_w]
         self.names = names or ["landmine"]
 
     def detect(self, frame) -> List[Detection]:
@@ -274,13 +299,13 @@ class OnnxDetector(Detector):
 
         h, w = frame.shape[:2]
         # Letterbox exactly as TrtYolo.preprocess does, so both backends see the same geometry.
-        s = self.imgsz
-        r = min(s / float(h), s / float(w))
+        in_h, in_w = self.in_h, self.in_w
+        r = min(in_h / float(h), in_w / float(w))
         nw, nh = int(round(w * r)), int(round(h * r))
-        canvas = np.full((s, s, 3), 114, dtype=np.uint8)
-        dw, dh = (s - nw) // 2, (s - nh) // 2
+        canvas = np.full((in_h, in_w, 3), 114, dtype=np.uint8)
+        dw, dh = (in_w - nw) // 2, (in_h - nh) // 2
         canvas[dh:dh + nh, dw:dw + nw] = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
-        blob = cv2.dnn.blobFromImage(canvas, 1.0 / 255.0, (s, s), swapRB=True, crop=False)
+        blob = cv2.dnn.blobFromImage(canvas, 1.0 / 255.0, (in_w, in_h), swapRB=True, crop=False)
         self.net.setInput(blob)
         raw = self.net.forward()
         if len(raw.shape) == 3:
@@ -359,7 +384,8 @@ def make_detector(kind: str, **kwargs) -> Detector:
         return UltralyticsDetector(**{k: v for k, v in kwargs.items() if k in allowed})
 
     if kind == "mock":
-        allowed = ("every_n", "confidence", "class_id", "names", "box_size")
+        allowed = ("every_n", "confidence", "class_id", "names", "box_size",
+                   "delay_s")
         return MockDetector(**{k: v for k, v in kwargs.items() if k in allowed})
 
     raise ValueError("Unknown detector '{0}'. Use trt, onnx, ultralytics or mock.".format(kind))
