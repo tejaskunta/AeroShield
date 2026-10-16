@@ -10,13 +10,16 @@ No cv2, no CUDA, no camera - pipeline.py deliberately imports only the standard
 library so it can be tested anywhere.
 """
 
+import contextlib
+import sys
 import threading
 import time
+import types
 
 import pytest
 
 import pipeline as pipeline_mod
-from pipeline import PipelineStats, Slot, run_threaded
+from pipeline import DetectorThread, PipelineStats, Slot, run_threaded
 
 
 class FakeDet:
@@ -89,6 +92,75 @@ class Recorder(object):
         self.box_counts.append(len(boxes))
         self.fresh_flags.append(fresh)
         self.fps_seen.append(fps)
+
+
+_context_stacks = {}
+
+
+def _stack_for_thread():
+    """One context stack PER THREAD, as CUDA really has.
+
+    A single global stack would be a fiction that hides the bug under test: if
+    DetectorThread forgot to push(), the stack would still be non-empty (because
+    the main thread left something on it) and the test would pass anyway.
+    """
+    key = threading.current_thread().ident
+    return _context_stacks.setdefault(key, [])
+
+
+class FakeContext(object):
+    """Stands in for a pycuda Context, which is current per-THREAD."""
+
+    def __init__(self, owner=None):
+        self.owner = owner
+
+    def push(self):
+        _stack_for_thread().append(self)
+
+    def pop(self):
+        stack = _stack_for_thread()
+        if not stack or stack[-1] is not self:
+            raise AssertionError("pop() without a matching push()")
+        stack.pop()
+
+
+class FakeCudaDriver(object):
+    """Minimal pycuda.driver replacement.
+
+    Exposes Context.get_current as a classmethod because that is the interface
+    _current_cuda_context() actually calls.
+    """
+
+    class Context(object):
+        @classmethod
+        def get_current(cls):  # noqa: N802
+            stack = _stack_for_thread()
+            return stack[-1] if stack else None
+
+
+@contextlib.contextmanager
+def fake_pycuda(context):
+    """Install a fake pycuda.driver, with `context` current on this thread."""
+    mod = types.ModuleType("pycuda.driver")
+    mod.Context = FakeCudaDriver.Context
+    pkg = types.ModuleType("pycuda")
+    pkg.driver = mod
+    saved = {k: sys.modules.get(k) for k in ("pycuda", "pycuda.driver")}
+    saved_stacks = {k: list(v) for k, v in _context_stacks.items()}
+    sys.modules["pycuda"] = pkg
+    sys.modules["pycuda.driver"] = mod
+    # pycuda.autoinit leaves the context current on the importing thread.
+    _stack_for_thread().append(context)
+    try:
+        yield mod
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+        _context_stacks.clear()
+        _context_stacks.update(saved_stacks)
 
 
 # --- Slot: the depth-1 hand-off ------------------------------------------
@@ -424,6 +496,112 @@ def test_cuda_context_helper_is_safe_without_pycuda():
     """
     ctx = pipeline_mod._current_cuda_context()
     assert ctx is None or hasattr(ctx, "push")
+
+
+def test_cuda_context_is_captured_at_construction_not_in_run():
+    """The context must be grabbed on the CALLER's thread.
+
+    pycuda.autoinit leaves the context current on the importing (main) thread.
+    If the capture happened inside run() it would look for a context on the
+    worker thread, find none, and the first execute_async_v2 would fail with
+    'invalid resource handle' - the exact bug this design exists to avoid.
+    """
+    ctx = FakeContext(owner="main")
+    with fake_pycuda(ctx):
+        # Main thread has the context current.
+        assert pipeline_mod._current_cuda_context() is ctx
+        slot = Slot()
+        thread = DetectorThread(SlowDetector(), slot, Slot(),
+                                threading.Event(), PipelineStats(),
+                                on_detections=None, quiet=True)
+        assert thread._cuda_ctx is ctx
+        # A fresh thread starts with NO context - proving the capture could not
+        # have happened later, inside run().
+        worker_capture = []
+        t = threading.Thread(target=lambda: worker_capture.append(
+            pipeline_mod._current_cuda_context()))
+        t.start()
+        t.join()
+        assert worker_capture == [None]
+
+
+def test_worker_pushes_and_pops_the_context_around_its_loop():
+    """Inside the loop the context must be current on the worker thread.
+
+    Without the push, TensorRT would run with no context attached to the thread
+    that actually calls execute_async_v2.
+    """
+    ctx = FakeContext(owner="main")
+    seen = []
+
+    class CtxSpy(object):
+        """A detector that checks the context is current on ITS thread."""
+
+        def detect(self, frame):
+            seen.append(threading.current_thread().name)
+            stack = _stack_for_thread()
+            assert stack and stack[-1] is ctx, "context not pushed on worker"
+            return []
+
+    with fake_pycuda(ctx):
+        cap = FakeCap(frame_s=0.002)
+        rec = Recorder()
+        run_threaded(cap, CtxSpy(), threading.Event(),
+                     lambda f, d, s: None, rec,
+                     max_frames=15, box_hold_s=1.0)
+        # The pop() left this thread's stack exactly as it was found.
+        assert _stack_for_thread() == [ctx]
+
+    assert seen, "the detector never ran"
+    assert all(name != "MainThread" for name in seen)
+
+
+def test_worker_pops_the_context_even_when_stopped_early():
+    """Teardown must release the context, or a restart reuses a stale stack."""
+    ctx = FakeContext(owner="main")
+    with fake_pycuda(ctx):
+        cap = FakeCap(frame_s=0.002)
+        rec = Recorder()
+        run_threaded(cap, SlowDetector(delay_s=0.01), threading.Event(),
+                     lambda f, d, s: None, rec,
+                     max_frames=6, box_hold_s=1.0)
+        assert _stack_for_thread() == [ctx], "context leaked or popped twice"
+
+
+def test_a_failing_push_does_not_kill_the_pipeline():
+    """A context that refuses to push must warn, not abort the run.
+
+    On a board where the context cannot be re-attached we still want video; the
+    alternative is a crash before the first frame is ever read.
+    """
+    class HostileContext(FakeContext):
+        def push(self):
+            raise RuntimeError("context is defunct")
+
+    ctx = HostileContext()
+    with fake_pycuda(ctx):
+        # Remove the auto-current entry so only the worker's push is in play.
+        _stack_for_thread().remove(ctx)
+        cap = FakeCap(frame_s=0.002)
+        rec = Recorder()
+        stats = run_threaded(cap, SlowDetector(delay_s=0.005), threading.Event(),
+                             lambda f, d, s: None, rec,
+                             max_frames=10, box_hold_s=1.0)
+    assert stats.frames_captured == 10
+    assert rec.calls == 10
+
+
+def test_pipeline_runs_without_pycuda_installed():
+    """The non-TensorRT backends must not be broken by any of the above."""
+    assert sys.modules.get("pycuda") is None
+    cap = FakeCap(frame_s=0.002)
+    det = SlowDetector(delay_s=0.005)
+    rec = Recorder()
+    stats = run_threaded(cap, det, threading.Event(),
+                         lambda f, d, s: None, rec,
+                         max_frames=10, box_hold_s=1.0)
+    assert stats.frames_captured == 10
+    assert rec.calls == 10
 
 
 def test_pipeline_imports_without_cv2():
