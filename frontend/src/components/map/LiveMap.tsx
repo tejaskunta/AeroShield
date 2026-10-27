@@ -1,45 +1,89 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { MapContainer, Polyline, TileLayer, useMap, ScaleControl } from 'react-leaflet'
-import type * as L from 'leaflet'
-import type { Detection, LatLng, MissionProgress, PathPlan, Telemetry } from '@/types'
+import type { Detection, LatLng, MissionProgress, Telemetry } from '@/types'
 import { MISSION } from '@/lib/mockData'
-import { gridBounds, gridCenter, toTuple } from '@/lib/geo'
+import { gridBounds, gridCenter } from '@/lib/geo'
+import { MapRoot } from './MapRoot'
 import { MissionGridLayer } from './MissionGridLayer'
 import { CoverageHatchLayer } from './CoverageHatchLayer'
 import { DronePlatform } from './DronePlatform'
 import { DetectionPins } from './DetectionPins'
-import { SafeCorridorLayer } from './SafeCorridorLayer'
+import { TrackLayer } from './TrackLayer'
 import { LayerToggles, type LayerState, DEFAULT_LAYERS } from './LayerToggles'
 import { MapLegend } from './MapLegend'
+import { useFollowDrone, type FollowMode } from './useMapHooks'
 
 /**
  * LiveMap — the canvas everything else docks to.
  *
- * Two basemaps: imagery (what the drone actually sees) and a dark canvas (when
- * imagery is unavailable or too busy to read hazard colour against). Both are
- * damped by the `.aeroshield-tiles` filter so the risk palette stays the most
- * saturated thing on screen — see the note in index.css.
+ * Basemaps are a `mapTypeId` now rather than a tile-URL swap: `hybrid` is imagery
+ * with place labels, `roadmap` is the dark street canvas, `satellite` is imagery
+ * alone. Imagery is the default because it is what the drone actually sees; the
+ * street canvas is the fallback for when imagery is unavailable or too busy to read
+ * hazard colour against.
  *
- * Tiles require network access. `TileFailureNotice` covers the offline case rather
- * than leaving the operator staring at an empty grey field wondering if the map
- * broke or the mission did.
+ * ── The scale of this map is metres ──────────────────────────────────────────────
+ *
+ * The survey block is 10 m × 10 m — the area the aircraft can actually be walked
+ * over by hand. Everything about the view follows from that: the zoom is a street
+ * zoom, not a regional one; the grid is drawn at one-metre cells so the individual
+ * squares are legible; and the padding that keeps the map pannable has to be
+ * generous in relative terms (metres) without being absurd in absolute ones.
+ *
+ * The original view framed a 320 × 240 m fixture block at zoom 17 — a correct view
+ * of an eight-hectare field, and a useless one for a ten-metre square, where the
+ * aircraft, the mines, and the grid were all a few pixels across.
+ *
+ * ── The drone-visibility fix still applies ───────────────────────────────────────
+ *
+ * An early version framed the block once on mount and then never moved, with panning
+ * bounded to the block and a fixed zoom. The aircraft was drawn — correctly, at its
+ * real GPS position — somewhere outside the viewport, and the only honest conclusion
+ * available to an operator was that the drone was missing. The replacement is
+ * `useFollowDrone`, with three modes the operator chooses between:
+ *
+ *   Follow   recentre as the drone moves              — for watching the flight
+ *   Fit      hold the drone *and* the block in view   — for seeing ground left to fly
+ *   Manual   never move on its own                    — for reading the map
+ *
+ * All three are passive about manual input. None of them fights the mouse, which is
+ * the failure mode that makes automatic map-following infuriating.
  */
+export type Basemap = 'satellite' | 'hybrid' | 'roadmap'
 
-export type Basemap = 'imagery' | 'canvas'
-
-const BASEMAPS: Record<Basemap, { url: string; attribution: string; maxZoom: number }> = {
-  imagery: {
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
-    maxZoom: 19,
-  },
-  canvas: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    maxZoom: 20,
-  },
+const BASEMAP_LABELS: Record<Basemap, string> = {
+  satellite: 'Satellite',
+  hybrid: 'Hybrid',
+  roadmap: 'Street',
 }
+
+/**
+ * A metre of ground, in pixels, at the reference zoom.
+ *
+ * Google's imagery over Hyderabad is native to about zoom 21 — roughly 7 cm per
+ * pixel at this latitude. Zoom 22 is the practical ceiling: one step of upsampling,
+ * still readable. Past that it is interpolation, which would look like a broken map
+ * rather than a closer one.
+ */
+const MAX_ZOOM = 22
+
+/**
+ * The view the block is designed for: 10 m across a 1200 px map, so one cell of the
+ * grid is a comfortable square rather than a smudge.
+ *
+ * `fit` takes over from here once telemetry arrives, but the first frame is already
+ * at the mission's scale — arriving at a regional view and then snapping in reads as
+ * a bug even when it is intentional.
+ */
+const INITIAL_ZOOM = 21
+
+/**
+ * And the floor. Below this the whole block is under 70 px and the metre cells
+ * disappear, so it is not a view anyone would choose; but an operator who has panned
+ * out and lost the aircraft needs to be able to find their way back, so the map is
+ * not locked to the block either.
+ */
+const MIN_ZOOM = 18
 
 export function LiveMap({
   telemetry,
@@ -47,8 +91,6 @@ export function LiveMap({
   detections,
   selectedId,
   onSelect,
-  plan,
-  planEndpoints,
   onMapClick,
   children,
 }: {
@@ -57,104 +99,112 @@ export function LiveMap({
   detections: Detection[]
   selectedId: string | null
   onSelect: (id: string | null) => void
-  plan: PathPlan | null
-  planEndpoints: { from: LatLng | null; to: LatLng | null }
-  /** Used by the planner to pick start/goal by clicking the map. */
   onMapClick?: (p: LatLng) => void
-  /**
-   * Rendered inside the Leaflet context, above every layer. This is how the
-   * detection callout gets access to `useMap()` for its leader line.
-   */
+  /** Rendered inside the map context, above every layer — how the callout and the
+   *  live feed reach `useMap()`. */
   children?: ReactNode
 }) {
-  const [basemap, setBasemap] = useState<Basemap>('imagery')
+  const [basemap, setBasemap] = useState<Basemap>('hybrid')
   const [layers, setLayers] = useState<LayerState>(DEFAULT_LAYERS)
-  const [tilesFailed, setTilesFailed] = useState(false)
+  const [follow, setFollow] = useState<FollowMode>('fit')
 
   const center = useMemo(() => gridCenter(MISSION.grid), [])
-  const tiles = BASEMAPS[basemap]
+
+  /**
+   * The area that must stay visible. Covers the grid *and* the flown track, because
+   * the track is where the aircraft has actually been and a manual pass can wander
+   * outside the block it is meant to be covering.
+   */
+  const extent = useMemo(() => {
+    const g = gridBounds(MISSION.grid)
+    const [[south, west], [north, east]] = g
+    const box = { south, west, north, east }
+
+    progress?.track.forEach((p) => {
+      box.south = Math.min(box.south, p.lat)
+      box.north = Math.max(box.north, p.lat)
+      box.west = Math.min(box.west, p.lon)
+      box.east = Math.max(box.east, p.lon)
+    })
+
+    return box
+  }, [progress?.track])
 
   return (
     <div className="relative h-full w-full bg-ink-deep">
-      <MapContainer
-        center={toTuple(center)}
-        zoom={17}
-        maxZoom={tiles.maxZoom}
-        zoomControl={false}
-        attributionControl
-        className="h-full w-full"
-        // The survey block is the world; don't let the operator get lost.
-        maxBounds={gridBounds(MISSION.grid)}
-        maxBoundsViscosity={0.7}
+      <MapRoot
+        center={center}
+        zoom={INITIAL_ZOOM}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
+        mapTypeId={basemap}
+        // Panning is bounded to the mission area, but generously. The padding is a
+        // *multiple of the block*, so at 10 m across it has to be a large fraction
+        // or the allowed area would be smaller than the viewport and the map would
+        // simply refuse to move at all.
+        restrictTo={padBounds(extent, 2)}
+        onMapClick={onMapClick}
       >
-        <TileLayer
-          key={basemap}
-          url={tiles.url}
-          attribution={tiles.attribution}
-          maxZoom={tiles.maxZoom}
-          className="aeroshield-tiles"
-          eventHandlers={{
-            tileerror: () => setTilesFailed(true),
-            tileload: () => setTilesFailed(false),
-          }}
-        />
-
         {layers.grid && <MissionGridLayer grid={MISSION.grid} />}
         {layers.coverage && progress && (
           <CoverageHatchLayer grid={MISSION.grid} coveredCells={progress.coveredCells} />
         )}
 
-        {/* Planned survey path, faint — it is intent, not history. */}
-        {layers.plannedPath && (
-          <Polyline
-            positions={MISSION.plannedPath.map(toTuple)}
-            pathOptions={{ color: '#3E5060', weight: 1, dashArray: '3 5', opacity: 0.9 }}
-          />
-        )}
-
-        {/* Flown track, solid — this is what actually happened. */}
+        {/* Flown track, solid — this is what actually happened, and the only path
+            there is. The aircraft is flown by hand, so there is no planned route to
+            draw against it. */}
         {layers.track && progress && progress.track.length > 1 && (
-          <Polyline
-            positions={progress.track.map(toTuple)}
-            pathOptions={{ color: '#E8E4DA', weight: 1.5, opacity: 0.55 }}
-          />
+          <TrackLayer points={progress.track} />
         )}
-
-        {layers.corridor && plan && <SafeCorridorLayer plan={plan} endpoints={planEndpoints} />}
 
         {layers.detections && (
-          <DetectionPins
-            detections={detections}
-            selectedId={selectedId}
-            onSelect={onSelect}
-          />
+          <DetectionPins detections={detections} selectedId={selectedId} onSelect={onSelect} />
         )}
 
         {telemetry && <DronePlatform telemetry={telemetry} />}
 
-        <ClickHandler onMapClick={onMapClick} />
-        <KeepCenteredOnGrid />
-        <ScaleControl position="bottomleft" metric imperial={false} />
-        {children}
-      </MapContainer>
+        <FollowController
+          position={telemetry?.position ?? null}
+          extent={extent}
+          mode={follow}
+        />
 
-      {/* Map chrome sits above Leaflet's panes. */}
+        {children}
+      </MapRoot>
+
+      {/* Map chrome, above every overlay the map draws. */}
       <div className="pointer-events-none absolute inset-0 z-[500]">
         <div className="pointer-events-auto absolute right-2 top-2 flex flex-col items-end gap-2">
           <BasemapSwitcher value={basemap} onChange={setBasemap} />
+          <FollowSwitcher value={follow} onChange={setFollow} />
           <LayerToggles value={layers} onChange={setLayers} />
         </div>
         <div className="pointer-events-auto absolute bottom-6 right-2">
           <MapLegend detections={detections} />
         </div>
       </div>
-
-      {tilesFailed && <TileFailureNotice basemap={basemap} onSwitch={setBasemap} />}
     </div>
   )
 }
 
-/** Basemap switcher — two states, so a segmented control rather than a dropdown. */
+/** Bridges the follow mode to the map instance — must live inside `MapRoot`. */
+function FollowController({
+  position,
+  extent,
+  mode,
+}: {
+  position: LatLng | null
+  extent: { south: number; west: number; north: number; east: number }
+  mode: FollowMode
+}) {
+  useFollowDrone({ position, extent, mode })
+  return null
+}
+
+/**
+ * Basemap switcher. Three states now: imagery with labels, imagery alone, and a
+ * street canvas for when imagery is unusable.
+ */
 function BasemapSwitcher({
   value,
   onChange,
@@ -162,13 +212,14 @@ function BasemapSwitcher({
   value: Basemap
   onChange: (b: Basemap) => void
 }) {
+  const options: Basemap[] = ['hybrid', 'satellite', 'roadmap']
   return (
     <div
       role="radiogroup"
       aria-label="Basemap"
       className="flex border border-rule bg-ink-deep/90 backdrop-blur-sm"
     >
-      {(['imagery', 'canvas'] as Basemap[]).map((b) => (
+      {options.map((b) => (
         <button
           key={b}
           type="button"
@@ -179,7 +230,7 @@ function BasemapSwitcher({
             value === b ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper-dim'
           }`}
         >
-          {b === 'imagery' ? 'Imagery' : 'Canvas'}
+          {BASEMAP_LABELS[b]}
         </button>
       ))}
     </div>
@@ -187,55 +238,64 @@ function BasemapSwitcher({
 }
 
 /**
- * Tiles are the one hard external dependency. Say what happened, and offer the
- * fallback — the mission overlays still work without a basemap.
+ * How the view tracks the aircraft. Three states, and the labels say what each one
+ * *does to the map* rather than naming a setting — "Fit" is meaningless, "Fit
+ * block + drone" is not.
  */
-function TileFailureNotice({
-  basemap,
-  onSwitch,
+function FollowSwitcher({
+  value,
+  onChange,
 }: {
-  basemap: Basemap
-  onSwitch: (b: Basemap) => void
+  value: FollowMode
+  onChange: (m: FollowMode) => void
 }) {
+  const options: { mode: FollowMode; label: string; title: string }[] = [
+    { mode: 'follow', label: 'Follow', title: 'Keep the drone centred as it flies' },
+    { mode: 'fit', label: 'Fit', title: 'Keep the drone and the whole survey block in view' },
+    { mode: 'manual', label: 'Manual', title: 'Never move the map on its own' },
+  ]
   return (
-    <div className="absolute bottom-2 left-2 z-[600] max-w-xs border border-caution/50 bg-ink-deep/95 p-2.5">
-      <p className="eyebrow text-caution">Basemap unavailable</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-paper-dim">
-        Tiles need network access. The mission grid, coverage, and detections below are
-        unaffected — only the background imagery is missing.
-      </p>
-      {basemap === 'imagery' && (
+    <div
+      role="radiogroup"
+      aria-label="Map tracking"
+      className="flex border border-rule bg-ink-deep/90 backdrop-blur-sm"
+    >
+      {options.map((o) => (
         <button
+          key={o.mode}
           type="button"
-          onClick={() => onSwitch('canvas')}
-          className="mt-1.5 border border-rule px-2 py-px font-display text-[10px] uppercase tracking-[0.1em] text-paper hover:bg-ink-hover"
+          role="radio"
+          aria-checked={value === o.mode}
+          onClick={() => onChange(o.mode)}
+          title={o.title}
+          className={`px-2 py-1 font-display text-[10px] uppercase tracking-[0.1em] transition-colors ${
+            value === o.mode ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper-dim'
+          }`}
         >
-          Try canvas basemap
+          {o.label}
         </button>
-      )}
+      ))}
     </div>
   )
 }
 
-/** Reports map clicks upward so the planner can set endpoints. */
-function ClickHandler({ onMapClick }: { onMapClick?: (p: LatLng) => void }) {
-  const map = useMap()
-  useEffect(() => {
-    if (!onMapClick) return
-    const handler = (e: L.LeafletMouseEvent) => onMapClick({ lat: e.latlng.lat, lon: e.latlng.lng })
-    map.on('click', handler)
-    return () => {
-      map.off('click', handler)
-    }
-  }, [map, onMapClick])
-  return null
-}
-
-/** Fit the survey block once, on mount. Never fights the operator's panning after. */
-function KeepCenteredOnGrid() {
-  const map = useMap()
-  useEffect(() => {
-    map.fitBounds(gridBounds(MISSION.grid), { padding: [40, 40] })
-  }, [map])
-  return null
+/**
+ * Grow a bound by a fraction of its own span.
+ *
+ * Used to give the panning restriction some slack around the survey block, so the
+ * operator can look at the ground just outside the area the drone is working without
+ * the map refusing to move.
+ */
+function padBounds(
+  b: { south: number; west: number; north: number; east: number },
+  fraction: number,
+): { south: number; west: number; north: number; east: number } {
+  const latPad = (b.north - b.south) * fraction
+  const lonPad = (b.east - b.west) * fraction
+  return {
+    south: b.south - latPad,
+    north: b.north + latPad,
+    west: b.west - lonPad,
+    east: b.east + lonPad,
+  }
 }

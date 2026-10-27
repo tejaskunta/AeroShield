@@ -4,9 +4,9 @@ import type { LatLng, MissionGrid } from '@/types'
  * Geodesy and coordinate formatting.
  *
  * Distances use a local flat-earth approximation rather than full geodesic maths.
- * Over a survey grid a few hundred metres across, the error is centimetres —
- * far below GPS noise — and it keeps the A* planner cheap enough to run on every
- * drag. Anything spanning more than a few kilometres would need real geodesics.
+ * Over this survey block — ten metres on a side — the error is a fraction of a
+ * millimetre, far below the GPS noise it is measuring. Anything spanning more than
+ * a few kilometres would need real geodesics.
  */
 
 const EARTH_RADIUS_M = 6_371_000
@@ -48,9 +48,29 @@ export function lerpLatLng(a: LatLng, b: LatLng, t: number): LatLng {
   return { lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t }
 }
 
-/** Leaflet wants `[lat, lng]` tuples; our types use named fields. */
-export function toTuple(p: LatLng): [number, number] {
-  return [p.lat, p.lon]
+/**
+ * The Maps API takes `{lat, lng}` literals, and — unlike every other layer of this
+ * stack — it spells longitude `lng` inside lat/lng objects, while our domain model,
+ * the backend, and every GPS string on the wire spell it `lon`. This function is the
+ * single crossing point between those two conventions.
+ *
+ * Keeping the translation here rather than renaming the field throughout means the
+ * domain type keeps matching the detection records it is built from (which use
+ * `latitude`/`longitude`), and there is one obvious place to look when a marker
+ * lands in the sea.
+ */
+export function toLatLngLiteral(p: LatLng): google.maps.LatLngLiteral {
+  return { lat: p.lat, lng: p.lon }
+}
+
+/** Inverse of `toLatLngLiteral` — Maps API coordinates back into our domain type. */
+export function fromLatLngLiteral(p: google.maps.LatLngLiteral): LatLng {
+  return { lat: p.lat, lon: p.lng }
+}
+
+/** A lat/lng path as the Maps API wants it, for polylines and polygons. */
+export function toPath(points: LatLng[]): google.maps.LatLngLiteral[] {
+  return points.map(toLatLngLiteral)
 }
 
 // ---------------------------------------------------------------------------

@@ -142,9 +142,9 @@ export type StreamState = 'connecting' | 'live' | 'stalled' | 'offline'
 // ---------------------------------------------------------------------------
 
 /**
- * The survey grid. A mission is flown as a lawnmower pattern over these cells,
- * and a cell is only 'covered' once the camera footprint has passed over it —
- * which is what the coverage hatch on the map draws.
+ * The survey grid, in metres. The aircraft is flown over these cells by hand, and a
+ * cell is only 'covered' once the camera footprint has passed over it — which is
+ * what the coverage hatch on the map draws.
  */
 export interface MissionGrid {
   /** South-west corner of the grid. */
@@ -159,15 +159,20 @@ export type MissionStatus = 'planned' | 'in-progress' | 'complete' | 'aborted'
 
 export interface Mission {
   id: string
-  /** e.g. `KANDAHAR-04`. Uppercase in the UI, it is a call sign. */
+  /** e.g. `KMIT-01`. Uppercase in the UI, it is a call sign. */
   name: string
   site: string
   status: MissionStatus
   startedAt: string
   endedAt?: string
   grid: MissionGrid
-  /** Waypoints as uploaded from Mission Planner. Read-only here by design. */
-  plannedPath: LatLng[]
+  /**
+   * No planned path, deliberately. The aircraft has no autopilot and no uploaded
+   * route: the block is small enough that a person walks it with a transmitter, and
+   * a planner that produced a route for it would be describing a capability the
+   * aircraft does not have. The flown track is the only path in the data model, and
+   * it is observed rather than commanded.
+   */
   operator: string
 }
 
@@ -184,39 +189,7 @@ export interface MissionProgress {
 }
 
 // ---------------------------------------------------------------------------
-// Safe path planning
-// ---------------------------------------------------------------------------
-
-export interface Waypoint {
-  position: LatLng
-  /** `WP1`, or `START` / `GOAL` for the endpoints. */
-  label: string
-  /** Distance to the nearest hazard at this waypoint, metres. */
-  clearanceM: number
-}
-
-/**
- * Output of the A* planner over the risk surface. Deterministic by design — the
- * same inputs must always give the same route, because an operator will re-run
- * it and needs to trust that it did not silently change.
- */
-export interface PathPlan {
-  from: LatLng
-  to: LatLng
-  waypoints: Waypoint[]
-  distanceM: number
-  /** Aggregate 0..1 route risk. Drives the risk badge. */
-  routeRisk: number
-  riskLevel: RiskLevel
-  /** Tightest hazard clearance anywhere on the route — the number that matters. */
-  minClearanceM: number
-  computedAt: string
-  /** False when no corridor exists at the required clearance. */
-  feasible: boolean
-  /** Why a route is infeasible, or what compromise was made. Shown verbatim. */
-  note?: string
-}
-
+// Risk
 // ---------------------------------------------------------------------------
 // Safety copilot
 // ---------------------------------------------------------------------------

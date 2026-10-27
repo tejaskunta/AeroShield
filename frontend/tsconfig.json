@@ -19,7 +19,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
 
-    "types": ["node"],
+    "types": ["node", "google.maps"],
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
   },

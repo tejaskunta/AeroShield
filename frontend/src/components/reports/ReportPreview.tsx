@@ -275,21 +275,6 @@ function MapPlate({ mission, detections }: { mission: Mission; detections: Detec
           }),
         )}
 
-        {/* Planned path, for orientation. */}
-        <polyline
-          points={mission.plannedPath
-            .map((p) => {
-              const east = (p.lon - grid.origin.lon) * mPerDegLon(grid.origin.lat)
-              const north = (p.lat - grid.origin.lat) * M_PER_DEG_LAT
-              return `${(east / blockWidthM) * W},${H - (north / blockHeightM) * H}`
-            })
-            .join(' ')}
-          fill="none"
-          stroke="#B8B2A4"
-          strokeWidth={1}
-          strokeDasharray="4 4"
-        />
-
         {/* Detection marks */}
         {detections.map((d) => {
           const { x, y } = project(d)

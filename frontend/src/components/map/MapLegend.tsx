@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import type { Detection } from '@/types'
 import { RISK_HEX } from '@/lib/risk'
 import { countByRisk } from '@/hooks/useDetections'
-import { HARD_CLEARANCE_M } from '@/lib/pathfinding'
 
 /**
  * MapLegend — what the marks mean, with live counts.
@@ -41,7 +40,7 @@ export function MapLegend({ detections }: { detections: Detection[] }) {
 
       <div className="rule-line my-1.5" />
       <p className="text-[10px] leading-snug text-paper-faint">
-        Rings show position uncertainty. Routes hold {HARD_CLEARANCE_M} m clearance.
+        Rings show how far a position could be out. One grid square is 1 m.
       </p>
     </div>
   )

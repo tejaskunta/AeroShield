@@ -8,7 +8,9 @@ import type {
   MissionGrid,
   MissionReport,
 } from '@/types'
-import { cellId, cellOrigin, gridCenter, offsetM } from './geo'
+import { M_PER_DEG_LAT, cellId, cellOrigin, gridCenter, mPerDegLon, offsetM } from './geo'
+import { SURVEY_ORIGIN } from './config'
+import { mulberry32 } from './rng'
 
 /**
  * Seeded mission fixtures.
@@ -22,22 +24,10 @@ import { cellId, cellOrigin, gridCenter, offsetM } from './geo'
  * the UI surfaces that. See the plan's honesty rule.
  */
 
-/** mulberry32 — tiny, fast, good enough for fixtures. Not cryptographic. */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a |= 0
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
 /**
  * Fixed epoch for all timestamps. Real code would use `Date.now()`, but pinning
  * it keeps fixtures reproducible and lets the simulator advance time itself.
- * Kandahar is UTC+4:30; this instant is ~14:22Z, mid-morning local.
+ * Hyderabad is UTC+5:30; this instant is ~19:52 local, late afternoon.
  */
 export const MISSION_EPOCH = Date.parse('2026-08-24T14:22:07Z')
 
@@ -49,58 +39,62 @@ function isoAt(offsetSeconds: number): string {
 // Mission + grid
 // ---------------------------------------------------------------------------
 
-/** SW corner near Kandahar. An arbitrary but plausible survey site. */
-const GRID_ORIGIN: LatLng = { lat: 31.609, lon: 65.734 }
+/**
+ * The survey block's SW corner.
+ *
+ * This must match the origin the aircraft is actually flying from, or the drone is
+ * drawn somewhere the map is not looking and the only honest conclusion available to
+ * an operator is that the aircraft is missing. It previously held a Kandahar fixture
+ * while the Jetson was flying from its default simulated origin, which put the drone
+ * several thousand kilometres from the grid.
+ *
+ * `VITE_SURVEY_ORIGIN` (see `lib/config.ts`) is now the single source of truth, so
+ * moving the survey to a real site is a config change rather than a code change.
+ * The fallback is only reached when the variable is unset.
+ */
+const GRID_ORIGIN: LatLng = SURVEY_ORIGIN
 
-/** 8 × 6 cells at 40 m — a 320 × 240 m survey block. */
+/**
+ * The survey block: 10 × 10 m, divided into 10 × 10 one-metre cells (A1–J10).
+ *
+ * The size is not a stylistic choice — it is the area the aircraft can actually be
+ * flown over by hand, and the metremost grid says so. The previous fixture was a
+ * 320 × 240 m block, which is what made the map look permanently zoomed out: a
+ * correct view of an eight-hectare block is necessarily an eight-hectare view, and
+ * the drone and the mines are both a few pixels across in it.
+ */
 export const MISSION_GRID: MissionGrid = {
   origin: GRID_ORIGIN,
-  cellSizeM: 40,
-  cols: 8,
-  rows: 6,
+  cellSizeM: 1,
+  cols: 10,
+  rows: 10,
 }
+
+/** The block's ground extents, in metres. Used to project ground positions into frames. */
+const BLOCK_W_M = MISSION_GRID.cols * MISSION_GRID.cellSizeM
+const BLOCK_H_M = MISSION_GRID.rows * MISSION_GRID.cellSizeM
 
 /**
  * How long the mission has been running at simulated "now". Seeds captured at or
  * before this mark are already on screen at load; later ones stream in live, so
  * the console has something to actually do while you look at it.
  *
- * Coupled to the survey path and `CRUISE_MS` in simulation.ts: the lawnmower path
- * over this grid is ~1880 m, which at 5 m/s is ~376 s of flying. 232 s puts the
- * drone about 62% of the way through — mid-mission, with lanes still to fly. Change
- * the grid, the path, or the cruise speed and this needs revisiting, or the drone
- * ends up parked at the far end with nothing left to survey.
+ * The flight is manual, so the pace is the pilot's, not a planner's. A person
+ * walking a 10 m block with a handheld transmitter covers it at roughly 1 m/s —
+ * a ten-second pass per lane, about eleven lanes, so two minutes of flying in
+ * total. 70 s puts the aircraft a little past halfway with the near lanes done and
+ * the far ones still to walk.
  */
-export const ELAPSED_AT_LOAD_S = 232
-
-/**
- * A lawnmower survey path over the grid: sweep east along a row, step north,
- * sweep back west, repeat. This is how a grid survey is actually flown, and the
- * coverage hatch fills in this order.
- */
-function buildLawnmowerPath(grid: MissionGrid): LatLng[] {
-  const path: LatLng[] = []
-  const inset = grid.cellSizeM / 2
-  const eastStart = inset
-  const eastEnd = (grid.cols - 1) * grid.cellSizeM + inset
-  for (let row = 0; row < grid.rows; row++) {
-    const north = row * grid.cellSizeM + inset
-    const leftToRight = row % 2 === 0
-    path.push(offsetM(grid.origin, leftToRight ? eastStart : eastEnd, north))
-    path.push(offsetM(grid.origin, leftToRight ? eastEnd : eastStart, north))
-  }
-  return path
-}
+export const ELAPSED_AT_LOAD_S = 70
 
 export const MISSION: Mission = {
-  id: 'MSN-KDH-04',
-  name: 'KANDAHAR-04',
-  site: 'Registan approach, sector 4',
+  id: 'MSN-KMT-01',
+  name: 'KMIT-01',
+  site: 'KMIT campus, Narayanaguda, Hyderabad',
   status: 'in-progress',
   startedAt: isoAt(-ELAPSED_AT_LOAD_S),
   grid: MISSION_GRID,
-  operator: 'S. RASMUSSEN',
-  plannedPath: buildLawnmowerPath(MISSION_GRID),
+  operator: 'A. RAO',
 }
 
 export const MISSION_CENTER: LatLng = gridCenter(MISSION.grid)
@@ -110,9 +104,17 @@ export const MISSION_CENTER: LatLng = gridCenter(MISSION.grid)
 // ---------------------------------------------------------------------------
 
 /**
- * Detections are seeded at fixed grid cells so the risk heatmap and the safe-path
- * planner have a stable, believable hazard field to work against. Confidence and
- * class are chosen to exercise every risk level and review state.
+ * Detections are seeded at fixed grid cells so the risk heatmap has a stable,
+ * believable hazard field to work against. Confidence and class are chosen to
+ * exercise every risk level and review state.
+ *
+ * Capture times stay inside the two-minute manual flight described above, so the
+ * last four sit just past `ELAPSED_AT_LOAD_S` and arrive every few seconds — long
+ * enough to orient before the first alert fires, short enough that the ping, the
+ * ticker, and the alert banner are all observable without waiting around.
+ *
+ * Cells are picked so the hazard field has a genuine cluster (C4/D4/E3) rather than
+ * evenly scattered pins any straight line would miss.
  */
 interface Seed {
   col: number
@@ -127,31 +129,30 @@ interface Seed {
 
 /**
  * Capture times are spread across the flown portion of the mission, and the last
- * four sit just past `ELAPSED_AT_LOAD_S` so arrivals begin ~18 s after load and
- * then every 30–40 s. That cadence is deliberate: long enough to orient before the
+ * four sit just past `ELAPSED_AT_LOAD_S` so arrivals begin ~4 s after load and
+ * then every ~5 s. That cadence is deliberate: long enough to orient before the
  * first alert fires, short enough that the ping, the ticker, and the alert banner
  * are all observable without waiting around.
  *
- * Cells are picked so the hazard field has a genuine cluster (C4/D4/E3) for the
- * safe-path planner to route around, rather than evenly scattered pins that any
- * straight line would miss.
+ * Cells are picked so the hazard field has a genuine cluster (C4/D4/E3) rather than
+ * evenly scattered pins any straight line would miss.
  */
 const SEEDS: Seed[] = [
-  { col: 1, row: 0, cls: 'landmine_metal', confidence: 0.94, reviewed: 'confirmed', atS: 24 },
-  { col: 2, row: 1, cls: 'landmine_metal', confidence: 0.88, atS: 41 },
-  { col: 1, row: 1, cls: 'debris_negative', confidence: 0.66, atS: 58 },
-  { col: 3, row: 1, cls: 'landmine_plastic', confidence: 0.71, atS: 76 },
-  { col: 4, row: 2, cls: 'landmine_metal', confidence: 0.83, reviewed: 'confirmed', atS: 98 },
-  { col: 5, row: 2, cls: 'landmine_plastic', confidence: 0.52, atS: 117 },
-  { col: 6, row: 2, cls: 'debris_negative', confidence: 0.41, reviewed: 'dismissed', reason: 'Scrap metal, not ordnance', atS: 138 },
-  { col: 5, row: 3, cls: 'landmine_metal', confidence: 0.79, atS: 162 },
-  { col: 4, row: 3, cls: 'landmine_plastic', confidence: 0.34, atS: 189 },
-  { col: 3, row: 3, cls: 'landmine_metal', confidence: 0.91, reviewed: 'flagged', reason: 'Possible cluster — request second pass', atS: 214 },
+  { col: 1, row: 0, cls: 'landmine_metal', confidence: 0.94, reviewed: 'confirmed', atS: 4 },
+  { col: 2, row: 1, cls: 'landmine_metal', confidence: 0.88, atS: 7 },
+  { col: 1, row: 1, cls: 'debris_negative', confidence: 0.66, atS: 11 },
+  { col: 3, row: 1, cls: 'landmine_plastic', confidence: 0.71, atS: 15 },
+  { col: 4, row: 2, cls: 'landmine_metal', confidence: 0.83, reviewed: 'confirmed', atS: 19 },
+  { col: 5, row: 2, cls: 'landmine_plastic', confidence: 0.52, atS: 23 },
+  { col: 6, row: 2, cls: 'debris_negative', confidence: 0.41, reviewed: 'dismissed', reason: 'Scrap metal, not ordnance', atS: 28 },
+  { col: 5, row: 3, cls: 'landmine_metal', confidence: 0.79, atS: 34 },
+  { col: 4, row: 3, cls: 'landmine_plastic', confidence: 0.34, atS: 41 },
+  { col: 3, row: 3, cls: 'landmine_metal', confidence: 0.91, reviewed: 'flagged', reason: 'Possible cluster — request second pass', atS: 48 },
   // --- these four arrive live, after load ---
-  { col: 2, row: 4, cls: 'landmine_plastic', confidence: 0.68, atS: 250 },
-  { col: 6, row: 4, cls: 'landmine_metal', confidence: 0.86, atS: 279 },
-  { col: 5, row: 5, cls: 'debris_negative', confidence: 0.28, atS: 312 },
-  { col: 3, row: 5, cls: 'landmine_metal', confidence: 0.77, atS: 348 },
+  { col: 2, row: 4, cls: 'landmine_plastic', confidence: 0.68, atS: 74 },
+  { col: 6, row: 4, cls: 'landmine_metal', confidence: 0.86, atS: 79 },
+  { col: 5, row: 5, cls: 'debris_negative', confidence: 0.28, atS: 84 },
+  { col: 3, row: 5, cls: 'landmine_metal', confidence: 0.77, atS: 89 },
 ]
 
 /**
@@ -172,7 +173,9 @@ function makeDetection(seed: Seed, index: number, rnd: () => number): Detection 
   const jitterN = (0.3 + rnd() * 0.4) * grid.cellSizeM
   const sw = cellOrigin(grid, seed.col, seed.row)
   const position = offsetM(sw, jitterE, jitterN)
-  const altitude = 40 + rnd() * 6
+  // A manual survey of a 10 m block is flown low — the camera needs the resolution
+  // and the pilot needs to see the aircraft. A few metres AGL, not forty.
+  const altitude = 4 + rnd() * 2
 
   const id = `D-${String(index + 101).padStart(4, '0')}`
   return {
@@ -180,12 +183,14 @@ function makeDetection(seed: Seed, index: number, rnd: () => number): Detection 
     missionId: MISSION.id,
     class: seed.cls,
     confidence: seed.confidence,
-    bbox: bboxFor(seed.confidence, rnd),
+    bbox: bboxFor(position, seed.confidence, rnd),
     position,
     captureAltitudeM: Number(altitude.toFixed(1)),
-    // Position error scales with altitude and shrinks with confidence — a rough
-    // but honest stand-in for the real GPS + attitude + terrain error budget.
-    positionErrorM: Number((2.5 + altitude * 0.08 + (1 - seed.confidence) * 3).toFixed(1)),
+    // Position error scales with altitude and shrinks with confidence. The budget is
+    // deliberately sub-metre: at this scale a 2.5 m CEP would be a quarter of the
+    // whole block, and an uncertainty ring wider than the survey tells an operator
+    // nothing except that the survey is pointless.
+    positionErrorM: Number((0.3 + altitude * 0.05 + (1 - seed.confidence) * 0.5).toFixed(2)),
     capturedAt: isoAt(seed.atS - ELAPSED_AT_LOAD_S),
     gridCell: cellId(seed.col, seed.row),
     frameUri: `placeholder:frame/${id}`,
@@ -202,12 +207,39 @@ function makeDetection(seed: Seed, index: number, rnd: () => number): Detection 
   }
 }
 
-function bboxFor(confidence: number, rnd: () => number) {
-  // Higher confidence → tighter, larger box, loosely. Frame is a nominal 1280×720.
-  const w = 90 + confidence * 120 + rnd() * 40
-  const h = w * (0.7 + rnd() * 0.4)
-  const x1 = 200 + rnd() * 700
-  const y1 = 120 + rnd() * 380
+/**
+ * The frame the detector actually publishes. `bboxFor` places a box in this space,
+ * and the camera picture-in-picture reads the same dimensions off the loaded image,
+ * so the two agree. (This was 640×360 in practice while the fixture claimed
+ * 1280×720, which put every synthetic box in the wrong place by a factor of two.)
+ */
+const FRAME_W = 640
+const FRAME_H = 360
+
+/**
+ * A detector box for a target at a known ground position.
+ *
+ * The box is not free-floating decoration: where it sits in the frame is a claim
+ * about where the target is, and the detection callout draws a leader line from that
+ * claim to the pin on the map. So it is derived from the same ground position,
+ * through the same projection the detection plate uses, and clamped inside the frame
+ * — a box hanging off the edge is a box claiming a target the camera never saw.
+ */
+function bboxFor(position: LatLng, confidence: number, rnd: () => number) {
+  const { grid } = MISSION
+  const east = (position.lon - grid.origin.lon) * mPerDegLon(grid.origin.lat)
+  const north = (position.lat - grid.origin.lat) * M_PER_DEG_LAT
+  const u = Math.min(1, Math.max(0, east / BLOCK_W_M))
+  const v = Math.min(1, Math.max(0, north / BLOCK_H_M))
+
+  // The block fills the frame's long axis, so one metre of ground is BLOCK_W_M/FRAME_W
+  // pixels. A more confident hit gets a tighter box.
+  const gsd = BLOCK_W_M / FRAME_W
+  const w = Math.min(FRAME_W * 0.22, (1.6 - confidence * 0.7) / gsd)
+  const h = w * (0.7 + rnd() * 0.35)
+
+  const x1 = Math.min(FRAME_W - w - 1, Math.max(1, u * FRAME_W - w / 2))
+  const y1 = Math.min(FRAME_H - h - 1, Math.max(1, (1 - v) * FRAME_H - h / 2))
   return {
     x1: Math.round(x1),
     y1: Math.round(y1),
@@ -319,7 +351,7 @@ export const COPILOT_INTRO: CopilotMessage = {
 
 export const REPORTS: MissionReport[] = [
   {
-    id: 'RPT-KDH-04',
+    id: 'RPT-KMT-01',
     missionId: MISSION.id,
     missionName: MISSION.name,
     site: MISSION.site,
@@ -330,26 +362,26 @@ export const REPORTS: MissionReport[] = [
     // recomputes those from live mission state, so a number written here would
     // drift out of step with the sheet it sits on within seconds.
     summary:
-      'Interim report, sector 4 survey in progress. Detections to date are listed in the register below with their review state at time of generation. Southern lanes flown; northern lanes outstanding. Two metal-cased detections confirmed and one flagged for a second pass — none released, all pending ground verification.',
-    areaSurveyedM2: 40 * 40 * 30,
+      'Interim report, KMIT campus block survey in progress. Detections to date are listed in the register below with their review state at time of generation. The near lanes have been walked; the far lanes are still to fly. Two metal-cased detections confirmed and one flagged for a second pass — none released, all pending ground verification.',
+    areaSurveyedM2: BLOCK_W_M * BLOCK_H_M * 0.62,
     coveragePct: 62,
     flightTimeS: ELAPSED_AT_LOAD_S,
     tallies: { total: 10, confirmed: 2, dismissed: 1, flagged: 1, unreviewed: 6 },
     detectionIds: ALL_DETECTIONS.map((d) => d.id),
   },
   {
-    id: 'RPT-KDH-03',
-    missionId: 'MSN-KDH-03',
-    missionName: 'KANDAHAR-03',
-    site: 'Registan approach, sector 3',
+    id: 'RPT-KMT-00',
+    missionId: 'MSN-KMT-00',
+    missionName: 'KMIT-00',
+    site: 'KMIT campus, Narayanaguda, Hyderabad',
     status: 'final',
     generatedAt: isoAt(-86_400),
-    generatedBy: 'S. RASMUSSEN',
+    generatedBy: 'A. RAO',
     summary:
-      'Full survey of sector 3 completed. 9 detections filed, 3 confirmed hazards handed to the ground team and marked to IMAS convention. No outstanding lanes. Survey only — no land released.',
-    areaSurveyedM2: 40 * 40 * 48,
+      'Complete survey of the KMIT campus block. 9 detections filed, 3 confirmed hazards handed to the ground team and marked to IMAS convention. No outstanding lanes. Survey only — no land released.',
+    areaSurveyedM2: BLOCK_W_M * BLOCK_H_M,
     coveragePct: 100,
-    flightTimeS: 391,
+    flightTimeS: 124,
     tallies: { total: 9, confirmed: 3, dismissed: 4, flagged: 0, unreviewed: 2 },
     detectionIds: [],
   },

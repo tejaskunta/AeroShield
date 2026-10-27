@@ -8,33 +8,30 @@ import { Toggle } from '@/components/ui/Toggle'
  *
  * Collapsed to a single button by default so the map keeps its width; the operator
  * opens it when they need to strip the map back. Each row carries the layer's own
- * mark as a swatch, so this list doubles as a key for the line styles (dashed =
- * planned, solid = flown) that the legend doesn't cover.
+ * mark as a swatch, so the list doubles as a key for the marks the legend doesn't
+ * cover — the hatched fill, the grid, and the flown track.
+ *
+ * There is no planned-path row and no safe-route row. The aircraft is flown by hand
+ * over the block, so a route is not something the system knows enough to draw.
  */
 export interface LayerState {
   grid: boolean
   coverage: boolean
-  plannedPath: boolean
   track: boolean
   detections: boolean
-  corridor: boolean
 }
 
 export const DEFAULT_LAYERS: LayerState = {
   grid: true,
   coverage: true,
-  plannedPath: true,
   track: true,
   detections: true,
-  corridor: true,
 }
 
 const ROWS: Array<{ key: keyof LayerState; label: string; swatch: ReactNode }> = [
   { key: 'detections', label: 'Detections', swatch: <Dot /> },
   { key: 'coverage', label: 'Coverage', swatch: <HatchSwatch /> },
-  { key: 'corridor', label: 'Safe route', swatch: <Line color="#4E9E86" /> },
   { key: 'track', label: 'Flown track', swatch: <Line color="#E8E4DA" /> },
-  { key: 'plannedPath', label: 'Planned path', swatch: <Line color="#3E5060" dashed /> },
   { key: 'grid', label: 'Survey grid', swatch: <GridSwatch /> },
 ]
 
@@ -82,7 +79,7 @@ export function LayerToggles({
   )
 }
 
-function Line({ color, dashed = false }: { color: string; dashed?: boolean }) {
+function Line({ color }: { color: string }) {
   return (
     <svg width="14" height="6" aria-hidden className="shrink-0">
       <line
@@ -92,7 +89,6 @@ function Line({ color, dashed = false }: { color: string; dashed?: boolean }) {
         y2="3"
         stroke={color}
         strokeWidth="1.5"
-        strokeDasharray={dashed ? '3 3' : undefined}
       />
     </svg>
   )

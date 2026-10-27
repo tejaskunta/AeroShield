@@ -91,66 +91,81 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Leaflet overrides — Leaflet ships a light, rounded, drop-shadowed look that
-   fights this design. Strip it back to flat instrument chrome.
+   Google Maps chrome.
+
+   The Maps API injects its own DOM controls, and every one of them ships with
+   Google's default styling — white plates, blue links, system fonts. They read
+   as "Google Maps" inside a console that is otherwise entirely hairlines and
+   monospace, so they are restyled here to disappear into the instrument rather
+   than sit on top of it.
+
+   Attribution and the scale bar are deliberately NOT hidden: both are required
+   by the Maps terms and, more practically, the scale bar is the only thing on
+   screen that tells an operator how big a hazard actually is.
 --------------------------------------------------------------------------- */
-.leaflet-container {
+
+/* The map container itself. Maps writes inline styles onto its own children, so
+   only the frame is ours to set. */
+.aeroshield-map {
+  height: 100%;
+  width: 100%;
   background: var(--ink-deep);
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  outline: none;
 }
 
-/* Attribution and zoom controls: flat, hairlined, no rounding or shadow. */
-.leaflet-control-attribution {
-  background: rgba(14, 20, 26, 0.86) !important;
-  color: var(--paper-faint) !important;
-  border-top: 1px solid var(--rule);
-  border-left: 1px solid var(--rule);
-  font-size: 9px;
-  padding: 2px 6px;
+/* Attribution: required, but it does not need to shout. Dim it to the same
+   weight as the rest of the map's annotations. */
+.aeroshield-map .gm-style-cc,
+.aeroshield-map .gmnoscreen,
+.aeroshield-map .gmnoprint {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  font-size: 9px !important;
+  letter-spacing: 0.04em;
 }
-.leaflet-control-attribution a {
+.aeroshield-map .gm-style-cc a,
+.aeroshield-map .gm-style-cc span,
+.aeroshield-map .gmnoprint a,
+.aeroshield-map .gmnoprint span {
+  color: var(--paper-faint) !important;
+  opacity: 0.55;
+}
+.aeroshield-map .gm-style-cc a:hover,
+.aeroshield-map .gmnoprint a:hover {
+  opacity: 1;
+}
+
+/* Google's default control plates (zoom, layers, map type). We render our own
+   chrome, so anything Maps decides to add gets the system's treatment rather
+   than a white rounded box. */
+.aeroshield-map .gm-style-mtc,
+.aeroshield-map .gm-bundled-control,
+.aeroshield-map .gm-bundled-control-on-bottom {
+  filter: saturate(0.4) brightness(0.7);
+}
+
+/* The maps API paints its own "keyboard shortcuts" and "map data" links in a
+   rounded white panel; flatten it. */
+.aeroshield-map .gm-style-moc,
+.aeroshield-map .gm-style-pbc {
+  background: rgba(14, 20, 26, 0.9) !important;
+  border: 1px solid var(--rule) !important;
+  border-radius: 0 !important;
   color: var(--paper-dim) !important;
 }
 
-.leaflet-bar,
-.leaflet-bar a {
-  background: rgba(27, 37, 48, 0.94) !important;
-  border-color: var(--rule) !important;
-  color: var(--paper) !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-.leaflet-bar a:hover {
-  background: var(--ink-hover) !important;
-}
+/* ---------------------------------------------------------------------------
+   Map labels.
 
-/* Tooltips as map labels: no bubble, no arrow, just a hairlined plate. */
-.leaflet-tooltip {
-  background: rgba(14, 20, 26, 0.92);
-  border: 1px solid var(--rule);
-  border-radius: 0;
-  box-shadow: none;
-  color: var(--paper);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  padding: 2px 6px;
-}
-.leaflet-tooltip::before {
-  display: none;
-}
-
-/* Detection pins are our own SVG; kill Leaflet's default marker chrome. */
-.aeroshield-pin {
-  background: transparent;
-  border: 0;
-}
-
-/* Basemap tiles are photographic or bright; damp them so our hazard colours
-   remain the most saturated thing on screen. Without this, imagery competes
-   with the risk palette and the "red means hazard" rule stops reading. */
-.aeroshield-tiles {
-  filter: saturate(0.55) brightness(0.62) contrast(1.08);
+   Marker labels are rendered by the Maps API into absolutely-positioned divs,
+   so the class name we set on the label is the only hook available. Used for
+   cell references and corridor waypoints.
+--------------------------------------------------------------------------- */
+.aeroshield-map-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  letter-spacing: 0.06em;
+  text-shadow:
+    0 0 3px rgba(14, 20, 26, 0.95),
+    0 0 6px rgba(14, 20, 26, 0.8);
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------

@@ -329,7 +329,7 @@ export async function listReports(): Promise<MissionReport[]> {
 /**
  * REAL (fixture fallback) — `POST /api/reports`.
  *
- * The UI addresses missions by call-sign string (`MSN-KDH-04`); the backend wants
+ * The UI addresses missions by call-sign string (`MSN-KMT-01`); the backend wants
  * an integer id. A non-numeric missionId can only be the simulated mission, so
  * the fixture path handles it. The fresh report replaces the fixture entry with
  * the same id so the list stays coherent whichever path produced it.

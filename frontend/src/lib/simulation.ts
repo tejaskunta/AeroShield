@@ -14,16 +14,23 @@ import {
   PENDING_DETECTIONS,
   detectionDueAtS,
 } from './mockData'
-import { bearingDeg, cellAt, cellId, distanceM, lerpLatLng } from './geo'
+import { bearingDeg, cellAt, cellId, distanceM, offsetM } from './geo'
 
 /**
  * MissionSimulator — the stand-in for the whole live backend.
  *
- * It advances a virtual drone along the planned survey path, emits telemetry on a
- * tick, releases the pending detections as their capture time arrives, and accrues
+ * It moves a virtual aircraft over the survey block, emits telemetry on a tick,
+ * releases the pending detections as their capture time arrives, and accrues
  * coverage. The UI subscribes to it exactly as it will later subscribe to a
  * Socket.IO stream — same event shapes, same cadence — so replacing this class is
  * the swap point and nothing downstream changes.
+ *
+ * The motion is deliberately NOT an autopilot. There is no planner and no uploaded
+ * waypoint list: the aircraft is flown by hand over a small block, so the model is a
+ * person walking a transmitter — straight lanes at walking pace, with a hand's width
+ * of wander. Anything smoother or more precise than that would be modelling a
+ * capability the aircraft does not have, and would make the track on screen a fiction
+ * an operator might plan against.
  *
  * This is a foundation: none of the telemetry or detections are real.
  */
@@ -40,16 +47,28 @@ type Listener = (snapshot: MissionSnapshot) => void
 type DetectionListener = (detection: Detection) => void
 
 /**
- * Ground speed of the virtual drone, m/s. A survey pace, not a transit pace —
- * imaging runs are flown slowly enough to keep motion blur down.
- *
- * This value and `ELAPSED_AT_LOAD_S` in mockData are coupled: elapsed time at load
- * must land partway along the path, or the drone starts parked at the far end with
- * the mission already over. `estimatedTotalTimeS()` is what relates them.
+ * How fast the pilot walks the aircraft across the block, m/s. A person holding a
+ * transmitter and watching the picture, not a cruise speed — the whole block is ten
+ * metres across, so the aircraft is never more than a few seconds from the pilot's
+ * feet and faster simply outruns the eye.
  */
-const CRUISE_MS = 5.0
+const CRUISE_MS = 1.0
 /** Telemetry cadence. 2 Hz looks live without thrashing React. */
 const TICK_MS = 500
+/** Spacing between swept lanes, metres. A little tighter than the cells so nothing slips between passes. */
+const LANE_STEP_M = 1.2
+/** Track points are kept once the aircraft has moved this far, which at this scale is a real trace. */
+const TRACK_STEP_M = 0.35
+
+/** Geometry of the hand-flown walk, derived from the grid so the two cannot drift apart. */
+const LANE_SPAN_M = MISSION.grid.cols * MISSION.grid.cellSizeM
+const BLOCK_DEPTH_M = MISSION.grid.rows * MISSION.grid.cellSizeM
+/** Number of sweeps that fit across the block, inside a half-lane margin at each edge. */
+const LANES = Math.max(2, Math.floor((BLOCK_DEPTH_M - LANE_STEP_M) / LANE_STEP_M) + 1)
+/** One lane plus the step across to the next — the repeating unit of the walk. */
+const WALK_PERIOD_M = LANE_SPAN_M + LANE_STEP_M
+/** Total distance the walk covers, start to finish. Used only to size battery and progress. */
+export const TOTAL_WALK_M = LANES * LANE_SPAN_M + (LANES - 1) * LANE_STEP_M
 
 export class MissionSimulator {
   private listeners = new Set<Listener>()
@@ -58,10 +77,8 @@ export class MissionSimulator {
 
   /** Mission-elapsed seconds. Starts partway in so there's history on screen. */
   private elapsedS = ELAPSED_AT_LOAD_S
-  /** Distance travelled along the planned path, metres. */
-  private distanceAlong = 0
-  private readonly pathTotalM: number
-  private readonly legLengths: number[]
+  /** Metres flown along the walk so far. */
+  private metresFlown = CRUISE_MS * ELAPSED_AT_LOAD_S
 
   private detections: Detection[] = [...INITIAL_DETECTIONS]
   private pending: Detection[] = [...PENDING_DETECTIONS]
@@ -71,20 +88,12 @@ export class MissionSimulator {
   private streamState: StreamState = 'live'
 
   constructor() {
-    const path = MISSION.plannedPath
-    this.legLengths = path.slice(1).map((p, i) => distanceM(path[i]!, p))
-    this.pathTotalM = this.legLengths.reduce((a, b) => a + b, 0)
-
-    // Fast-forward to the load point so initial position, track, and coverage
-    // are consistent with the detections already on screen. Clamped: if the two
-    // constants ever drift out of step, the drone parks at the end of the path
-    // rather than running off it.
-    this.distanceAlong = Math.min(
-      this.pathTotalM,
-      (ELAPSED_AT_LOAD_S / this.estimatedTotalTimeS()) * this.pathTotalM,
-    )
-    this.lastPosition = MISSION.plannedPath[0]!
-    this.replayTrackTo(this.distanceAlong)
+    // Seed position, track, and coverage from the walk already flown, so what is on
+    // screen at load is consistent with the detections already on screen. Because the
+    // walk is a pure function of distance, this is the same path the tick will
+    // continue along — no separate fast-forward code to drift out of step.
+    this.lastPosition = this.positionAtDistance(this.metresFlown)
+    this.replayTrackTo(this.metresFlown)
   }
 
   // --- subscription --------------------------------------------------------
@@ -114,27 +123,22 @@ export class MissionSimulator {
 
   // --- simulation ----------------------------------------------------------
 
-  private estimatedTotalTimeS(): number {
-    return this.pathTotalM / CRUISE_MS
-  }
-
   private tick(): void {
     const dt = TICK_MS / 1000
     this.elapsedS += dt
-    this.distanceAlong = Math.min(this.pathTotalM, this.distanceAlong + CRUISE_MS * dt)
+    this.metresFlown = Math.min(TOTAL_WALK_M, this.metresFlown + CRUISE_MS * dt)
 
-    const position = this.positionAt(this.distanceAlong)
+    const position = this.positionAtDistance(this.metresFlown)
     this.lastPosition = position
 
-    // Extend the flight track, thinning to keep the polyline cheap.
+    // Extend the flight track, thinning to keep the polyline cheap. The threshold is
+    // scale-coupled: at 1 m/s a 3 m gap would be a track point every six seconds, and
+    // 3 m is nearly a third of this block, so the trace would skip whole lanes.
     const last = this.track[this.track.length - 1]
-    if (!last || distanceM(last, position) > 3) this.track.push(position)
+    if (!last || distanceM(last, position) > TRACK_STEP_M) this.track.push(position)
 
     this.markCoverage(position)
     this.releaseDueDetections()
-
-    // At the end of the path, hold station rather than looping.
-    if (this.distanceAlong >= this.pathTotalM) this.streamState = 'live'
 
     this.emit()
   }
@@ -149,14 +153,14 @@ export class MissionSimulator {
   }
 
   /**
-   * Mark the cell the drone is currently over as imaged.
+   * Mark the cell the aircraft is currently over as imaged.
    *
-   * Only the cell underneath, not its neighbours. At 42 m altitude the footprint is
-   * roughly 55 m across against 40 m cells, so the drone genuinely images the cell
-   * it is in — but a neighbour only catches a fringe, and calling that "surveyed"
-   * would inflate coverage past what was actually looked at. The lawnmower path
-   * passes through every cell, so full coverage is still reachable, and coverage
-   * percent now tracks flight progress instead of racing ahead of it.
+   * Only the cell underneath, not its neighbours. The aircraft is a few metres up
+   * with a wide lens, so it sees well beyond one metre — but a neighbour only
+   * catches a fringe, and calling a fringe "surveyed" would inflate coverage past
+   * what was actually looked at. Every cell in a lane is marked as the lane is
+   * walked, so coverage still tracks flight progress and full coverage is
+   * reachable.
    */
   private markCoverage(position: LatLng): void {
     const here = cellAt(MISSION.grid, position)
@@ -164,35 +168,54 @@ export class MissionSimulator {
     this.coveredCells.add(cellId(here.col, here.row))
   }
 
-  // --- path geometry -------------------------------------------------------
+  // --- walk geometry -------------------------------------------------------
 
-  private positionAt(distance: number): LatLng {
-    let remaining = distance
-    const path = MISSION.plannedPath
-    for (let i = 0; i < this.legLengths.length; i++) {
-      const leg = this.legLengths[i]!
-      if (remaining <= leg || i === this.legLengths.length - 1) {
-        const t = leg === 0 ? 0 : Math.min(1, remaining / leg)
-        return lerpLatLng(path[i]!, path[i + 1]!, t)
-      }
-      remaining -= leg
+  /**
+   * Where the aircraft is after `d` metres of the walk.
+   *
+   * Lanes are swept east–west alternately, stepping north at the end of each, and
+   * the hand on the stick drifts a few centimetres either side of a true line. The
+   * drift is the point: a perfectly straight trace would read as a programmed route,
+   * and an operator comparing two surveys needs to see which waviness is the pilot
+   * and which is real.
+   */
+  private positionAtDistance(d: number): LatLng {
+    const walked = Math.max(0, Math.min(TOTAL_WALK_M, d))
+    const lane = Math.floor(walked / WALK_PERIOD_M)
+    const within = walked - lane * WALK_PERIOD_M
+    const lastLane = Math.max(0, LANES - 1)
+
+    let u: number
+    let northM: number
+    if (within <= LANE_SPAN_M) {
+      const s = within / LANE_SPAN_M
+      u = lane % 2 === 0 ? s : 1 - s
+      northM = Math.min(lastLane, lane) * LANE_STEP_M
+    } else {
+      // In the step across to the next lane. Held at the end of the lane, easing
+      // north, so the turn is one continuous movement instead of a jump.
+      const tau = (within - LANE_SPAN_M) / LANE_STEP_M
+      u = lane % 2 === 0 ? 1 : 0
+      northM = Math.min(lastLane, lane + tau) * LANE_STEP_M
     }
-    return path[path.length - 1]!
+
+    const driftE = Math.cos(walked / 2.3) * 0.08 + Math.sin(walked / 0.61) * 0.03
+    const driftN = Math.sin(walked / 1.7) * 0.09
+    return offsetM(MISSION.grid.origin, u * LANE_SPAN_M + driftE, northM + driftN)
   }
 
   private replayTrackTo(distance: number): void {
-    // Seed the track and coverage as if the drone had already flown this far.
-    const step = 8 // metres between sampled track points
-    for (let d = 0; d <= distance; d += step) {
-      const p = this.positionAt(d)
+    // Seed the track and coverage as if the aircraft had already walked this far.
+    for (let d = 0; d <= distance; d += TRACK_STEP_M) {
+      const p = this.positionAtDistance(d)
       this.track.push(p)
       this.markCoverage(p)
     }
   }
 
   private headingAt(distance: number): number {
-    const ahead = this.positionAt(Math.min(this.pathTotalM, distance + 2))
-    const behind = this.positionAt(Math.max(0, distance - 2))
+    const ahead = this.positionAtDistance(Math.min(TOTAL_WALK_M, distance + 0.25))
+    const behind = this.positionAtDistance(Math.max(0, distance - 0.25))
     return bearingDeg(behind, ahead)
   }
 
@@ -200,22 +223,23 @@ export class MissionSimulator {
 
   private buildTelemetry(): Telemetry {
     const position = this.lastPosition
-    const heading = this.headingAt(this.distanceAlong)
-    const progress = this.distanceAlong / this.pathTotalM
+    const heading = this.headingAt(this.metresFlown)
+    const progress = Math.min(1, this.metresFlown / TOTAL_WALK_M)
     // Battery drains roughly linearly from 100% at takeoff.
     const batteryPct = Math.max(8, Math.round(100 - progress * 62 - this.elapsedS * 0.004))
     return {
       timestamp: new Date(MISSION_EPOCH + (this.elapsedS - ELAPSED_AT_LOAD_S) * 1000).toISOString(),
       position,
-      altitudeM: Number((41 + Math.sin(this.elapsedS / 40) * 1.4).toFixed(1)),
-      groundSpeedMs: Number((CRUISE_MS + Math.sin(this.elapsedS / 7) * 0.3).toFixed(1)),
+      altitudeM: Number((4 + Math.sin(this.elapsedS / 9) * 1.2).toFixed(1)),
+      groundSpeedMs: Number((CRUISE_MS + Math.sin(this.elapsedS / 2.5) * 0.15).toFixed(1)),
       headingDeg: Math.round(heading),
       batteryPct,
       batteryVolts: Number((22.2 * (0.86 + (batteryPct / 100) * 0.14)).toFixed(1)),
       satellites: 16 + (Math.floor(this.elapsedS / 13) % 3),
       gpsFix: '3d',
       linkPct: 92 + (Math.floor(this.elapsedS / 5) % 6),
-      mode: 'AUTO',
+      // The aircraft is flown by hand over the block — there is no autopilot to be in.
+      mode: 'MANUAL',
       armed: true,
     }
   }
