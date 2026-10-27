@@ -50,11 +50,6 @@ HEADING_UNKNOWN = 65535
 METRES_PER_DEG_LAT = 111320.0
 
 
-def _utc_now_iso() -> str:
-    """UTC timestamp, ISO-8601 with a Z suffix. Week 4 requires timestamped coords."""
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
 class GpsFix(NamedTuple):
     """One position sample. Immutable, so it can be handed to another thread safely."""
 
@@ -72,6 +67,64 @@ class GpsFix(NamedTuple):
         return self.fix_type >= GPS_FIX_3D
 
 
+# ---------------------------------------------------------------------------
+# Why a provider refused to produce a fix. These are machine-readable so a
+# caller (and gps_telemetry.GpsTelemetryService) can branch on the cause
+# instead of pattern-matching a sentence. They are deliberately distinct:
+# "wait for the first message" and "the link just died" are different faults
+# on the bench and want different responses.
+# ---------------------------------------------------------------------------
+REJECT_OK = ""                  # not a refusal - a fix is available
+REJECT_NO_POSITION = "no_position"   # nothing received yet; FC may still be booting
+REJECT_STALE = "stale"               # a real position, older than max_age_s
+REJECT_FIX_TYPE = "fix_type"         # fix below require_3d quality, or none at all
+
+# Link liveness, which is a question about the CONNECTION and not about the
+# position. Kept separate from the fix because a drone can have a perfect last
+# fix and a dead cable.
+LINK_OK = "ok"            # messages arriving normally
+LINK_SILENT = "silent"    # nothing for silent_after_s - the FC stopped talking
+LINK_FAULT = "fault"      # the link is erroring, not merely quiet
+
+
+class LinkStatus(NamedTuple):
+    """Health of the MAVLink connection itself, independent of any position."""
+
+    state: str                             # LINK_OK / LINK_SILENT / LINK_FAULT
+    seconds_since_message: Optional[float]  # None if no message has EVER arrived
+    last_error: str                        # most recent read exception, "" if none
+    rx_count: int                          # position messages accepted
+
+    def is_alive(self) -> bool:
+        return self.state == LINK_OK
+
+
+class TelemetrySample(NamedTuple):
+    """One drain of the provider, with the reason attached either way.
+
+    get_fix() collapses three very different situations into a bare None. This
+    keeps them apart. `reason` is a REJECT_* code (REJECT_OK when fix is set),
+    `detail` is the human-readable version, and `link` describes the connection
+    rather than the position.
+    """
+
+    fix: Optional[GpsFix]          # None unless reason == REJECT_OK
+    reason: str                    # REJECT_* code
+    detail: str                    # why, in words
+    age_s: Optional[float]         # seconds since the position message arrived
+    link: LinkStatus
+    fix_type: int
+    satellites: int
+
+    def is_valid(self) -> bool:
+        return self.fix is not None
+
+
+def _utc_now_iso() -> str:
+    """UTC timestamp, ISO-8601 with a Z suffix. Week 4 requires timestamped coords."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 class GpsProvider(object):
     """Base provider. Subclasses override start/get_fix/close."""
 
@@ -82,6 +135,31 @@ class GpsProvider(object):
 
     def get_fix(self) -> Optional[GpsFix]:
         raise NotImplementedError
+
+    def sample(self):
+        """Newest position plus the reason it is or is not usable.
+
+        Default for providers that have no link to report on (sim, none): wrap
+        whatever get_fix() returns and describe the link as healthy-but-idle.
+        MavlinkGpsProvider overrides this with real link bookkeeping.
+
+        The base implementation exists so GpsTelemetryService can wrap ANY
+        provider through one interface - without it, --gps sim and --gps none
+        would raise AttributeError on the first poll.
+        """
+        fix = self.get_fix()
+        age = None if fix is None else 0.0
+        if fix is None:
+            reason = REJECT_NO_POSITION
+            detail = "provider {0} has no position".format(self.name)
+        else:
+            reason = REJECT_OK
+            detail = "ok"
+        link = LinkStatus(LINK_OK, None, "", 0)
+        return TelemetrySample(
+            fix=fix, reason=reason, detail=detail, age_s=age, link=link,
+            fix_type=fix.fix_type if fix is not None else GPS_FIX_NONE,
+            satellites=fix.satellites if fix is not None else 0)
 
     def close(self) -> None:
         pass
@@ -109,6 +187,21 @@ class NullGpsProvider(GpsProvider):
 
     def get_fix(self) -> Optional[GpsFix]:
         return None
+
+    def sample(self):
+        """No receiver at all: report it as absent, not as a broken link.
+
+        The link is honestly LINK_OK - nothing is faulting and nothing went
+        quiet, there is simply no receiver fitted. Marking it LINK_SILENT would
+        make GpsTelemetryService classify a deliberate `--gps none` as
+        FIX_DISCONNECTED, which reads as "your cable fell out" when the operator
+        knows full well no GPS is attached.
+        """
+        return TelemetrySample(
+            fix=None, reason=REJECT_NO_POSITION,
+            detail="no GPS provider configured (--gps none)",
+            age_s=None, link=LinkStatus(LINK_OK, None, "", 0),
+            fix_type=GPS_FIX_NONE, satellites=0)
 
 
 class SimulatedGpsProvider(GpsProvider):
@@ -212,6 +305,7 @@ class MavlinkGpsProvider(GpsProvider):
         require_3d: bool = True,
         wait_for_heartbeat: bool = True,
         heartbeat_timeout_s: float = 30.0,
+        silent_after_s: float = 5.0,
     ) -> None:
         self.url = url
         self.baud = baud
@@ -219,6 +313,11 @@ class MavlinkGpsProvider(GpsProvider):
         self.require_3d = require_3d
         self.wait_for_heartbeat = wait_for_heartbeat
         self.heartbeat_timeout_s = heartbeat_timeout_s
+        # How long a working link may go quiet before it counts as disconnected.
+        # Deliberately larger than max_age_s: max_age_s judges a POSITION and
+        # this judges the CONNECTION, so a link that is merely missing position
+        # messages is not yet a dead link.
+        self.silent_after_s = silent_after_s
 
         self._conn = None
         self._thread = None      # type: Optional[threading.Thread]
@@ -235,6 +334,12 @@ class MavlinkGpsProvider(GpsProvider):
         self._sats = 0
         self._recv_mono = None   # type: Optional[float]
         self._recv_iso = ""
+
+        # Link bookkeeping, kept separate from the position above.
+        self._rx_count = 0       # position messages accepted since start()
+        self._last_msg_mono = None   # type: Optional[float] - ANY message, incl. heartbeat
+        self._last_error = ""
+        self._read_failures = 0
 
     def start(self) -> None:
         try:
@@ -285,15 +390,31 @@ class MavlinkGpsProvider(GpsProvider):
                     timeout=1.0,
                 )
             except Exception as exc:            # noqa: BLE001 - a dropped link must not kill the thread
+                with self._lock:
+                    self._read_failures += 1
+                    self._last_error = "{0}: {1}".format(type(exc).__name__, exc)
                 print("[gps] read error: {0}".format(exc), file=sys.stderr)
                 time.sleep(0.5)
                 continue
 
             if msg is None:
+                # A quiet second. Not an error: recv_match simply timed out, which
+                # on a live link happens between position updates at 5-10 Hz only
+                # if the link has actually stopped. Recorded as nothing received,
+                # never as a fault - the silent/fault distinction is made in
+                # link_status() so a slow link is not reported as a dead one.
                 continue
+
+            now = time.monotonic()
 
             kind = msg.get_type()
             with self._lock:
+                # ANY decoded message proves the link is alive, including ones this
+                # reader filters out. Heartbeats keep arriving on a link whose GPS
+                # has failed, and that is exactly the case worth distinguishing.
+                self._last_msg_mono = now
+                self._read_failures = 0     # a good read clears the error state
+
                 if kind == "GLOBAL_POSITION_INT":
                     # lat/lon arrive as degrees * 1e7, altitudes in mm.
                     self._lat = msg.lat / 1e7
@@ -301,30 +422,95 @@ class MavlinkGpsProvider(GpsProvider):
                     self._alt_msl_m = msg.alt / 1000.0
                     self._rel_alt_m = msg.relative_alt / 1000.0
                     self._heading = None if msg.hdg == HEADING_UNKNOWN else msg.hdg / 100.0
-                    self._recv_mono = time.monotonic()
+                    self._recv_mono = now
                     self._recv_iso = _utc_now_iso()
+                    self._rx_count += 1
                 elif kind == "GPS_RAW_INT":
                     self._fix_type = int(msg.fix_type)
                     self._sats = int(msg.satellites_visible)
 
-    def get_fix(self) -> Optional[GpsFix]:
-        """Newest usable fix, or None.
+    def link_status(self) -> LinkStatus:
+        """Is the connection itself healthy?
 
-        Returns None rather than a stale or low-quality position. Silently
-        accepting either is how a detection ends up plotted in the wrong field.
+        Three answers, and they are not the same thing:
+
+            fault  the reader keeps raising. The socket is broken, not quiet.
+            silent nothing has arrived for silent_after_s. Cable out, FC reset,
+                   or the FC stopped talking entirely.
+            ok     messages are arriving.
+
+        A drone can hold a perfectly good (now stale) last fix through all three,
+        which is why this is reported separately from get_fix().
         """
         with self._lock:
-            if self._lat is None or self._recv_mono is None:
-                return None
+            return self._link_status_locked()
 
-            age = time.monotonic() - self._recv_mono
-            if age > self.max_age_s:
-                return None
+    def _link_status_locked(self) -> LinkStatus:
+        """link_status() body. Caller must already hold self._lock.
+
+        Split out because threading.Lock is NOT reentrant: sample() and status()
+        both hold the lock and both need a link verdict, so they must call this
+        and not link_status() - which would deadlock the reader thread against
+        the caller.
+        """
+        if self._last_error and self._read_failures >= 3:
+            return LinkStatus(LINK_FAULT, self._seconds_since(self._last_msg_mono),
+                              self._last_error, self._rx_count)
+
+        idle = self._seconds_since(self._last_msg_mono)
+        if idle is None:
+            # Nothing has EVER arrived. Not a fault yet - that is what
+            # waiting for the first heartbeat looks like.
+            return LinkStatus(LINK_OK if self._thread is None else LINK_SILENT,
+                              None, self._last_error, self._rx_count)
+
+        if idle > self.silent_after_s:
+            return LinkStatus(LINK_SILENT, idle, self._last_error, self._rx_count)
+
+        return LinkStatus(LINK_OK, idle, self._last_error, self._rx_count)
+
+    def _seconds_since(self, mono):
+        """Seconds since a monotonic stamp, or None if it never happened."""
+        if mono is None:
+            return None
+        return time.monotonic() - mono
+
+    def sample(self):
+        """One drain of the link, with the reason attached either way.
+
+        get_fix() is the blunt instrument: none of "no message yet", "the fix is
+        only 2D" and "that position is 4 seconds old" are distinguishable from
+        its return value. sample() keeps them apart without changing get_fix()'s
+        contract, so existing callers (live_detect.py) are untouched.
+        """
+        with self._lock:
+            link = self._link_status_locked()
+            age = self._seconds_since(self._recv_mono)
+            fix_type = self._fix_type
+            sats = self._sats
+
+            if self._lat is None or self._recv_mono is None:
+                return TelemetrySample(
+                    fix=None, reason=REJECT_NO_POSITION,
+                    detail="no position message yet (fix_type={0}, sats={1})".format(
+                        fix_type, sats),
+                    age_s=None, link=link, fix_type=fix_type, satellites=sats)
+
+            if age is not None and age > self.max_age_s:
+                return TelemetrySample(
+                    fix=None, reason=REJECT_STALE,
+                    detail="position is {0:.1f}s old (max_age_s={1:.1f})".format(
+                        age, self.max_age_s),
+                    age_s=age, link=link, fix_type=fix_type, satellites=sats)
 
             if self.require_3d and self._fix_type < GPS_FIX_3D:
-                return None
+                return TelemetrySample(
+                    fix=None, reason=REJECT_FIX_TYPE,
+                    detail="fix_type={0} is below the required 3D fix (sats={1})".format(
+                        fix_type, sats),
+                    age_s=age, link=link, fix_type=fix_type, satellites=sats)
 
-            return GpsFix(
+            fix = GpsFix(
                 lat=self._lat,
                 lon=self._lon,
                 alt_msl_m=self._alt_msl_m,
@@ -334,14 +520,33 @@ class MavlinkGpsProvider(GpsProvider):
                 satellites=self._sats,
                 ts_utc=self._recv_iso,
             )
+            return TelemetrySample(
+                fix=fix, reason=REJECT_OK, detail="ok",
+                age_s=age, link=link, fix_type=fix_type, satellites=sats)
+
+    def get_fix(self) -> Optional[GpsFix]:
+        """Newest usable fix, or None.
+
+        Returns None rather than a stale or low-quality position. Silently
+        accepting either is how a detection ends up plotted in the wrong field.
+
+        Unchanged contract - this is one line over sample(), so there is exactly
+        one implementation of the accept/reject policy and gps_telemetry.py's
+        reasons cannot drift away from what get_fix() actually returns.
+        """
+        return self.sample().fix
 
     def status(self) -> str:
         """One-line health string for the HUD overlay and startup diagnostics."""
         with self._lock:
+            link = self._link_status_locked()
             if self._lat is None:
-                return "no position yet (fix_type={0}, sats={1})".format(self._fix_type, self._sats)
-            age = time.monotonic() - self._recv_mono if self._recv_mono else float("inf")
-            return "fix_type={0} sats={1} age={2:.1f}s".format(self._fix_type, self._sats, age)
+                return "no position yet (fix_type={0}, sats={1}, link={2})".format(
+                    self._fix_type, self._sats, link.state)
+            age = self._seconds_since(self._recv_mono)
+            return "fix_type={0} sats={1} age={2:.1f}s link={3}".format(
+                self._fix_type, self._sats,
+                float("inf") if age is None else age, link.state)
 
     def close(self) -> None:
         self._stop.set()
@@ -364,7 +569,7 @@ def make_provider(kind: str, **kwargs) -> GpsProvider:
 
     if kind == "mavlink":
         allowed = ("url", "baud", "max_age_s", "require_3d",
-                   "wait_for_heartbeat", "heartbeat_timeout_s")
+                   "wait_for_heartbeat", "heartbeat_timeout_s", "silent_after_s")
         return MavlinkGpsProvider(**{k: v for k, v in kwargs.items() if k in allowed})
 
     if kind == "sim":

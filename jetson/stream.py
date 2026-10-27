@@ -69,14 +69,20 @@ def make_handler(broadcaster):
             pass
 
         def do_GET(self):
-            if self.path == "/":
+            # Path only — ignore any query string. Browsers append cache-busters
+            # (`/stream?t=3`) to force a fresh request when retrying a perpetual
+            # multipart connection, and a strict equality test on `self.path`
+            # would answer those with a 404. The query carries nothing the server
+            # needs, so the cheapest correct thing is to drop it.
+            path = self.path.split("?", 1)[0]
+            if path == "/":
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
                 self.send_header("Content-Length", str(len(PAGE)))
                 self.end_headers()
                 self.wfile.write(PAGE)
                 return
-            if self.path != "/stream":
+            if path != "/stream":
                 self.send_error(404)
                 return
 
