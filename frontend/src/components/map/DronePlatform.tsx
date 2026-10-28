@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
 import type { Telemetry } from '@/types'
-import { droneSymbol } from './markerGlyphs'
+import { createDroneOverlay } from './DroneOverlay'
+import type { DroneOverlayHandle } from './DroneOverlay'
 import { useMap } from './mapContext'
-import { useZoomScale } from './useMapHooks'
 
 /**
  * DronePlatform — the aircraft, and the ground it can see.
@@ -18,13 +18,13 @@ import { useZoomScale } from './useMapHooks'
  * view). It is drawn at low opacity for exactly that reason: it is a hint about
  * coverage, not a surveyed boundary.
  *
- * ── Port note ────────────────────────────────────────────────────────────────────
+ * ── The aircraft mark is a DOM overlay ─────────────────────────────────────────
  *
- * In Leaflet the heading was applied as an inline CSS transform on an SVG inside a
- * `divIcon`, and rotating a DOM element about its own centre is fiddly enough that it
- * was the classic source of off-by-a-few-pixels marker skew. Maps `Symbol` has a
- * native `rotation`, measured clockwise from north — the same convention compass
- * headings already use — so the whole transform dance disappears.
+ * The drone is drawn from a raster PNG, and a raster `google.maps.Marker` icon cannot
+ * be rotated — `Icon` has no rotation field. `Symbol` does have `rotation`, but a
+ * symbol is a vector path, not a bitmap. So the aircraft is an `OverlayView` wrapping
+ * an `<img>` and rotating it with CSS. See `DroneOverlay.ts`, which also explains why
+ * that class has to be built lazily.
  *
  * Unlike the other layers, these two objects are created once and then *updated*.
  * Telemetry arrives several times a second and the drone is the one thing on screen
@@ -33,26 +33,27 @@ import { useZoomScale } from './useMapHooks'
  */
 export function DronePlatform({ telemetry }: { telemetry: Telemetry }) {
   const { map, maps } = useMap()
-  const scale = useZoomScale()
 
-  const markerRef = useRef<google.maps.Marker | null>(null)
+  const overlayRef = useRef<DroneOverlayHandle | null>(null)
   const discRef = useRef<google.maps.Circle | null>(null)
+  const frameRef = useRef<number | null>(null)
+
+  // What the next frame should apply. Held in a ref so the scheduling effect can
+  // depend on the numbers while the callback always reads the latest values — a
+  // closure capturing `telemetry` here would paint one tick behind.
+  const pendingRef = useRef({ lat: 0, lon: 0, altitudeM: 0, headingDeg: 0 })
 
   // Create once. The initial position comes from the first telemetry frame; every
   // later frame is applied by the effect below.
   useEffect(() => {
     const position = { lat: telemetry.position.lat, lng: telemetry.position.lon }
 
-    const marker = new maps.Marker({
-      map,
-      position,
-      icon: droneSymbol(telemetry.headingDeg, scale),
-      // Above every detection pin. The drone is the one mark that must never be
-      // hidden by the thing it is investigating.
-      zIndex: 1000,
-      clickable: false,
-      title: 'Drone',
-    })
+    const overlay = createDroneOverlay()
+    overlay.setPosition({ lat: telemetry.position.lat, lon: telemetry.position.lon })
+    overlay.setHeading(telemetry.headingDeg)
+    // Above every detection pin. The drone is the one mark that must never be
+    // hidden by the thing it is investigating.
+    overlay.setMap(map)
 
     const disc = new maps.Circle({
       map,
@@ -67,14 +68,24 @@ export function DronePlatform({ telemetry }: { telemetry: Telemetry }) {
       zIndex: 900,
     })
 
-    markerRef.current = marker
+    overlayRef.current = overlay
     discRef.current = disc
 
+    pendingRef.current = {
+      lat: telemetry.position.lat,
+      lon: telemetry.position.lon,
+      altitudeM: telemetry.altitudeM,
+      headingDeg: telemetry.headingDeg,
+    }
+
     return () => {
-      google.maps.event.clearInstanceListeners(marker)
-      marker.setMap(null)
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current)
+        frameRef.current = null
+      }
+      overlay.setMap(null)
       disc.setMap(null)
-      markerRef.current = null
+      overlayRef.current = null
       discRef.current = null
     }
     // Intentionally not dependant on the telemetry values: this effect owns the
@@ -83,25 +94,41 @@ export function DronePlatform({ telemetry }: { telemetry: Telemetry }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, maps])
 
-  // Follow the aircraft. Position, heading and the footprint disc all move together.
+  // Follow the aircraft. Position, altitude and heading all move the same mark, so
+  // they share one scheduled frame instead of each scheduling its own — within a
+  // single tick the position and the heading both change, and there is no reason to
+  // lay the aircraft out twice for one visible frame.
   useEffect(() => {
-    const marker = markerRef.current
-    const disc = discRef.current
-    if (!marker || !disc) return
+    pendingRef.current = {
+      lat: telemetry.position.lat,
+      lon: telemetry.position.lon,
+      altitudeM: telemetry.altitudeM,
+      headingDeg: telemetry.headingDeg,
+    }
 
-    const position = { lat: telemetry.position.lat, lng: telemetry.position.lon }
-    marker.setPosition(position)
-    disc.setCenter(position)
-    disc.setRadius(footprintM(telemetry.altitudeM))
-  }, [telemetry.position.lat, telemetry.position.lon, telemetry.altitudeM])
+    // A frame is already queued; it will read the values just stored and paint them.
+    if (frameRef.current !== null) return
 
-  // Heading, separately — so a change in heading does not also touch geometry that
-  // has not moved.
-  useEffect(() => {
-    const marker = markerRef.current
-    if (!marker) return
-    marker.setIcon(droneSymbol(telemetry.headingDeg, scale))
-  }, [telemetry.headingDeg, scale])
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null
+
+      const overlay = overlayRef.current
+      const disc = discRef.current
+      if (!overlay || !disc) return
+
+      const { lat, lon, altitudeM, headingDeg } = pendingRef.current
+
+      overlay.setPosition({ lat, lon })
+      overlay.setHeading(headingDeg)
+      disc.setCenter({ lat, lng: lon })
+      disc.setRadius(footprintM(altitudeM))
+    })
+  }, [
+    telemetry.position.lat,
+    telemetry.position.lon,
+    telemetry.altitudeM,
+    telemetry.headingDeg,
+  ])
 
   return null
 }

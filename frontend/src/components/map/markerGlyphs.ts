@@ -24,6 +24,10 @@ import { RISK_HEX } from '@/lib/risk'
  *
  * The marker size tracks selection so the selected pin reads as selected at a
  * glance without a separate highlight.
+ *
+ * The aircraft is deliberately *not* here. It is a raster PNG rather than a path, and
+ * a raster `Marker` icon cannot be rotated — so the drone is a DOM `OverlayView` with
+ * a CSS rotation instead. See `DroneOverlay.ts`.
  */
 
 const STROKE = '#0E141A'
@@ -119,34 +123,6 @@ export function detectionSymbol(
 }
 
 /**
- * The drone glyph — an arrowhead pointing along the aircraft's heading.
- *
- * Authored pointing *north* (up) so the marker's `rotation` can be the heading
- * directly, with no offset arithmetic to get wrong. Maps rotates symbols clockwise
- * from north, which is the same convention compass headings use, so
- * `rotation: headingDeg` is exactly right.
- *
- * The notch at the tail is not decoration: a plain triangle is ambiguous at small
- * sizes — it can read as pointing either way. Cutting the tail makes the direction
- * unmistakable, which matters when the operator is asking "which way is it facing".
- */
-export function droneSymbol(headingDeg: number, zoomScale = 1): google.maps.Symbol {
-  return {
-    // A classic dart: nose, two trailing corners, and a notch between them.
-    path: 'M 0,-11 L 7,9 L 0,4.5 L -7,9 Z',
-    scale: zoomScale,
-    rotation: headingDeg,
-    // rotate about the glyph's own centre, not the map origin.
-    anchor: new google.maps.Point(0, 0),
-    fillColor: '#E8E4DA',
-    fillOpacity: 1,
-    strokeColor: '#0E141A',
-    strokeOpacity: 1,
-    strokeWeight: 1.5,
-  }
-}
-
-/**
  * Endpoint glyph for the safe-route planner.
  *
  * Drawn as a ring with a dark core, matching the console's other "you put this
@@ -175,26 +151,5 @@ export function waypointSymbol(hex: string, scale = 1): google.maps.Symbol {
     strokeColor: '#0E141A',
     strokeOpacity: 1,
     strokeWeight: 1.5,
-  }
-}
-
-/**
- * The survey-grid cell hover target.
- *
- * An invisible but interactive rectangle. Maps has no "tooltip on a polygon", so
- * cell labels are rendered as plain markers with an attached text label; this
- * symbol exists only for the cells where a click target is wanted.
- */
-export function cellLabelIcon(text: string): {
-  text: string
-  color: string
-  fontSize: string
-  fontFamily: string
-} {
-  return {
-    text,
-    color: 'rgba(232, 228, 218, 0.42)',
-    fontSize: '9px',
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   }
 }

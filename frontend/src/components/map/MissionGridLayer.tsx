@@ -1,103 +1,102 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { MissionGrid } from '@/types'
-import { cellBounds, cellId } from '@/lib/geo'
-import { cellLabelIcon } from './markerGlyphs'
-import { useZoomScale } from './useMapHooks'
+import { gridBounds } from '@/lib/geo'
 import { useMap } from './mapContext'
 
 /**
- * MissionGridLayer — the survey grid, with cell references.
+ * MissionGridLayer — the survey grid, as vector lines.
  *
- * This is not decoration: `C4` is how a cell gets named on paper and over radio, so
- * the label on the map and the label in the detection record are the same string.
- * Cell outlines are hairline and unfilled — the grid is a reference frame, and
- * anything heavier would compete with the coverage hatch drawn over it.
+ * The grid is a reference frame, not data. Its job is to let an operator say "the
+ * hazard is in C4" and have everyone else find C4 immediately. That means the lines
+ * need to be present at every zoom without ever competing with the things that *are*
+ * data — detections and coverage.
  *
- * Ported from Leaflet, where each cell was one `<Rectangle>` carrying a `<Tooltip>`
- * child. Maps has no tooltip on a shape, so a cell is now two objects: an unfilled
- * rectangle for the line, and a marker carrying a text label for the reference. They
- * are created and destroyed as one array so the layer appears and disappears as a
- * unit — a partially-drawn grid would be worse than none, because a missing line
- * reads as surveyed ground.
+ * ── Why lines rather than one rectangle per cell ────────────────────────────────
  *
- * Both are built once per mount and never re-created. There can be hundreds of cells,
- * and churning that many overlay objects on every re-render would drop frames mid-pan.
+ * Every internal grid line is shared by the two cells either side of it, so drawing
+ * each cell as its own closed rectangle draws each shared edge twice. On a 10x10 grid
+ * that is 100 rectangles and 400 edges to express 40 unique segments. The waste is
+ * not the real problem: adjacent rectangles stroke the same line twice at 85%
+ * opacity, so shared edges render darker than the boundary and the grid appears to
+ * have a heavier internal lattice than frame.
+ *
+ * As lines, every segment has exactly one owner — 11 horizontal and 11 vertical
+ * polylines, one per boundary including the far edge, which is why there is one more
+ * line than there are rows or columns. Stroke weight is then uniform by construction
+ * rather than by tuning opacity, and the whole grid is 22 overlay objects instead of
+ * 100, which also makes panning cheaper.
+ *
+ * ── Why there are no cell labels on the map ──────────────────────────────
+ *
+ * Cells used to carry an `A1..J10` text marker each. At the working zoom a 1 m cell
+ * is roughly 14 px across and a 9 px label does not fit inside it — 100 of them
+ * overlap into an illegible smear that reads as map noise and buries the detections
+ * it is meant to help locate.
+ *
+ * The cell reference still matters, so nothing is lost: it appears everywhere it has
+ * room — the detection callout, the detection table and the reports all carry the
+ * cell id. The map shows geometry; the console shows nomenclature.
  */
 export function MissionGridLayer({ grid }: { grid: MissionGrid }) {
   const { map, maps } = useMap()
-  const scale = useZoomScale()
 
-  const cells = useMemo(() => {
-    const out: { col: number; row: number; id: string }[] = []
-    for (let row = 0; row < grid.rows; row++) {
-      for (let col = 0; col < grid.cols; col++) {
-        out.push({ col, row, id: cellId(col, row) })
-      }
+  /**
+   * The grid's lines, in domain coordinates.
+   *
+   * Boundaries are derived from `gridBounds` rather than from per-cell
+   * `cellBounds` calls so that every line shares one origin and one longitude
+   * scale. `cellBounds` recomputes metres-per-degree from each cell's own corner,
+   * which makes the east edges of cells in different rows differ in the last
+   * decimal — enough to leave column lines a hair off true vertical and row lines
+   * unevenly long. Starting from the grid's own bounds makes both families exactly
+   * axis-aligned.
+   */
+  const lines = useMemo(() => {
+    const [[south, west], [north, east]] = gridBounds(grid)
+    const out: google.maps.LatLngLiteral[][] = []
+
+    // Row boundaries: `rows + 1` horizontal lines, south to north.
+    for (let row = 0; row <= grid.rows; row++) {
+      const lat = south + ((north - south) * row) / grid.rows
+      out.push([
+        { lat, lng: west },
+        { lat, lng: east },
+      ])
     }
+
+    // Column boundaries: `cols + 1` vertical lines, west to east.
+    for (let col = 0; col <= grid.cols; col++) {
+      const lng = west + ((east - west) * col) / grid.cols
+      out.push([
+        { lat: south, lng },
+        { lat: north, lng },
+      ])
+    }
+
     return out
-  }, [grid.rows, grid.cols])
-
-  const outlinesRef = useRef<google.maps.Rectangle[]>([])
-  const labelsRef = useRef<google.maps.Marker[]>([])
+  }, [grid])
 
   useEffect(() => {
-    const outlines = cells.map(({ col, row }) => {
-      // `cellBounds` still speaks Leaflet's [[swLat, swLon], [neLat, neLon]] shape,
-      // so the corners are lifted out by name rather than destructured positionally:
-      // swapping them would place the rectangle on the far side of the globe without
-      // raising an error.
-      const [[south, west], [north, east]] = cellBounds(grid, col, row)
-      return new maps.Rectangle({
-        map,
-        bounds: { south, west, north, east },
-        strokeColor: '#2C3A47',
-        strokeWeight: 1,
-        strokeOpacity: 0.85,
-        fillOpacity: 0,
-        // A reference grid should never intercept a click meant for a pin.
-        clickable: false,
-        zIndex: 10,
-      })
-    })
+    const polylines = lines.map(
+      (path) =>
+        new maps.Polyline({
+          map,
+          path,
+          strokeColor: '#2C3A47',
+          strokeWeight: 1,
+          strokeOpacity: 0.85,
+          // A reference grid should never intercept a click meant for a pin.
+          clickable: false,
+          // Above the coverage fill, below the pins: a cell boundary is a reading
+          // aid, and a detection marker must always win the z-order fight.
+          zIndex: 10,
+        }),
+    )
 
-    outlinesRef.current = outlines
     return () => {
-      outlines.forEach((o) => o.setMap(null))
-      outlinesRef.current = []
+      polylines.forEach((line) => line.setMap(null))
     }
-  }, [map, maps, grid, cells])
-
-  useEffect(() => {
-    const labels = cells.map(({ col, row, id }) => {
-      const [[south, west], [north, east]] = cellBounds(grid, col, row)
-      return new maps.Marker({
-        map,
-        position: { lat: (south + north) / 2, lng: (west + east) / 2 },
-        label: cellLabelIcon(id),
-        clickable: false,
-        // Above the hatch, below the pins: a cell reference is a reading aid, and a
-        // detection marker must always win the z-order fight.
-        zIndex: 20,
-      })
-    })
-
-    labelsRef.current = labels
-    return () => {
-      labels.forEach((m) => m.setMap(null))
-      labelsRef.current = []
-    }
-  }, [map, maps, grid, cells])
-
-  // Zoom changes a label's apparent size, not its content, so this adjusts the
-  // existing markers rather than rebuilding them.
-  useEffect(() => {
-    labelsRef.current.forEach((marker) => {
-      const label = marker.getLabel()
-      if (label && typeof label === 'object' && label.text !== undefined) {
-        marker.setLabel({ ...label, text: label.text, fontSize: `${Math.round(9 * scale)}px` })
-      }
-    })
-  }, [scale])
+  }, [map, maps, lines])
 
   return null
 }
