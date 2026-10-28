@@ -67,8 +67,86 @@ const BLOCK_DEPTH_M = MISSION.grid.rows * MISSION.grid.cellSizeM
 const LANES = Math.max(2, Math.floor((BLOCK_DEPTH_M - LANE_STEP_M) / LANE_STEP_M) + 1)
 /** One lane plus the step across to the next — the repeating unit of the walk. */
 const WALK_PERIOD_M = LANE_SPAN_M + LANE_STEP_M
-/** Total distance the walk covers, start to finish. Used only to size battery and progress. */
-export const TOTAL_WALK_M = LANES * LANE_SPAN_M + (LANES - 1) * LANE_STEP_M
+/**
+ * Distance to fly every lane once, sweeping alternate directions and stepping north
+ * between them. This is the survey pass proper.
+ */
+const SERPENTINE_M = LANES * LANE_SPAN_M + (LANES - 1) * LANE_STEP_M
+/**
+ * The leg that closes the loop: from the end of the last lane back south to the start.
+ *
+ * Without it the walk is an open path, which meant `metresFlown` saturated at the end
+ * of the first pass and the aircraft stopped dead. At `ELAPSED_AT_LOAD_S` the seed is
+ * already 70 m into an 88 m walk, so the drone froze about eighteen seconds after the
+ * page loaded and never moved again — which is precisely what a live map must not do.
+ * The block is small enough to be re-flown, so the walk repeats rather than ends.
+ */
+const RETURN_M = (LANES - 1) * LANE_STEP_M
+/** Total distance around the closed walk. */
+export const TOTAL_WALK_M = SERPENTINE_M + RETURN_M
+
+/**
+ * Where the aircraft is after `d` metres of the walk.
+ *
+ * Lanes are swept east–west alternately, stepping north at the end of each, and the
+ * hand on the stick drifts a few centimetres either side of a true line. The drift is
+ * the point: a perfectly straight trace would read as a programmed route, and an
+ * operator comparing two surveys needs to see which waviness is the pilot and which
+ * is real.
+ *
+ * Module-level and pure on purpose. The walk is the part of the simulator whose
+ * geometry has to be right — a metre of error is visible on a block this small — so
+ * it is testable without constructing a simulator, starting a timer, or touching the
+ * DOM.
+ */
+export function positionAtDistance(d: number): LatLng {
+  // Wrap rather than clamp: the walk is a loop, not a one-way leg. Clamping here is
+  // what froze the aircraft on screen, and it would do the same to a real mission
+  // replay once the log ran past its end.
+  const walked = ((d % TOTAL_WALK_M) + TOTAL_WALK_M) % TOTAL_WALK_M
+
+  // The closing leg back south down the western edge. Handled before the serpentine
+  // maths so the lanes below only ever deal with `0 .. SERPENTINE_M`.
+  if (walked > SERPENTINE_M) {
+    const tau = (walked - SERPENTINE_M) / RETURN_M
+    const driftE = Math.cos(walked / 2.3) * 0.08 + Math.sin(walked / 0.61) * 0.03
+    const driftN = Math.sin(walked / 1.7) * 0.09
+    return offsetM(MISSION.grid.origin, driftE, (1 - tau) * (LANES - 1) * LANE_STEP_M + driftN)
+  }
+
+  const lane = Math.floor(walked / WALK_PERIOD_M)
+  const within = walked - lane * WALK_PERIOD_M
+  const lastLane = Math.max(0, LANES - 1)
+
+  let u: number
+  let northM: number
+  if (within <= LANE_SPAN_M) {
+    const s = within / LANE_SPAN_M
+    u = lane % 2 === 0 ? s : 1 - s
+    northM = Math.min(lastLane, lane) * LANE_STEP_M
+  } else {
+    // In the step across to the next lane. Held at the end of the lane, easing
+    // north, so the turn is one continuous movement instead of a jump.
+    const tau = (within - LANE_SPAN_M) / LANE_STEP_M
+    u = lane % 2 === 0 ? 1 : 0
+    northM = Math.min(lastLane, lane + tau) * LANE_STEP_M
+  }
+
+  const driftE = Math.cos(walked / 2.3) * 0.08 + Math.sin(walked / 0.61) * 0.03
+  const driftN = Math.sin(walked / 1.7) * 0.09
+  return offsetM(MISSION.grid.origin, u * LANE_SPAN_M + driftE, northM + driftN)
+}
+
+/**
+ * Heading at `d` metres along the walk, degrees off north.
+ *
+ * Taken as a tangent over ±0.25 m, which at a 1.2 m lane spacing is a stable local
+ * direction without reaching into the neighbouring lane. `positionAtDistance` wraps,
+ * so the step across the end of the loop needs no special case here.
+ */
+export function headingAtDistance(d: number): number {
+  return bearingDeg(positionAtDistance(d - 0.25), positionAtDistance(d + 0.25))
+}
 
 export class MissionSimulator {
   private listeners = new Set<Listener>()
@@ -92,7 +170,7 @@ export class MissionSimulator {
     // screen at load is consistent with the detections already on screen. Because the
     // walk is a pure function of distance, this is the same path the tick will
     // continue along — no separate fast-forward code to drift out of step.
-    this.lastPosition = this.positionAtDistance(this.metresFlown)
+    this.lastPosition = positionAtDistance(this.metresFlown)
     this.replayTrackTo(this.metresFlown)
   }
 
@@ -126,9 +204,11 @@ export class MissionSimulator {
   private tick(): void {
     const dt = TICK_MS / 1000
     this.elapsedS += dt
-    this.metresFlown = Math.min(TOTAL_WALK_M, this.metresFlown + CRUISE_MS * dt)
+    // Advance and let `positionAtDistance` wrap. Clamping to TOTAL_WALK_M here would
+    // pin the aircraft to the last lane forever, which is the freeze this fixes.
+    this.metresFlown += CRUISE_MS * dt
 
-    const position = this.positionAtDistance(this.metresFlown)
+    const position = positionAtDistance(this.metresFlown)
     this.lastPosition = position
 
     // Extend the flight track, thinning to keep the polyline cheap. The threshold is
@@ -170,60 +250,20 @@ export class MissionSimulator {
 
   // --- walk geometry -------------------------------------------------------
 
-  /**
-   * Where the aircraft is after `d` metres of the walk.
-   *
-   * Lanes are swept east–west alternately, stepping north at the end of each, and
-   * the hand on the stick drifts a few centimetres either side of a true line. The
-   * drift is the point: a perfectly straight trace would read as a programmed route,
-   * and an operator comparing two surveys needs to see which waviness is the pilot
-   * and which is real.
-   */
-  private positionAtDistance(d: number): LatLng {
-    const walked = Math.max(0, Math.min(TOTAL_WALK_M, d))
-    const lane = Math.floor(walked / WALK_PERIOD_M)
-    const within = walked - lane * WALK_PERIOD_M
-    const lastLane = Math.max(0, LANES - 1)
-
-    let u: number
-    let northM: number
-    if (within <= LANE_SPAN_M) {
-      const s = within / LANE_SPAN_M
-      u = lane % 2 === 0 ? s : 1 - s
-      northM = Math.min(lastLane, lane) * LANE_STEP_M
-    } else {
-      // In the step across to the next lane. Held at the end of the lane, easing
-      // north, so the turn is one continuous movement instead of a jump.
-      const tau = (within - LANE_SPAN_M) / LANE_STEP_M
-      u = lane % 2 === 0 ? 1 : 0
-      northM = Math.min(lastLane, lane + tau) * LANE_STEP_M
-    }
-
-    const driftE = Math.cos(walked / 2.3) * 0.08 + Math.sin(walked / 0.61) * 0.03
-    const driftN = Math.sin(walked / 1.7) * 0.09
-    return offsetM(MISSION.grid.origin, u * LANE_SPAN_M + driftE, northM + driftN)
-  }
-
   private replayTrackTo(distance: number): void {
     // Seed the track and coverage as if the aircraft had already walked this far.
     for (let d = 0; d <= distance; d += TRACK_STEP_M) {
-      const p = this.positionAtDistance(d)
+      const p = positionAtDistance(d)
       this.track.push(p)
       this.markCoverage(p)
     }
-  }
-
-  private headingAt(distance: number): number {
-    const ahead = this.positionAtDistance(Math.min(TOTAL_WALK_M, distance + 0.25))
-    const behind = this.positionAtDistance(Math.max(0, distance - 0.25))
-    return bearingDeg(behind, ahead)
   }
 
   // --- snapshot assembly ---------------------------------------------------
 
   private buildTelemetry(): Telemetry {
     const position = this.lastPosition
-    const heading = this.headingAt(this.metresFlown)
+    const heading = headingAtDistance(this.metresFlown)
     const progress = Math.min(1, this.metresFlown / TOTAL_WALK_M)
     // Battery drains roughly linearly from 100% at takeoff.
     const batteryPct = Math.max(8, Math.round(100 - progress * 62 - this.elapsedS * 0.004))

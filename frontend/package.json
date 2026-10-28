@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --import ./scripts/register.mjs --test src/lib/*.test.ts"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^1.16.10",

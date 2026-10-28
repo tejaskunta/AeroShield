@@ -162,7 +162,7 @@ export function cellOrigin(grid: MissionGrid, col: number, row: number): LatLng 
   return offsetM(grid.origin, col * grid.cellSizeM, row * grid.cellSizeM)
 }
 
-/** `[[swLat, swLon], [neLat, neLon]]` — a Leaflet rectangle for one cell. */
+/** `[[swLat, swLon], [neLat, neLon]]` — the block's extent as plain numeric tuples. */
 export function cellBounds(
   grid: MissionGrid,
   col: number,

@@ -150,7 +150,18 @@ function droneOverlayClass(): new () => DroneOverlayHandle {
       // first paint after `setMap`. There is nothing to position against yet.
       if (!projection) return
 
-      const point = projection.fromLatLngToContainerPixel({
+      // Div pixels, NOT container pixels.
+      //
+      // This element is a child of a map pane, and the map panes are anchored at the
+      // *centre* of the map rather than at its top-left corner.
+      // `fromLatLngToContainerPixel` measures from the top-left, so using it here
+      // displaced the aircraft by exactly half the map in each axis — measured at
+      // 724x320, the error was precisely (362, 160). The drone was drawn the whole
+      // time; it was just parked in the bottom-right corner, which happens to be
+      // underneath the legend panel. That is what "the drone icon is not visible"
+      // actually was, and it is why nothing about the marker's geometry, size or
+      // opacity looked wrong when inspected in isolation.
+      const point = projection.fromLatLngToDivPixel({
         lat: this.position.lat,
         lng: this.position.lon,
       })

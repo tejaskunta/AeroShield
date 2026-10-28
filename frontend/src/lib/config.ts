@@ -15,7 +15,16 @@ import type { LatLng } from '@/types'
  */
 
 /** The browser bundle is public; these values are inlined into it verbatim. */
-const env = import.meta.env
+// Defaulted to an empty object because `import.meta.env` is a Vite construct: it does
+// not exist when these modules are imported by plain Node, which is how the geo
+// accuracy tests run. Without the fallback a test that only wants a survey origin
+// dies on `Cannot read properties of undefined` before it asserts anything.
+//
+// Cast rather than annotated: `ImportMetaEnv` declares this app's keys individually
+// and has no index signature, so it is not assignable to a `Record`. The cast keeps
+// the reads below checked against the real declaration while still allowing the
+// empty-object fallback that only Node can reach.
+const env = (import.meta.env ?? {}) as ImportMetaEnv
 
 /**
  * Google Maps JavaScript API key.
