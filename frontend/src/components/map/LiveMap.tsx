@@ -166,6 +166,9 @@ export function LiveMap({
           <TrackLayer points={progress.track} />
         )}
 
+        {/* The two layers that are on from the start: the hazards, and the aircraft
+            that found them. Everything above is reference geometry, off by default
+            (see DEFAULT_LAYERS) so these read as objects rather than as texture. */}
         {layers.detections && (
           <DetectionPins detections={detections} selectedId={selectedId} onSelect={onSelect} />
         )}

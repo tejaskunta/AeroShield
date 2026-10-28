@@ -21,10 +21,20 @@ export interface LayerState {
   detections: boolean
 }
 
+/**
+ * The map opens with the hazard field alone: detection pins and the aircraft.
+ *
+ * The survey grid, the coverage hatch and the flown track are all *reference*
+ * marks — they describe the ground and where the aircraft has been, not where the
+ * danger is. With them on by default the hazard pins sit inside a lattice of
+ * metre-square lines and read as part of that texture instead of as separate
+ * objects on it. They are one click away in this menu, which is where a reference
+ * layer belongs: available, not competing.
+ */
 export const DEFAULT_LAYERS: LayerState = {
-  grid: true,
-  coverage: true,
-  track: true,
+  grid: false,
+  coverage: false,
+  track: false,
   detections: true,
 }
 
