@@ -62,6 +62,19 @@ const HATCH_ALPHA = 0.5
 const HATCH_WIDTH = 1.4
 
 /**
+ * The wash under the hatch: surveyed ground reads as *filled* first and hatched
+ * second, so the covered area is legible at a glance from any distance without
+ * the operator having to resolve the individual hatch lines.
+ *
+ * It lives inside the tile rather than in a separate `Rectangle` per cell for a
+ * reason that matters to this layer's cost: a per-cell fill would double the object
+ * count for a decoration that is uniform anyway. A uniform wash is also the one
+ * thing that tiles across cell boundaries with no seam at all — which is precisely
+ * why the texture around it had to be built so carefully.
+ */
+const WASH = 'rgba(62, 80, 96, 0.16)'
+
+/**
  * Built lazily and kept for the session. Rasterising a hatch is deterministic and
  * identical for every cell and every mission, so doing it once per page is both
  * cheaper and *more* correct — separate Sid canvases could differ by a fraction of a
@@ -84,6 +97,12 @@ function hatchTile(): string {
   }
 
   ctx.clearRect(0, 0, TILE, TILE)
+
+  // The wash goes down first and covers the whole tile, so it is seamless across
+  // cell edges by construction — there is no edge to mismatch on.
+  ctx.fillStyle = WASH
+  ctx.fillRect(0, 0, TILE, TILE)
+
   ctx.strokeStyle = HATCH_STROKE
   ctx.globalAlpha = HATCH_ALPHA
   ctx.lineWidth = HATCH_WIDTH
@@ -136,13 +155,32 @@ export function CoverageHatchLayer({
   coveredCells: string[]
 }) {
   const { map, maps } = useMap()
-  const fillsRef = useRef<google.maps.GroundOverlay[]>([])
-  const edgesRef = useRef<google.maps.Polyline[]>([])
 
-  const covered = useMemo(() => new Set(coveredCells), [coveredCells])
+  /**
+   * Live overlays, keyed by the thing they represent rather than by array position.
+   *
+   * The whole point of this layer's shape: coverage only ever grows, so on a tick
+   * almost every cell is one we already drew. Diffing by key means a tick costs one
+   * `GroundOverlay` for the cell just imaged, instead of a hundred.
+   */
+  const fillsRef = useRef(new Map<string, google.maps.GroundOverlay>())
+  const edgesRef = useRef(new Map<string, google.maps.Polyline>())
+
+  /**
+   * Cell geometry, memoised on the *content* of the coverage list.
+   *
+   * The simulator hands us a fresh array every tick (`coveredCells: [...]`), so
+   * depending on `coveredCells` by identity would rebuild this on every single tick
+   * for an unchanged result. Joining the ids gives a primitive that only changes
+   * when the surveyed set actually changes — which is roughly once per several
+   * ticks as the aircraft crosses cell boundaries.
+   */
+  const key = useMemo(() => [...coveredCells].sort().join('|'), [coveredCells])
+
+  const covered = useMemo(() => new Set(key ? key.split('|') : []), [key])
 
   const cells = useMemo(() => {
-    return coveredCells
+    return (key ? key.split('|') : [])
       .map((id) => {
         const parsed = parseCellId(id)
         if (!parsed) return null
@@ -157,15 +195,36 @@ export function CoverageHatchLayer({
         }
       })
       .filter((c): c is NonNullable<typeof c> => c !== null)
-  }, [coveredCells, covered, grid])
+    // `key` is the identity of `covered` in every way that matters here.
+  }, [key, covered, grid])
 
-  // The hatch fill.
+  // The hatch fill — reconciled, not rebuilt.
   useEffect(() => {
     const tile = hatchTile()
-    if (!tile) return
+    const fills = fillsRef.current
 
-    const fills = cells.map(
-      (cell) =>
+    if (!tile) {
+      // No 2D context: degrade to "coverage not shown" rather than throwing.
+      fills.forEach((f) => f.setMap(null))
+      fills.clear()
+      return
+    }
+
+    const wanted = new Set(cells.map((c) => c.id))
+
+    // Anything no longer covered. In a forward-only survey this is empty, but a
+    // mission reset would otherwise leave stale hatch painted on the ground.
+    fills.forEach((overlay, id) => {
+      if (!wanted.has(id)) {
+        overlay.setMap(null)
+        fills.delete(id)
+      }
+    })
+
+    cells.forEach((cell) => {
+      if (fills.has(cell.id)) return
+      fills.set(
+        cell.id,
         new maps.GroundOverlay(tile, cell.bounds, {
           map,
           // The tile is already drawn at final opacity; letting the overlay apply a
@@ -173,23 +232,40 @@ export function CoverageHatchLayer({
           opacity: 1,
           clickable: false,
         }),
-    )
-
-    fillsRef.current = fills
-    return () => {
-      fills.forEach((f) => f.setMap(null))
-      fillsRef.current = []
-    }
+      )
+    })
   }, [map, maps, cells])
 
-  // The stake edge, drawn only on frontier sides.
+  // Tear down only on unmount or a map swap — not on every coverage change.
   useEffect(() => {
-    const edges: google.maps.Polyline[] = []
+    const fills = fillsRef.current
+    const edges = edgesRef.current
+    return () => {
+      fills.forEach((f) => f.setMap(null))
+      fills.clear()
+      edges.forEach((e) => e.setMap(null))
+      edges.clear()
+    }
+  }, [map])
+
+  // The stake edge, drawn only on frontier sides — also reconciled.
+  useEffect(() => {
+    const edges = edgesRef.current
+    const wanted = new Set<string>()
 
     cells.forEach((cell) => {
       if (!cell.frontier) return
       frontierSides(covered, cell.col, cell.row, grid).forEach((side) => {
-        edges.push(
+        // The frontier moves as cells fill in: a side staked last tick may be
+        // interior now, so the key has to name the side itself, not its position
+        // in the filtered list — position 0 is west on one tick and south on the
+        // next, which would silently leave the wrong stake on the ground.
+        const id = `${cell.id}:${side.side}`
+        wanted.add(id)
+        if (edges.has(id)) return
+
+        edges.set(
+          id,
           new maps.Polyline({
             map,
             path: side.path,
@@ -211,11 +287,16 @@ export function CoverageHatchLayer({
       })
     })
 
-    edgesRef.current = edges
-    return () => {
-      edges.forEach((e) => e.setMap(null))
-      edgesRef.current = []
-    }
+    // Retire sides that are no longer frontier. This is the part that keeps the
+    // marking honest: without it, ticks staked earlier in the flight would remain
+    // drawn across ground that has since been surveyed, so the map would keep
+    // claiming an edge that no longer exists.
+    edges.forEach((line, id) => {
+      if (!wanted.has(id)) {
+        line.setMap(null)
+        edges.delete(id)
+      }
+    })
   }, [map, maps, cells, covered, grid])
 
   return null
@@ -243,18 +324,23 @@ function frontierSides(
   col: number,
   row: number,
   grid: MissionGrid,
-): { path: google.maps.LatLngLiteral[] }[] {
+): { side: string; path: google.maps.LatLngLiteral[] }[] {
   const [[south, west], [north, east]] = cellBounds(grid, col, row)
   const sw = { lat: south, lng: west }
   const se = { lat: south, lng: east }
   const ne = { lat: north, lng: east }
   const nw = { lat: north, lng: west }
 
-  const candidates: { col: number; row: number; path: google.maps.LatLngLiteral[] }[] = [
-    { col: col - 1, row, path: [nw, sw] },
-    { col: col + 1, row, path: [se, ne] },
-    { col, row: row - 1, path: [sw, se] },
-    { col, row: row + 1, path: [ne, nw] },
+  const candidates: {
+    side: string
+    col: number
+    row: number
+    path: google.maps.LatLngLiteral[]
+  }[] = [
+    { side: 'w', col: col - 1, row, path: [nw, sw] },
+    { side: 'e', col: col + 1, row, path: [se, ne] },
+    { side: 's', col, row: row - 1, path: [sw, se] },
+    { side: 'n', col, row: row + 1, path: [ne, nw] },
   ]
 
   return candidates
@@ -262,5 +348,5 @@ function frontierSides(
       if (c < 0 || r < 0 || c >= grid.cols || r >= grid.rows) return false
       return !covered.has(cellId(c, r))
     })
-    .map(({ path }) => ({ path }))
+    .map(({ side, path }) => ({ side, path }))
 }

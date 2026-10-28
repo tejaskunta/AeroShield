@@ -24,11 +24,22 @@ import { useMap } from './mapContext'
  *
  * Bright and solid: this is the historical record, and on a mission in progress it is
  * the only evidence of where the aircraft has been.
+ *
+ * ── The dependency here is `points.length`, and it has to be ─────────────────────
+ *
+ * The simulator appends to its track array in place and hands out the *same*
+ * reference every tick (`buildProgress()` returns `track: this.track`). So `points`
+ * is identity-stable for the whole mission, and an effect depending on `[.., points]`
+ * runs exactly once — the polyline was frozen at whatever the track was on mount and
+ * never extended. That is why this reads `.length`: it is the only thing that
+ * changes. The line is then extended in place with `setPath`, which is also the
+ * cheaper operation, since a track that grows to hundreds of points stays one object.
  */
 export function TrackLayer({ points }: { points: LatLng[] }) {
   const { map, maps } = useMap()
   const lineRef = useRef<google.maps.Polyline | null>(null)
 
+  // Create once per map, not once per point.
   useEffect(() => {
     const line = new maps.Polyline({
       map,
@@ -45,7 +56,19 @@ export function TrackLayer({ points }: { points: LatLng[] }) {
       line.setMap(null)
       lineRef.current = null
     }
-  }, [map, maps, points])
+    // `points` is deliberately absent: it is a mutated array, so its identity never
+    // changes and including it would express a dependency that does not exist. The
+    // path is kept current by the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, maps])
+
+  // Extend as the aircraft flies.
+  useEffect(() => {
+    lineRef.current?.setPath(toPath(points))
+    // `points.length` stands in for the array's contents, which is all that can
+    // change — see the note above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points.length])
 
   return null
 }

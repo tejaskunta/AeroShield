@@ -114,7 +114,13 @@ export function LiveMap({
    * The area that must stay visible. Covers the grid *and* the flown track, because
    * the track is where the aircraft has actually been and a manual pass can wander
    * outside the block it is meant to be covering.
+   *
+   * Keyed on `track.length`, not on `track`: the simulator appends in place and
+   * returns the same array reference each tick, so an identity dependency would
+   * compute this once and then hold panning to the bounds the track had at mount
+   * while the aircraft flew somewhere else entirely.
    */
+  const trackLength = progress?.track.length ?? 0
   const extent = useMemo(() => {
     const g = gridBounds(MISSION.grid)
     const [[south, west], [north, east]] = g
@@ -128,7 +134,10 @@ export function LiveMap({
     })
 
     return box
-  }, [progress?.track])
+    // See above: `trackLength` is the observable change, and `progress` is read only
+    // for its track.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackLength])
 
   return (
     <div className="relative h-full w-full bg-ink-deep">

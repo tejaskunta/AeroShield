@@ -48,6 +48,28 @@ export function DetectionPins({
   const selectedRef = useRef(selectedId)
   selectedRef.current = selectedId
 
+  /**
+   * A signature of everything a pin's appearance depends on.
+   *
+   * The simulator hands out a fresh `detections` array on every tick, so keying the
+   * effect on that array would tear down and rebuild all fourteen markers twice a
+   * second — for a list that changes only when a detection arrives or is reviewed.
+   * This string changes exactly when a pin would actually look different: a new id,
+   * a moved position, a different risk level, or a new review state.
+   *
+   * `positionErrorM` is included because it sizes the ring; `lat`/`lon` because a
+   * detection is relocated as its track firms up. Everything else on the record is
+   * irrelevant to what gets drawn.
+   */
+  const signature = detections
+    .map(
+      (d) =>
+        `${d.id}:${d.position.lat.toFixed(6)},${d.position.lon.toFixed(6)}:${
+          d.positionErrorM
+        }:${riskOf(d)}:${d.review.state}`,
+    )
+    .join('|')
+
   useEffect(() => {
     const markers: google.maps.Marker[] = []
     const rings: google.maps.Circle[] = []
@@ -101,10 +123,12 @@ export function DetectionPins({
       })
       rings.forEach((r) => r.setMap(null))
     }
-    // Rebuilding on selection change is deliberate: a pin's entire appearance is
-    // derived from whether it is selected, so patching in place would mean
-    // re-deriving the same arguments. Detections number in the tens.
-  }, [map, maps, detections, selectedId, scale])
+    // Rebuilding is still deliberate — a pin's entire appearance derives from its
+    // selection, so patching in place would mean re-deriving the same arguments.
+    // What changed is *when*: on the signature rather than on array identity, so a
+    // telemetry tick no longer counts as a change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, maps, signature, selectedId, scale])
 
   return null
 }
