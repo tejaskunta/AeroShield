@@ -39,6 +39,16 @@ interface ImportMetaEnv {
   readonly VITE_GOOGLE_MAPS_MAP_ID?: string
 
   /**
+   * Mapbox access token, used for imagery at zooms Google's built-in raster types
+   * will not reach. Public by construction, like the Google key — restrict it by URL
+   * in the Mapbox account rather than treating it as a secret.
+   *
+   * Absent, the imagery basemaps fall back to Google's own types and cap at zoom 20.
+   * See `RASTER_MAX_ZOOM` in `lib/config.ts`.
+   */
+  readonly VITE_MAPBOX_TOKEN?: string
+
+  /**
    * Live MJPEG feed from the Jetson. Empty string disables the in-app feed;
    * undefined falls back to the default in `lib/config.ts`.
    *

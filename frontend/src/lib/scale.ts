@@ -134,3 +134,33 @@ export function isBelowAffordableZoom(
 ): boolean {
   return zoom < Math.min(affordableZoom, maxZoom)
 }
+
+/**
+ * Whether a pane of this size can hold `spanM` legibly under a given ceiling.
+ *
+ * This is the question the map's legibility guard asks, stated as arithmetic so it
+ * can be decided without attempting a fit. It exists because the guard's previous
+ * method — fit, measure, retry if short, give up after three — cannot tell "the fit
+ * has not happened yet" apart from "no fit exists", and it spends its whole budget
+ * proving the second one on every raster basemap. See `RASTER_MAX_ZOOM`.
+ *
+ * Pass the ceiling the *current basemap* can reach, not the configured maximum: the
+ * difference between the two is exactly what made imagery look broken.
+ *
+ * `minPxPerMetre` is the legibility requirement, and it is compared against the scale
+ * at the best zoom reachable inside this pane. If the best is not good enough then no
+ * fit will be, and the honest response is to say so once — not to refit.
+ */
+export function paneHoldsSpanLegibly(
+  spanM: number,
+  viewportWidthPx: number,
+  viewportHeightPx: number,
+  paddingPx: number,
+  latDeg: number,
+  ceilingZoom: number,
+  minPxPerMetre: number,
+): boolean {
+  const affordable = zoomToFit(spanM, viewportWidthPx, viewportHeightPx, paddingPx, latDeg)
+  const reachable = Math.min(affordable, ceilingZoom)
+  return pixelsPerMetre(reachable, latDeg) >= minPxPerMetre
+}

@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { M_PER_DEG_LAT, distanceM, mPerDegLon } from '@/lib/geo'
-import { FIT_PADDING_PX, MIN_LIVE_MAP_PX_PER_METRE } from '@/lib/config'
+import {
+  FIT_PADDING_PX,
+  MAX_LIVE_MAP_ZOOM,
+  MIN_LIVE_MAP_PX_PER_METRE,
+} from '@/lib/config'
 import { pixelsPerMetre, zoomToFit } from '@/lib/scale'
 import type { LatLng } from '@/types'
 import { useMap } from './mapContext'
@@ -253,6 +257,14 @@ export interface ViewMetrics {
    */
   affordableZoom: number
   /**
+   * The ceiling the current basemap can actually reach.
+   *
+   * Reported so the readout can name the real limit rather than the configured one.
+   * On raster imagery these differ by two levels, which is a factor of four in scale —
+   * far too large a gap for a diagnostic to paper over. See `RASTER_MAX_ZOOM`.
+   */
+  ceilingZoom: number
+  /**
    * Which axis is starving the fit.
    *
    * `fitBounds` has to satisfy the width and the height, so one of them runs out
@@ -264,7 +276,7 @@ export interface ViewMetrics {
   binding: 'width' | 'height'
 }
 
-export function useViewMetrics(spanM: number): ViewMetrics | null {
+export function useViewMetrics(spanM: number, ceilingZoom: number = MAX_LIVE_MAP_ZOOM): ViewMetrics | null {
   const { map } = useMap()
   const [view, setView] = useState<ViewMetrics | null>(null)
 
@@ -301,6 +313,7 @@ export function useViewMetrics(spanM: number): ViewMetrics | null {
         prev.zoom === zoom &&
         prev.width === width &&
         prev.height === height &&
+        prev.ceilingZoom === ceilingZoom &&
         prev.viewportSpanM === nearest(viewportSpanM)
           ? prev
           : {
@@ -315,6 +328,7 @@ export function useViewMetrics(spanM: number): ViewMetrics | null {
               spanPx: spanM * pxPerM,
               viewportSpanM: nearest(viewportSpanM),
               affordableZoom: affordable,
+              ceilingZoom,
               // `zoomToFit` spends whichever axis runs out first, so on a wide, short
               // pane the height is what limits it — the readout is asking "what is
               // stopping this pane from going further", and the answer is the smaller
@@ -336,7 +350,7 @@ export function useViewMetrics(spanM: number): ViewMetrics | null {
       listeners.forEach((l) => l.remove())
       observer.disconnect()
     }
-  }, [map, spanM])
+  }, [map, spanM, ceilingZoom])
 
   return view
 }
@@ -360,18 +374,23 @@ export function useViewMetrics(spanM: number): ViewMetrics | null {
  * and restriction are in force. The arithmetic in `lib/scale.ts` predicts the
  * outcome; it does not decide it.
  *
- * Bounded to three attempts. Re-running a fit inside the callback that observes
- * zoom changes is one step from an infinite loop, and an operator who has zoomed
- * out on purpose — to find their way back to a block they have lost — must not have
- * the map yank itself in again the moment they stop. If three fits have not produced
- * a legible scale, the container cannot provide one at this span and the answer is a
- * layout change, not a fourth fit.
+ * Bounded to three attempts, and subordinate to the operator. Re-running a fit inside
+ * the callback that observes zoom changes is one step from an infinite loop, and an
+ * operator who has zoomed out on purpose — to find their way back to a block they
+ * have lost — must not have the map yank itself in again the moment they stop. That
+ * was not a hypothetical: it was measured, twenty-five wheel scrolls out leaving the
+ * zoom pinned at 22. So a zoom the operator pulled out ends the guard's interest in
+ * this pane size entirely, and the three-attempt budget is a bound on the guard's own
+ * correction attempts rather than a licence to keep trying. If three fits have not
+ * produced a legible scale the container cannot provide one at this span, and the
+ * answer is a layout change, not a fourth fit.
  *
  * Returns whether the map is currently legible, so a caller can say so.
  */
 export function useViewReadiness(
   position: LatLng | null,
   extent: { south: number; west: number; north: number; east: number } | null,
+  ceilingZoom: number = MAX_LIVE_MAP_ZOOM,
 ): boolean {
   const { map } = useMap()
   /**
@@ -384,6 +403,41 @@ export function useViewReadiness(
    */
   const [ready, setReady] = useState(true)
   const attempts = useRef(0)
+  /**
+   * The operator has taken this pane, so the guard stands down until it is resized.
+   *
+   * This is the fix for a measured bug, and why it is a flag rather than arithmetic
+   * is worth recording, because the arithmetic looked correct and was not. The guard
+   * used to reset its attempt budget on every successful fit. That defeats its own
+   * "bounded to three attempts" rule — fit, measure legible, reset to zero, fresh
+   * budget — and because it listens to `zoom_changed`, an operator zooming out was
+   * answered with a refit, which reset the budget, which permitted another refit.
+   * Twenty-five wheel scrolls out on the live map left the zoom pinned at 22: the
+   * guard could not merely be slow to yield, it could never yield at all.
+   *
+   * The first attempt at a fix inferred intent from the change itself — a zoom that
+   * decreased, caused by someone other than this guard — on the reasoning that the
+   * app never zooms out on its own. It does, though. `useFollowDrone` fits as soon as
+   * telemetry arrives, and when that lands before layout settles the fit resolves
+   * against a short pane and comes out at zoom 20. That is a decrease this guard did
+   * not cause, so it was read as the operator, and the legibility guard stood down
+   * and left the map at 20 on three reloads out of three. Inferring intent from the
+   * shape of a change means correctly classifying every other fit in the app, and
+   * being wrong about any one of them disables the guard.
+   *
+   * So intent is not inferred. It is observed directly: human input on the map's own
+   * container. A wheel, a touch, or a pointer press inside the map div is the
+   * operator, unambiguously, and no programmatic `fitBounds` can produce one. This is
+   * the same signal `useFollowDrone` uses to back off after a manual pan.
+   *
+   * Standing down on any interaction rather than only on zoom-out is deliberate, and
+   * the reason is that the two mistakes are not symmetric. Standing down too readily
+   * leaves the operator looking at their own chosen view — the view they asked for.
+   * Not standing down is the bug above: the map fighting the wheel. Interaction
+   * means the human has taken the pane, and after that the honest thing is to report
+   * the scale and let them read it.
+   */
+  const operatorTook = useRef(false)
   /**
    * The container size the attempt budget was last spent against.
    *
@@ -400,6 +454,17 @@ export function useViewReadiness(
    * A resize is not the operator zooming out; it is the map being handed a new
    * viewport and owing a fresh fit for it. So the budget is re-armed whenever the
    * container's size changes, and the guard can always correct a stale fit.
+   *
+   * The budget is the *only* thing a resize touches. It deliberately does not clear
+   * `operatorTook`, and that separation is the fix for the last measured defect: the
+   * operator wheeled out from 22 to 19.1 and then the page's own layout shifted — the
+   * map pane going from 880 to 848 px tall as a banner settled — and because the
+   * resize branch used to re-arm the operator flag too, the guard treated that
+   * incidental layout change as a fresh start and yanked the view back to 22
+   * mid-gesture. A pane that changes height while the operator is turning the wheel
+   * is this app's normal behaviour, not a special case, so it must not be able to
+   * revoke a gesture. Only a genuine new interaction gives the pane back to the
+   * guard — via the gesture it already listens for, in the code below.
    */
   const attemptSize = useRef<string | null>(null)
 
@@ -417,16 +482,59 @@ export function useViewReadiness(
 
       const lat = map.getCenter()?.lat() ?? 0
       const legible = pixelsPerMetre(zoom, lat) >= MIN_LIVE_MAP_PX_PER_METRE
+
+      /**
+       * Whether the fit already applied is the best this pane and this basemap can do.
+       *
+       * This is the fix for the imagery basemaps, and it replaces a rule that could not
+       * work. The guard used to fire whenever the view was short of the bar, up to three
+       * times, on the theory that a fit might not have happened yet. On raster imagery
+       * that theory is false in a way that never resolves: the fit is issued, the map
+       * silently grants zoom 20 instead of the requested 22, the measurement is short,
+       * and so another identical fit is issued — three times, every time — until the
+       * budget runs out and the shortfall is reported as though the operator had caused
+       * it. A permanent red warning and a fitted view that is a quarter of the scale of
+       * the street canvas, for no reason the operator could act on.
+       *
+       * So when the shortfall is a ceiling rather than an unfinished fit, the guard
+       * declines to spend an attempt. It still reports the scale honestly — `setReady`
+       * above has already run — because the operator may legitimately want to know that
+       * this basemap is coarser. What it stops is pretending a fourth fit would help.
+       *
+       * Attempts are reserved for the case they were written for: a fit that landed
+       * short of a ceiling it *could* have reached, which is the stale-viewport case
+       * and the one where re-fitting actually moves the map.
+       */
+      const atCeiling = zoom >= ceilingZoom - 1e-6
+
       setReady(legible)
 
       if (legible || !position) {
         // A view that satisfies the requirement retires the allowance, so a later
         // layout change gets its own three attempts rather than inheriting a spent
         // budget from the last one.
+        //
+        // This renewal is necessary and it is also exactly what made the guard
+        // unyielding, so the two facts belong together. Necessary: it is what lets the
+        // map reach the working zoom at all. Removed, three consecutive loads settled
+        // at zoom 20 rather than 22, because the startup fits — this one and
+        // `useFollowDrone`'s — both spend attempts against a pane that layout has not
+        // finished, and once three have gone nothing corrects the last bad one.
+        // Measured both ways.
+        //
+        // And with it in place the guard cannot be escaped by zooming out: yank back
+        // to 22, measure legible, renew, and the budget is fresh for the next yank.
+        // That is why the operator's gesture has to end the guard's interest rather
+        // than the budget having to run down — see `operatorTook`. The renewal is only
+        // safe because a gesture now stops the fit that the renewal would have funded.
         if (legible) attempts.current = 0
         return
       }
+      if (operatorTook.current) return
       if (attempts.current >= 3) return
+      // The pane and the basemap have between them given all they have. Another fit
+      // would be identical — see `atCeiling` above.
+      if (atCeiling) return
 
       const bounds = new google.maps.LatLngBounds()
       if (extent) {
@@ -444,19 +552,37 @@ export function useViewReadiness(
       })
     }
 
+    /**
+     * Any human gesture on the map hands the pane over.
+     *
+     * Passive, because these only observe: the map's own handlers must receive the
+     * events unaltered, and calling `preventDefault` here would break panning and
+     * zooming outright.
+     */
+    const onUserGesture = () => {
+      operatorTook.current = true
+    }
+    const div = map.getDiv()
+    div.addEventListener('wheel', onUserGesture, { passive: true })
+    div.addEventListener('touchstart', onUserGesture, { passive: true })
+    div.addEventListener('pointerdown', onUserGesture, { passive: true })
+
     check()
     const listeners = [
       map.addListener('zoom_changed', check),
       map.addListener('bounds_changed', check),
     ]
     const observer = new ResizeObserver(check)
-    observer.observe(map.getDiv())
+    observer.observe(div)
 
     return () => {
       listeners.forEach((l) => l.remove())
       observer.disconnect()
+      div.removeEventListener('wheel', onUserGesture)
+      div.removeEventListener('touchstart', onUserGesture)
+      div.removeEventListener('pointerdown', onUserGesture)
     }
-  }, [map, position, extent])
+  }, [map, position, extent, ceilingZoom])
 
   return ready
 }

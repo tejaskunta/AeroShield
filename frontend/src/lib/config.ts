@@ -46,6 +46,64 @@ export const GOOGLE_MAPS_MAP_ID: string | undefined =
   (env.VITE_GOOGLE_MAPS_MAP_ID ?? '').trim() || undefined
 
 // ---------------------------------------------------------------------------
+// Imagery provider
+// ---------------------------------------------------------------------------
+
+/**
+ * Mapbox access token, for when Google's imagery runs out of zoom.
+ *
+ * This exists because of a measured ceiling, not a preference. Google's built-in
+ * `satellite` and `hybrid` types stop at zoom 20 at the survey block however they are
+ * asked — see `RASTER_MAX_ZOOM` below for the readings — while Mapbox serves real
+ * tiles all the way to 22. That is a factor of four in ground scale, and it is the
+ * whole difference between the satellite view matching the street view and being
+ * unreadable next to it.
+ *
+ * Same secrecy rules as the Google key: a public token that ships to the browser, so
+ * restrict it by URL in the Mapbox account rather than treating it as a secret. A
+ * token here is optional — with none set, the imagery basemaps fall back to Google's
+ * built-in types and behave exactly as they did before this existed.
+ */
+export const MAPBOX_TOKEN: string = (env.VITE_MAPBOX_TOKEN ?? '').trim()
+
+/** True when a Mapbox token is present, i.e. the deep-zoom imagery path is usable. */
+export const HAS_MAPBOX_TOKEN: boolean = MAPBOX_TOKEN.length > 0
+
+/**
+ * Mapbox styles used for the two imagery basemaps.
+ *
+ * Chosen by id, not by URL, so the look can be changed in the Mapbox account without
+ * a code change. `satellite-v9` is bare imagery; `satellite-streets-v12` is imagery
+ * *plus* the road and place-label layers, which is what makes it the honest
+ * counterpart of Google's `hybrid` — the labels are the entire difference between
+ * hybrid and satellite, so a "hybrid" built from the bare satellite style would
+ * reproduce the exact bug this console already fixed once.
+ *
+ * Measured at the survey block, zoom 22: `satellite-streets-v12` returns 88 distinct
+ * colours against `satellite-v9`'s 33, i.e. the label and road layers are present in
+ * the tile rather than being empty at this depth.
+ */
+export const MAPBOX_STYLE_SATELLITE = 'mapbox/satellite-v9'
+export const MAPBOX_STYLE_HYBRID = 'mapbox/satellite-streets-v12'
+
+/**
+ * The tile grid Mapbox is asked for, and the largest zoom its raster API serves.
+ *
+ * 256 is the geographic tile size, and it must match the `tileSize` handed to
+ * `ImageMapType` — the two are the same number describing different things, and if
+ * they disagree the map silently renders at the wrong scale. 22 is Mapbox's
+ * documented maximum for raster tiles.
+ *
+ * `@2x` is a separate, purely cosmetic option: it returns the same ground area as a
+ * 512x512 image instead of 256x256, which the browser then draws into the same 256
+ * CSS pixels. It costs bandwidth and buys sharpness on a retina display; it does not
+ * extend the zoom range by a single level, so it is not a substitute for sorting out
+ * the ceiling.
+ */
+export const MAPBOX_TILE_SIZE = 256
+export const MAPBOX_MAX_ZOOM = 22
+
+// ---------------------------------------------------------------------------
 // Live camera feed
 // ---------------------------------------------------------------------------
 
@@ -232,3 +290,43 @@ export const FIT_PADDING_PX = 8
  * same off-by-one, reported as a fault, at the one moment everything is working.
  */
 export const MAX_LIVE_MAP_ZOOM = 22
+
+/**
+ * The zoom ceiling the *raster* basemaps actually respect, which is not the one we
+ * ask for.
+ *
+ * This is a measured fact about the Maps API, not a preference, and it is the reason
+ * the imagery basemaps looked broken. Asking this project's map — which is raster,
+ * because no Map ID is configured — for zoom 22 does not produce zoom 22. It produces
+ * 20, silently, no matter how the request is made:
+ *
+ *   - `new Map({ zoom: 22, mapTypeId: 'satellite' })` reads back 20 and still reads
+ *     20 at t = 0.5, 1.5, 3, 5 and 8 seconds. It is a settled value, not a transient.
+ *   - `setZoom(22)` -> 20. `setZoom(21)` -> 20. `setZoom(20)` -> 20.
+ *   - Fractional zoom is enabled here and `setZoom(21.5)` still lands on 20.
+ *   - `map.maxZoom` reads 22. Every `mapTypes.get(id).maxZoom` reads 22. Assigning
+ *     22 to the type's own `maxZoom` changes nothing.
+ *   - `MaxZoomService.getMaxZoomAtLatLng()` over the survey block returns **20**.
+ *   - The built-in raster type is a compiled class with no `getTileUrl`, so it cannot
+ *     be wrapped in a custom `ImageMapType` to raise its own ceiling.
+ *
+ * And it is *not* a shortage of imagery. Fetching the tile URLs directly returns real
+ * 256x256 tiles at z = 19, 20, 21 **and 22** for both `lyrs=s` (satellite) and
+ * `lyrs=y` (hybrid). The imagery exists; this particular map type will not show it.
+ *
+ * The practical consequence is what the operator sees. `roadmap` has no raster layer
+ * and honours 22, so it reaches 28.1 px/m and frames the ten-metre block at 281 px.
+ * `satellite` and `hybrid` stop at 20 — 7.0 px/m, a 70 px block, a quarter of the
+ * scale. Identical chrome, identical pane, four times coarser imagery.
+ *
+ * So the two ceilings are named separately and the basemap picks between them. The
+ * alternative — keeping 22 as the single truth and treating 20 as a failure — is what
+ * produced a permanent "below 12 px/m" warning and an endless, unwinnable refit on
+ * the imagery basemaps, because a fit that cannot be satisfied is attempted again
+ * until the budget runs out and then reported as the operator's problem.
+ *
+ * Raise this and `MAX_LIVE_MAP_ZOOM` together once imagery can actually reach 22 —
+ * the licensed route is a Map ID (vector) or the Map Tiles API, both of which are
+ * account-level changes rather than code ones. See `docs/` for the trade-off.
+ */
+export const RASTER_MAX_ZOOM = 20
