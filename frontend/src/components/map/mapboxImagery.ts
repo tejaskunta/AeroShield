@@ -27,9 +27,19 @@ import type { Basemap } from './LiveMap'
  * The imagery is not missing — direct tile fetches return real 256x256 images for
  * z19 through z22 on both `lyrs=s` and `lyrs=y`. It is the built-in map *type* that
  * declines to ask for it. So the fix is to supply the imagery through a type that
- * will: Mapbox's raster API, which serves z22 tiles at this location (measured 200,
- * `image/jpeg`, 33-88 distinct colours per tile, against a z15 positive control that
- * returns 182).
+ * will: Mapbox's raster API, which serves z22 tiles at this location.
+ *
+ * What z22 actually contains
+ * -------------------------
+ * The tiles are real, but the *detail* in them is not native to z22. Correlating a
+ * z22 tile against the same ground area resampled from shallower zoom levels gives
+ * 0.999 at z21, 0.999 at z20, 0.997 at z19 and 0.977 at z18 — z22 is
+ * indistinguishable from a 2x-to-16x magnification of z21. Past roughly z18 the
+ * provider has no extra information to serve, which matches the sensor: at this
+ * latitude z22 is 3.6 cm/px while the best commercial satellite resolves ~31 cm/px,
+ * about zoom 19. So reaching 22 is correctness of scale relative to the street view,
+ * not an increase in resolution. The instrument that shows centimetre detail here is
+ * the aircraft's own camera, not any basemap.
  *
  * How it is wired
  * ---------------
@@ -69,6 +79,14 @@ export function mapboxImageryTypes(
        * Tile URL. Mapbox uses the same Web Mercator scheme as Google, so the
        * coordinates pass through unchanged — no reprojection, which is the other
        * reason this is a small module rather than a rendering layer.
+       *
+       * `@2x` asks Mapbox for a 512x512 bitmap of the same tile rather than 256x256.
+       * It does not move the imagery one level deeper — the ground area is identical
+       * — but it removes a resampling step on the way to the screen: a 256 px tile
+       * occupies 256 CSS px, which on a 2x display is 512 device px, so the browser
+       * was stretching every tile to double size before drawing it. At the zoom
+       * ceiling, where the imagery is already magnified past its native resolution,
+       * that stretch was compounding the softness the operator could see.
        */
       getTileUrl: (coord, zoom) => {
         // Mapbox will serve a zoom beyond its maximum by upscaling the deepest real
@@ -78,9 +96,12 @@ export function mapboxImageryTypes(
         const z = Math.min(zoom, MAPBOX_MAX_ZOOM)
         return (
           `https://api.mapbox.com/styles/v1/${style}/tiles/${MAPBOX_TILE_SIZE}` +
-          `/${z}/${coord.x}/${coord.y}?access_token=${MAPBOX_TOKEN}`
+          `/${z}/${coord.x}/${coord.y}@2x?access_token=${MAPBOX_TOKEN}`
         )
       },
+      // Must stay at the tile's geographic size, not its bitmap size. Raising this
+      // to 512 to "match" the @2x image would halve the apparent scale and undo the
+      // whole point of reaching zoom 22.
       tileSize: new maps.Size(MAPBOX_TILE_SIZE, MAPBOX_TILE_SIZE),
       maxZoom: MAPBOX_MAX_ZOOM,
       minZoom: 0,

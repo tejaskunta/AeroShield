@@ -94,11 +94,20 @@ export const MAPBOX_STYLE_HYBRID = 'mapbox/satellite-streets-v12'
  * they disagree the map silently renders at the wrong scale. 22 is Mapbox's
  * documented maximum for raster tiles.
  *
- * `@2x` is a separate, purely cosmetic option: it returns the same ground area as a
- * 512x512 image instead of 256x256, which the browser then draws into the same 256
- * CSS pixels. It costs bandwidth and buys sharpness on a retina display; it does not
- * extend the zoom range by a single level, so it is not a substitute for sorting out
- * the ceiling.
+ * The tile URL requests `@2x`, so the *bitmap* is 512x512 over that same 256-unit
+ * footprint. This is not cosmetic, and it is not a zoom-range change either. A 256 px
+ * tile is drawn into 256 CSS px, which on a 2x display is 512 device px: without
+ * `@2x` the browser stretches every tile to double size before it reaches the screen.
+ * At the ceiling, where the imagery is already magnified past its native resolution,
+ * that stretch compounds the softness the operator sees. `tileSize` must stay 256
+ * regardless — it describes the ground footprint, not the image dimensions, and
+ * raising it to 512 would halve the apparent scale and undo the point of zoom 22.
+ *
+ * Note the honest limit: `@2x` sharpens the rendering of the tile. It does not add
+ * detail the provider never recorded. Measured by correlating a z22 tile against the
+ * same ground resampled from shallower levels, z22 is indistinguishable from a
+ * magnified z21 (r = 0.999) — see `components/map/mapboxImagery.ts`. Going deeper
+ * than about z19 here is past the resolution of the satellite itself.
  */
 export const MAPBOX_TILE_SIZE = 256
 export const MAPBOX_MAX_ZOOM = 22
