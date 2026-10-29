@@ -7,6 +7,17 @@
  */
 interface ImportMetaEnv {
   /**
+   * Vite's own flag, true under `vite dev` and false in a production build.
+   *
+   * Declared by hand for the same reason as everything else here — this file is the
+   * only place the app's env shape is written down. It gates development
+   * instrumentation that would otherwise ship: the scale readout on the map, which
+   * reports how many pixels a metre of ground is worth, how wide the survey block
+   * therefore draws, and how wide the viewport actually is in metres.
+   */
+  readonly DEV: boolean
+
+  /**
    * Dashboard-scoped API key (detections:read + review) sent as X-API-Key.
    * Set in `frontend/.env.local`. With it unset, `lib/api.ts` keeps every call on
    * its fixture fallback, so the zero-key classroom demo still runs.

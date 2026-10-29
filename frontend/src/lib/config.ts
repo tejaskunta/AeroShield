@@ -184,3 +184,51 @@ export const SURVEY_ORIGIN: LatLng = parseLatLon(env.VITE_SURVEY_ORIGIN, DEFAULT
 /** True when the configured origin differs from the built-in default. */
 export const HAS_CUSTOM_SURVEY_ORIGIN: boolean =
   SURVEY_ORIGIN.lat !== DEFAULT_SURVEY_ORIGIN.lat || SURVEY_ORIGIN.lon !== DEFAULT_SURVEY_ORIGIN.lon
+
+/**
+ * The ground scale a live mission map has to reach to be worth looking at, in pixels
+ * per metre.
+ *
+ * Twelve. At this latitude that is about zoom 21.5, so it sits between two zoom
+ * levels and is deliberately not tied to either: it is a statement about what an
+ * operator can read, not about Google's tiling. The survey block is ten metres
+ * across, so twelve px/m draws it 120 px wide and a one-metre cell twelve pixels
+ * wide — the point at which a cell is an object rather than a smudge and the
+ * aircraft's sub-metre movement between frames is visible.
+ *
+ * Below roughly seven px/m the whole block is under seventy pixels and a real flight
+ * reads as jitter, which is the failure this constant exists to catch. The map is
+ * held to it by `useViewReadiness` — see `components/map/useMapHooks.ts`.
+ */
+export const MIN_LIVE_MAP_PX_PER_METRE = 12
+
+/**
+ * Padding around a map fit, in pixels.
+ *
+ * Shared between the fit itself, the readiness check that judges it, and the
+ * development-time readout, so the three cannot drift apart. Smaller than it looks
+ * like it should be: the search for a zoom level is integral, so a few pixels of
+ * padding here can cost an entire level, which halves the scale of everything drawn
+ * on the map.
+ */
+export const FIT_PADDING_PX = 8
+
+/**
+ * The map's zoom ceiling, and the reason it is a shared constant rather than a
+ * number local to the map component.
+ *
+ * Google's imagery over this survey block is native to about zoom 21 — roughly 7 cm
+ * per pixel at this latitude. Zoom 22 is one step of upsampling, still readable;
+ * past that it is interpolation, which looks like a broken map rather than a closer
+ * one. So the map stops at 22, and that ceiling is a fact about the imagery, not
+ * about the component that happens to set it.
+ *
+ * It lives here because the diagnostic reads it. A pane tall enough to frame the
+ * ten-metre block at the fit's own padding *can afford* zoom 23 in the pure
+ * arithmetic, and the map then sits one level below it — at 22, correctly, because
+ * that is the ceiling. Anything judging the view by comparing the affordable zoom
+ * against the actual one has to know the ceiling exists, or a pan with plenty of
+ * room looks exactly like a pane that has been given less than it asked for: the
+ * same off-by-one, reported as a fault, at the one moment everything is working.
+ */
+export const MAX_LIVE_MAP_ZOOM = 22

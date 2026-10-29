@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Detection, LatLng, MissionProgress, Telemetry } from '@/types'
 import { MISSION } from '@/lib/mockData'
+import { MAX_LIVE_MAP_ZOOM, MIN_LIVE_MAP_PX_PER_METRE } from '@/lib/config'
+import { isBelowAffordableZoom } from '@/lib/scale'
 import { gridBounds, gridCenter } from '@/lib/geo'
 import { MapRoot } from './MapRoot'
 import { MissionGridLayer } from './MissionGridLayer'
@@ -11,7 +13,14 @@ import { DetectionPins } from './DetectionPins'
 import { TrackLayer } from './TrackLayer'
 import { LayerToggles, type LayerState, DEFAULT_LAYERS } from './LayerToggles'
 import { MapLegend } from './MapLegend'
-import { useFollowDrone, type FollowMode } from './useMapHooks'
+import {
+  VIEW_SPAN_M,
+  useFollowDrone,
+  useViewMetrics,
+  useViewReadiness,
+  type FollowMode,
+  type ViewMetrics,
+} from './useMapHooks'
 
 /**
  * LiveMap — the canvas everything else docks to.
@@ -63,19 +72,24 @@ const BASEMAP_LABELS: Record<Basemap, string> = {
  * Google's imagery over Hyderabad is native to about zoom 21 — roughly 7 cm per
  * pixel at this latitude. Zoom 22 is the practical ceiling: one step of upsampling,
  * still readable. Past that it is interpolation, which would look like a broken map
- * rather than a closer one.
+ * rather than a closer one. Declared in `lib/config` because the readiness check has
+ * to know about the ceiling too — see `MAX_LIVE_MAP_ZOOM`.
  */
-const MAX_ZOOM = 22
+const MAX_ZOOM = MAX_LIVE_MAP_ZOOM
 
 /**
- * The view the block is designed for: 10 m across a 1200 px map, so one cell of the
- * grid is a comfortable square rather than a smudge.
+ * The view the block is designed for.
+ *
+ * At this latitude zoom 22 is about 28 px per metre of ground, so the ten-metre
+ * block covers roughly 280 px and each one-metre cell is a legible square rather
+ * than a smudge. That is the whole point: the aircraft only ever travels metres, and
+ * a scale that renders a metre as seven pixels makes a real flight look like a jitter.
  *
  * `fit` takes over from here once telemetry arrives, but the first frame is already
  * at the mission's scale — arriving at a regional view and then snapping in reads as
  * a bug even when it is intentional.
  */
-const INITIAL_ZOOM = 21
+const INITIAL_ZOOM = 22
 
 /**
  * And the floor. Below this the whole block is under 70 px and the metre cells
@@ -107,6 +121,17 @@ export function LiveMap({
   const [basemap, setBasemap] = useState<Basemap>('hybrid')
   const [layers, setLayers] = useState<LayerState>(DEFAULT_LAYERS)
   const [follow, setFollow] = useState<FollowMode>('fit')
+  /**
+   * Bumped by choosing a follow mode again, to ask for the framed view back.
+   *
+   * 'fit' is deliberately idempotent, so an operator who has panned away has no
+   * other way to ask for it — the extent has not changed, so nothing re-fits and the
+   * control looks broken. Keyed by an integer rather than a boolean so repeated
+   * requests each produce a distinct value.
+   */
+  const [refitKey, setRefitKey] = useState(0)
+  const [view, setView] = useState<ViewMetrics | null>(null)
+  const [legible, setLegible] = useState(true)
 
   const center = useMemo(() => gridCenter(MISSION.grid), [])
 
@@ -151,7 +176,13 @@ export function LiveMap({
         // *multiple of the block*, so at 10 m across it has to be a large fraction
         // or the allowed area would be smaller than the viewport and the map would
         // simply refuse to move at all.
-        restrictTo={padBounds(extent, 2)}
+        //
+        // Eight block-widths, not two, for that reason alone. An earlier comment
+        // here also credited the pad with capping zoom — that was wrong, and worth
+        // recording so it is not re-derived: at zoom 22 this viewport spans roughly
+        // 45 m across, so even the old 2x pad (a 50 m box) was already larger than
+        // the viewport. The restriction was never what held the zoom out.
+        restrictTo={padBounds(extent, 8)}
         onMapClick={onMapClick}
       >
         {layers.grid && <MissionGridLayer grid={MISSION.grid} />}
@@ -179,6 +210,18 @@ export function LiveMap({
           position={telemetry?.position ?? null}
           extent={extent}
           mode={follow}
+          refitKey={refitKey}
+        />
+
+        {/* Holds the map to a legible ground scale, and reports it. Both live here
+            rather than in the chrome because both need the map instance, and the map
+            is only in context inside `MapRoot`. */}
+        <ViewReporter
+          spanM={VIEW_SPAN_M}
+          position={telemetry?.position ?? null}
+          extent={extent}
+          onView={setView}
+          onLegible={setLegible}
         />
 
         {children}
@@ -188,29 +231,136 @@ export function LiveMap({
       <div className="pointer-events-none absolute inset-0 z-[500]">
         <div className="pointer-events-auto absolute right-2 top-2 flex flex-col items-end gap-2">
           <BasemapSwitcher value={basemap} onChange={setBasemap} />
-          <FollowSwitcher value={follow} onChange={setFollow} />
+          <FollowSwitcher
+            value={follow}
+            onChange={(m) => {
+              setFollow(m)
+              // Choosing 'fit' again is a request for the framed view back.
+              if (m === 'fit') setRefitKey((k) => k + 1)
+            }}
+          />
           <LayerToggles value={layers} onChange={setLayers} />
         </div>
         <div className="pointer-events-auto absolute bottom-6 right-2">
           <MapLegend detections={detections} />
         </div>
+        {import.meta.env.DEV && view && <ScaleReadout view={view} />}
+        {!legible && <ScaleWarning />}
       </div>
     </div>
   )
 }
 
-/** Bridges the follow mode to the map instance — must live inside `MapRoot`. */
+/**
+ * Bridges the follow mode to the map instance — must live inside `MapRoot`.
+ *
+ * `refitKey` is passed straight through rather than being read from state here: it
+ * is a trigger, not a value, so anything that changed the effect's dependency on it
+ * would break the one thing it does.
+ */
 function FollowController({
   position,
   extent,
   mode,
+  refitKey,
 }: {
   position: LatLng | null
   extent: { south: number; west: number; north: number; east: number }
   mode: FollowMode
+  refitKey: number
 }) {
-  useFollowDrone({ position, extent, mode })
+  useFollowDrone({ position, extent, mode, forceRefit: refitKey > 0 })
   return null
+}
+
+/**
+ * Reads the live view back out of the map for the caller to render.
+ *
+ * A render-nothing component rather than a hook in `LiveMap` itself, because
+ * `MapContext` is provided *inside* `MapRoot`: `LiveMap` owns `MapRoot` and so is
+ * above the provider, where `useMap` would throw.
+ */
+function ViewReporter({
+  spanM,
+  position,
+  extent,
+  onView,
+  onLegible,
+}: {
+  spanM: number
+  position: LatLng | null
+  extent: { south: number; west: number; north: number; east: number }
+  onView: (v: ViewMetrics | null) => void
+  onLegible: (b: boolean) => void
+}) {
+  const view = useViewMetrics(spanM)
+  // Holds the map to a legible ground scale, and it is *not* yet known to work.
+  // It was thought to be the fix on the strength of one run with it removed, which
+  // settled at zoom 20; turning it back on and measuring again reproduced zoom 20
+  // immediately, so that run proved nothing and the same reload gives 20 or 22
+  // depending on timing. What that non-determinism means is still unresolved, and
+  // the readout beside the map is what is being used to find out.
+  const legible = useViewReadiness(position, extent)
+
+  useEffect(() => {
+    onView(view)
+  }, [view, onView])
+
+  useEffect(() => {
+    onLegible(legible)
+  }, [legible, onLegible])
+
+  return null
+}
+
+/**
+ * The scale, in the units the requirement is written in.
+ *
+ * Development only. This is the instrument the zoom bug was diagnosed with, and it
+ * is kept because "what is a metre worth on screen right now" is the one question
+ * this console cannot afford to guess at: everything else on the screen is drawn at
+ * the wrong size if the answer is wrong, and nothing else reports it. Rendered as
+ * text rather than an overlay precisely so it can be read out of the page.
+ */
+function ScaleReadout({ view }: { view: ViewMetrics }) {
+  // Below what the pane can afford, *and* below the ceiling that caps the search.
+  //
+  // The second half is not redundant. On a tall pane the pure arithmetic affords
+  // zoom 23 for a ten-metre span, while the map is held at 22 by the imagery itself,
+  // so a bare `affordableZoom > zoom` lights the readout amber at the one moment
+  // everything is working — an instrument that cries wolf is worse than no
+  // instrument, because it teaches the reader to ignore it. `isBelowAffordableZoom`
+  // clamps to what is actually reachable, so amber reports a real shortfall.
+  const short = isBelowAffordableZoom(view.zoom, view.affordableZoom, MAX_LIVE_MAP_ZOOM)
+  return (
+    <div
+      className={`pointer-events-none absolute bottom-6 left-2 border bg-ink-deep/90 px-2 py-1 font-mono text-[10px] backdrop-blur-sm ${
+        short ? 'border-hazard text-hazard' : 'border-rule text-paper-dim'
+      }`}
+    >
+      zoom {view.zoom} · {view.width}x{view.height} · {view.binding}-bound ·{' '}
+      {view.pixelsPerMetre.toFixed(1)} px/m · block {Math.round(view.spanPx)} px ·{' '}
+      holds {view.viewportSpanM} m · affords z{view.affordableZoom}
+      {view.affordableZoom > MAX_LIVE_MAP_ZOOM ? ` (capped z${MAX_LIVE_MAP_ZOOM})` : ''}
+    </div>
+  )
+}
+
+/**
+ * Said in the interface, not just the console.
+ *
+ * If the map cannot reach a legible scale for the block, the operator is reading a
+ * view that cannot show what it claims to — sub-metre movement becomes noise. That
+ * is worth stating plainly, because the alternative is an operator concluding the
+ * aircraft is not moving.
+ */
+function ScaleWarning() {
+  return (
+    <div className="pointer-events-none absolute left-2 top-2 border border-hazard bg-ink-deep/90 px-2 py-1 font-mono text-[10px] text-hazard backdrop-blur-sm">
+      Map is below {MIN_LIVE_MAP_PX_PER_METRE} px/m — check the view is showing the
+      survey block
+    </div>
+  )
 }
 
 /**
