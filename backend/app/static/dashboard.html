@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AeroShield - Detections Dashboard</title>
+<style>
+  :root {
+    --bg: #0b1020; --panel: #121a2e; --panel-2: #18223b; --line: #24304f;
+    --text: #e6ecff; --muted: #8b97b8; --accent: #5ee0c0; --warn: #ffb547; --bad: #ff6b7a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 10% -10%, #17264a 0%, var(--bg) 60%); color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding: 18px 24px; border-bottom: 1px solid var(--line); background: rgba(11,16,32,.7); position: sticky; top: 0; backdrop-filter: blur(6px);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .3px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  .status { color: var(--muted); font-size: 13px; }
+  .status b { color: var(--text); font-weight: 600; }
+  main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .row { display: grid; gap: 16px; }
+  .auth { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+  input, select, button {
+    font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 10px; padding: 9px 12px; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  input[type=password] { min-width: 280px; }
+  button { cursor: pointer; background: var(--accent); color: #042018; border: none; font-weight: 600; }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 20px; }
+  .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .stat .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+  .pill.ok { color: var(--accent); border-color: rgba(94,224,192,.4); }
+  .pill.warn { color: var(--warn); border-color: rgba(255,181,71,.4); }
+  .bar { height: 6px; background: var(--panel-2); border-radius: 999px; overflow: hidden; min-width: 80px; }
+  .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #7aa7ff); }
+  .empty, .error { padding: 30px; text-align: center; color: var(--muted); }
+  .error { color: var(--bad); }
+  .footer { color: var(--muted); font-size: 12px; margin-top: 14px; }
+  .hidden { display: none; }
+  @media (max-width: 640px) { main { padding: 14px; } input[type=password] { min-width: 0; width: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span> AeroShield <span class="status">/ detections</span></div>
+  <div class="status" id="health">API: checking...</div>
+</header>
+
+<main>
+  <section class="auth">
+    <input id="key" type="password" placeholder="X-API-Key (kept in this tab only)" autocomplete="off">
+    <button id="connect">Connect</button>
+    <button class="ghost" id="forget">Forget key</button>
+  </section>
+
+  <section class="row stats" id="stats">
+    <div class="card stat"><div class="label">Missions</div><div class="value" id="s-missions">-</div></div>
+    <div class="card stat"><div class="label">Detections</div><div class="value" id="s-detections">-</div></div>
+    <div class="card stat"><div class="label">Geotagged</div><div class="value" id="s-geo">-</div></div>
+    <div class="card stat"><div class="label">Mean confidence</div><div class="value" id="s-conf">-</div></div>
+  </section>
+
+  <section class="card">
+    <div class="filters">
+      <select id="mission"><option value="">All missions</option></select>
+      <select id="cls"><option value="">All classes</option></select>
+      <input id="minconf" type="number" min="0" max="1" step="0.05" placeholder="Min confidence">
+      <button class="ghost" id="refresh">Refresh</button>
+    </div>
+    <div id="table-wrap"><div class="empty">Enter an API key with <b>detections:read</b> to load data.</div></div>
+    <div class="footer" id="footer"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var KEY_STORAGE = null; // deliberately never persisted: key lives in memory for this tab
+  var apiKey = "";
+  var $ = function (id) { return document.getElementById(id); };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function fmtTime(s) { return s ? new Date(s).toLocaleString() : "-"; }
+  function fmtPct(v) { return v == null ? "-" : (v * 100).toFixed(1) + "%"; }
+
+  function api(path) {
+    return fetch(path, { headers: { "X-API-Key": apiKey } }).then(function (r) {
+      if (!r.ok) {
+        return r.json().catch(function () { return {}; }).then(function (body) {
+          var err = new Error(body.detail || ("HTTP " + r.status));
+          err.status = r.status;
+          throw err;
+        });
+      }
+      return r.json();
+    });
+  }
+
+  function setHealth() {
+    fetch("/health").then(function (r) { return r.json(); }).then(function (h) {
+      $("health").innerHTML = 'API <b>' + esc(h.status) + '</b> &middot; DB <b>' + esc(h.database) +
+        '</b> &middot; v' + esc(h.version) + ' &middot; ' + esc(h.environment);
+    }).catch(function () {
+      $("health").innerHTML = '<span style="color:var(--bad)">API unreachable</span>';
+    });
+  }
+
+  function renderError(msg) {
+    $("table-wrap").innerHTML = '<div class="error">' + esc(msg) + '</div>';
+  }
+
+  function loadMissions() {
+    return api("/api/missions?limit=200").then(function (page) {
+      var sel = $("mission");
+      var current = sel.value;
+      sel.innerHTML = '<option value="">All missions</option>' + page.items.map(function (m) {
+        return '<option value="' + m.id + '">' + esc(m.name) + ' (' + m.detection_count + ')</option>';
+      }).join("");
+      sel.value = current;
+      $("s-missions").textContent = page.total;
+      return page.items;
+    });
+  }
+
+  function loadDetections() {
+    var params = new URLSearchParams({ limit: "100" });
+    if ($("mission").value) params.set("mission_id", $("mission").value);
+    if ($("cls").value) params.set("class_name", $("cls").value);
+    if ($("minconf").value) params.set("min_confidence", $("minconf").value);
+
+    return api("/api/detections?" + params.toString()).then(function (page) {
+      var items = page.items;
+      $("s-detections").textContent = page.total;
+      var geo = items.filter(function (d) { return d.latitude != null && d.longitude != null; }).length;
+      $("s-geo").textContent = items.length ? Math.round(geo / items.length * 100) + "%" : "-";
+      var confs = items.map(function (d) { return d.confidence; }).filter(function (c) { return c != null; });
+      $("s-conf").textContent = confs.length ? fmtPct(confs.reduce(function (a, b) { return a + b; }, 0) / confs.length) : "-";
+
+      var classes = {};
+      items.forEach(function (d) { classes[d.class_name] = true; });
+      var cls = $("cls"), cur = cls.value;
+      cls.innerHTML = '<option value="">All classes</option>' + Object.keys(classes).sort().map(function (c) {
+        return '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+      }).join("");
+      cls.value = cur;
+
+      if (!items.length) {
+        $("table-wrap").innerHTML = '<div class="empty">No detections match these filters.</div>';
+      } else {
+        var rows = items.map(function (d) {
+          var conf = d.confidence == null ? 0 : d.confidence;
+          var hasGeo = d.latitude != null && d.longitude != null;
+          return '<tr>' +
+            '<td>' + fmtTime(d.captured_at) + '</td>' +
+            '<td>' + esc(d.class_name) + '</td>' +
+            '<td class="num"><div style="display:flex;gap:8px;align-items:center"><div class="bar" style="width:110px"><i style="width:' + (conf * 100).toFixed(0) + '%"></i></div>' + fmtPct(conf) + '</div></td>' +
+            '<td class="num">' + (hasGeo ? d.latitude.toFixed(6) + ', ' + d.longitude.toFixed(6) : '<span class="pill warn">no GPS</span>') + '</td>' +
+            '<td class="num">' + (d.horizontal_error_m != null ? d.horizontal_error_m.toFixed(1) + ' m' : '-') + '</td>' +
+            '<td>' + (hasGeo ? '<span class="pill ok">geotagged</span>' : '<span class="pill">unlocated</span>') + '</td>' +
+            '</tr>';
+        }).join("");
+        $("table-wrap").innerHTML = '<div style="overflow-x:auto"><table><thead><tr>' +
+          '<th>Captured</th><th>Class</th><th>Confidence</th><th>Position</th><th>Error (1&sigma;)</th><th>Status</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+      }
+      $("footer").textContent = "Showing " + items.length + " of " + page.total + " detections - refreshed " + new Date().toLocaleTimeString();
+    });
+  }
+
+  function refreshAll() {
+    if (!apiKey) return;
+    $("refresh").disabled = true;
+    loadMissions().then(loadDetections).catch(function (e) {
+      if (e.status === 401 || e.status === 403) {
+        renderError("Key rejected (" + e.status + "): " + e.message + ". The key needs the detections:read scope.");
+      } else {
+        renderError("Could not load data: " + e.message);
+      }
+    }).then(function () { $("refresh").disabled = false; });
+  }
+
+  $("connect").addEventListener("click", function () {
+    apiKey = $("key").value.trim();
+    $("key").value = "";
+    refreshAll();
+  });
+  $("key").addEventListener("keydown", function (e) { if (e.key === "Enter") $("connect").click(); });
+  $("forget").addEventListener("click", function () {
+    apiKey = ""; $("key").value = "";
+    $("table-wrap").innerHTML = '<div class="empty">Key cleared. Enter a new key to continue.</div>';
+  });
+  $("refresh").addEventListener("click", refreshAll);
+  $("mission").addEventListener("change", refreshAll);
+  $("cls").addEventListener("change", refreshAll);
+  $("minconf").addEventListener("change", refreshAll);
+
+  setHealth();
+  setInterval(function () { setHealth(); if (apiKey) refreshAll(); }, 15000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,466 @@
+# AeroShield API
+
+Week 5 deliverable: REST API over the detection database.
+
+Interactive docs are generated from the code and are the authoritative reference:
+
+- Swagger UI: http://127.0.0.1:8000/docs
+- ReDoc: http://127.0.0.1:8000/redoc
+- OpenAPI JSON: http://127.0.0.1:8000/openapi.json
+
+This file covers the things a schema cannot express: why the endpoints are shaped the
+way they are, and the failure modes worth knowing about before a flight.
+
+---
+
+## The flow this API is built around
+
+The Jetson runs YOLO **onboard** and posts finished detections. The backend records;
+it never runs a model. PRD section 2.2 puts cloud inference explicitly out of scope.
+
+```
+Camera -> YOLO (Jetson) -> MAVLink GPS -> geotag -> POST /api/detections
+                                                 -> PUT  /api/detections/{id}/image
+```
+
+Metadata and image are **two requests**, deliberately:
+
+| | Size | Guarantee |
+|---|---|---|
+| `POST /api/detections` | ~1 KB JSON | Must never be lost. Spooled to disk on failure, replayed on reconnect. |
+| `PUT /api/detections/{id}/image` | ~200 KB JPEG | Best-effort. Retried separately, abandoned if it will not go. |
+
+A detection whose photo never arrived is still a usable safety record. A photo with
+no detection row is useless. Welding them into one all-or-nothing multipart request
+would give the small critical part the durability of the large optional one.
+
+---
+
+## Authentication
+
+Every endpoint except `GET /` and `GET /health` requires a scoped API key:
+
+```
+X-API-Key: aero_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### Minting keys
+
+The first key has to come from the CLI, since `POST /api/admin/api-keys` itself
+needs an admin key:
+
+```bash
+cd backend
+python scripts/create_api_key.py --name laptop   --preset admin
+python scripts/create_api_key.py --name drone-01 --preset drone
+python scripts/create_api_key.py --list
+python scripts/create_api_key.py --revoke 3
+```
+
+The plaintext key is printed **once**. Only a SHA-256 hash is stored, so it cannot be
+recovered - if it is lost, revoke it and mint another.
+
+### Scopes
+
+| Scope | Grants |
+|---|---|
+| `drone:ingest` | POST detections, PUT detection images and Grad-CAM overlays |
+| `detections:read` | Read detections, missions, stats, images, GeoJSON. Also reviews, copilot queries, and report generation/download |
+| `missions:write` | Create and update missions |
+| `admin` | Manage API keys, delete detections. **Implies every other scope.** |
+
+Presets: `drone` (ingest + missions:write), `dashboard` (read), `operator`
+(read + missions:write), `admin` (everything).
+
+A key is revoked by flag, not deleted - the record of which key ingested which
+detection has to outlive the key itself.
+
+### What this does not give you
+
+Keys are bearer credentials in a header. Over plain HTTP anything on the path can
+read them. **Terminate TLS in front of this API before it leaves the bench.** That is
+a deployment requirement, not something the code can solve.
+
+CORS origins are explicit (`AEROSHIELD_CORS_ORIGINS`) and must never be `*`: a
+wildcard origin plus a browser-held key leaks the key to any site the operator visits.
+
+### Week 6 note
+
+The React dashboard will need a human login. `app/core/dependencies.py` resolves a
+credential into a `Principal`, and routes depend on `require_scope(...)` rather than
+on API keys specifically - so a JWT verifier that returns the same `Principal` slots
+in without touching a single route.
+
+---
+
+## Endpoints
+
+### Detections
+
+| Method | Path | Scope |
+|---|---|---|
+| POST | `/api/detections` | `drone:ingest` |
+| GET | `/api/detections` | `detections:read` |
+| GET | `/api/detections/geojson` | `detections:read` |
+| GET | `/api/detections/{id}` | `detections:read` |
+| PATCH | `/api/detections/{id}/review` | `detections:read` |
+| PUT | `/api/detections/{id}/image` | `drone:ingest` |
+| GET | `/api/detections/{id}/image` | `detections:read` |
+| PUT | `/api/detections/{id}/gradcam` | `drone:ingest` |
+| GET | `/api/detections/{id}/gradcam` | `detections:read` |
+| DELETE | `/api/detections/{id}` | `admin` |
+
+**Ingest is idempotent on `client_detection_id`.** A replay returns `200` with
+`duplicate: true` rather than `409`, because a 4xx would make the drone treat
+successfully-stored work as failed and retry the same record forever.
+
+**Mission resolution**, in order: `mission_id` (404 if unknown) -> `mission_name`
+(get-or-create) -> neither (stored unassigned). The drone sends `mission_name` so a
+detection spooled during a link outage can still be filed correctly hours later.
+
+**Query parameters** on `GET /api/detections`:
+
+| Parameter | Notes |
+|---|---|
+| `mission_id` | |
+| `class_name` | Exact match |
+| `min_confidence` | 0.0-1.0 |
+| `since`, `until` | Filter on `captured_at`, ISO-8601 **with offset** |
+| `near` | `latitude,longitude,radius_metres` - PostGIS `ST_DWithin` |
+| `geotagged_only` | Exclude detections with no GPS lock |
+| `limit`, `offset` | Default 50, max 500 |
+
+Results are ordered by **`captured_at` descending, never `created_at`**. A spooled
+detection is inserted long after it was seen, so insertion order does not reflect the
+flight.
+
+`near` radius is **metres**, because the column is `geography(POINT, 4326)` and not
+`geometry`. With geometry the same number would mean *degrees* and silently match
+half the planet - a bug the test suite pins down explicitly.
+
+### Review (PRD 5.1)
+
+`PATCH /api/detections/{id}/review` records a human decision about one detection -
+the step that turns model output into evidence.
+
+```json
+{ "state": "confirmed", "reason": "visible AP blast marker" }
+```
+
+`state` is one of `unreviewed` / `confirmed` / `dismissed` / `flagged`; anything else
+is a 422, because a typo must not store a bogus verdict. The response is the full
+detection read, with `reviewed_by` and `reviewed_at` **stamped server-side** from the
+authenticated principal and the server clock. A client that could name its own
+reviewer would make the audit trail decorative.
+
+Two scope choices are deliberate:
+
+- **`detections:read`, not `drone:ingest`** - adjudication is a dashboard action. The
+  drone key cannot mark its own detections confirmed, which is the difference between
+  a review and a self-assessment.
+- **`unreviewed` is a state, not a null** - absence of a decision is itself a decision
+  state, and the mission report tallies it as such.
+
+### Grad-CAM overlays (PRD 5.1)
+
+`PUT /api/detections/{id}/gradcam` (drone key) stores the explainability heatmap;
+`GET` (dashboard key) serves it back. The server never computes one - pytorch-grad-cam
+runs on the laptop or training PC that holds the weights, and the overlay rides the
+uplink beside the frame it explains.
+
+The upload order is enforced, not assumed: **a heatmap without its frame is a 409**.
+The overlay is meaningless without the pixels it was computed over, and the dashboard's
+wipe slider is built from exactly those two layers. `jetson/uplink.py` therefore
+uploads the frame first and the heatmap second. Like the frame, the overlay is
+idempotent - re-running the analysis replaces it.
+
+### Copilot (PRD 5.1)
+
+| Method | Path | Scope |
+|---|---|---|
+| POST | `/api/copilot/query` | `detections:read` |
+
+`{"question": "What standoff for a suspected metal mine?"}` returns
+`{"text", "citations", "grounded", "engine"}` - the same shape as the frontend's
+`CopilotMessage`, so the UI swap is body-only.
+
+The pipeline: retrieve passages from the standards corpus (Chroma when installed, a
+deterministic lexical scorer over the same chunks when not) -> if nothing clears the
+relevance floor, **refuse** (`grounded: false`, `engine: "ungrounded"`, an explicit
+"consult your field manual" reply) -> otherwise compose with Groq if a key is set,
+or stitch the retrieved passages extractively if not. A Groq answer is
+string-similarity-checked against its own sources and discarded if it drifted - the
+model composes, retrieval decides, and the guardrail can overrule the model.
+
+`engine` (`"groq"` / `"extractive"` / `"ungrounded"`) reports which path ran, so a
+demo can never accidentally claim a premium path it did not use.
+
+### Mission reports (PRD 5.1)
+
+| Method | Path | Scope |
+|---|---|---|
+| GET | `/api/reports` | `detections:read` |
+| POST | `/api/reports` | `detections:read` |
+| GET | `/api/reports/{report_id}/document` | `detections:read` |
+
+`POST` takes `{"mission_id": 12, "mark_final": false, "area_surveyed_m2": null,
+"coverage_pct": null}` and returns the report: headline tallies from the review
+states, the detection register (capped at 250 rows, said so when truncated), and a
+narrative written by Groq or by a deterministic template that cannot invent a number
+(`engine` says which). The document is a real PDF when WeasyPrint is importable and
+styled HTML when it is not (`renderer` says which) - the classroom machine has neither
+a key nor WeasyPrint, and still produces a complete, downloadable report.
+
+Reports are **files, not rows**: a self-describing pair (`RPT-....json` sidecar +
+document) under `storage/reports/`. `area_surveyed_m2`/`coverage_pct` belong to the
+survey plan, which lives on the ground station - the API passes them through and
+stores `null` when absent, never a fabricated zero. `generated_by` comes from the
+credential. The `report_id` arrives from a URL, so document download applies the same
+path-traversal containment as the image endpoints.
+
+Generating is deliberately `detections:read` rather than a write scope: a report
+changes nothing in the database, and requiring `missions:write` would stop the plain
+dashboard key from producing the artifact it exists for.
+
+### Missions
+
+| Method | Path | Scope |
+|---|---|---|
+| POST | `/api/missions` | `missions:write` |
+| GET | `/api/missions` | `detections:read` |
+| GET | `/api/missions/{id}` | `detections:read` |
+| PATCH | `/api/missions/{id}` | `missions:write` |
+| GET | `/api/missions/{id}/stats` | `detections:read` |
+
+`POST /api/missions` is **get-or-create by name**: `201` when created, `200` when it
+already existed. The drone calls it at every startup, and a reboot mid-flight must
+rejoin the existing mission rather than fork it.
+
+Setting `status` to `completed` or `aborted` stamps `ended_at` automatically, so the
+Week 11 report agent always has a duration.
+
+### Telemetry
+
+| Method | Path | Scope |
+|---|---|---|
+| POST | `/api/missions/{id}/telemetry` | `drone:ingest` |
+| GET | `/api/missions/{id}/telemetry` | `detections:read` |
+| GET | `/api/missions/{id}/telemetry/latest` | `detections:read` |
+
+This is how the dashboard knows where the aircraft is. The drone runs a 1 Hz position
+beacon (`jetson/beacon.py`) that posts the current fix; the dashboard polls
+`/telemetry/latest` once a second.
+
+`.../telemetry/latest` answers even when nothing has been received, which is what makes
+it safe to poll unconditionally:
+
+```json
+{
+  "found": true,
+  "live": false,
+  "age_s": 412.6,
+  "mission_name": "kmit-01",
+  "latitude": 17.397220,
+  "longitude": 78.489540,
+  "altitude_m": 482.4,
+  "relative_altitude_m": 4.2,
+  "heading_deg": 277.7,
+  "gps_fix_type": 3,
+  "satellites_visible": 7,
+  "recorded_at": "2026-10-30T13:25:41Z"
+}
+```
+
+- `found` is `false` until the first fix arrives - the frontend shows the simulator
+  rather than an empty map.
+- `live` is a server-side freshness decision (fix younger than a few seconds), not a
+  "did the request succeed" flag. A `200` with `live: false` means the aircraft is
+  silent, which is exactly the state the dashboard must be able to tell apart from
+  "no mission at all".
+
+### Auth and admin
+
+| Method | Path | Scope |
+|---|---|---|
+| GET | `/api/auth/me` | any valid key |
+| POST | `/api/admin/api-keys` | `admin` |
+| GET | `/api/admin/api-keys` | `admin` |
+| DELETE | `/api/admin/api-keys/{id}` | `admin` |
+
+### Health and dev tools
+
+| Method | Path | Auth |
+|---|---|---|
+| GET | `/` | public |
+| GET | `/health` | public - includes a real database round-trip |
+| POST | `/api/detect` | public - **dev tool, mock detector, stores nothing** |
+
+`POST /api/detect` (singular) predates the ingest path. It uploads an image and
+returns a mock detection so the API can be demoed with no drone. It is **not** the
+flight path and must never grow a real model - see PRD section 2.2.
+
+---
+
+## Positional accuracy
+
+Every geotagged detection carries `horizontal_error_m`: a 1-sigma estimate combining
+
+- GPS receiver error (~2.5 m for the Holybro M10, no RTK)
+- altitude error (5% of AGL), which scales with distance from the frame centre
+- heading error (5 degrees after a good compass calibration)
+- box-centroid jitter (~4 px, converted through the GSD)
+
+It **excludes** terrain slope, camera tilt away from nadir, and lens distortion,
+because correcting those needs a terrain model and a calibrated camera. Get the
+numbers for your own setup with:
+
+```bash
+python3 jetson/geo.py --hfov 62.2 --width 1280 --height 720 --alt 30
+```
+
+Render an uncertainty circle, not a pin. PRD section 10 is explicit that overstating
+precision is the dangerous direction to be wrong in for a safety system.
+
+When there is no usable GPS fix, `latitude`/`longitude` are `null` and the detection
+is still stored. `GET /api/detections/geojson` omits those rows - GeoJSON cannot
+express "exists but has no location", and `[0, 0]` would draw a phantom cluster in the
+Gulf of Guinea. Use `GET /api/missions/{id}/stats` to see the
+`total_detections` vs `geotagged_detections` split.
+
+---
+
+## Errors
+
+| Status | Meaning |
+|---|---|
+| 400 | Malformed request; non-image upload (checked by magic bytes, not Content-Type) |
+| 401 | Missing, unknown or revoked API key |
+| 403 | Valid key without the required scope. The message names the scopes the key *does* have. |
+| 404 | No such detection/mission, or an image that was never uploaded |
+| 409 | Grad-CAM heatmap uploaded for a detection that has no frame yet — upload the image first (`PUT /api/detections/{id}/image`), then the overlay |
+| 413 | Image over `AEROSHIELD_MAX_IMAGE_MB` |
+| 422 | Schema validation failure - inverted bbox, out-of-range confidence, one-sided coordinates, naive timestamp, malformed `near` |
+
+Validation worth knowing about, because each rejects a real failure mode:
+
+- **Inverted or zero-area bbox** - the client's coordinate maths is wrong.
+- **One-sided coordinates** - a latitude with no longitude plots on the prime meridian.
+- **Naive `captured_at`** - drone, server and browser are routinely in different
+  zones, so a timestamp with no offset silently shifts the mission timeline.
+- **Non-image upload** - magic bytes are checked because `Content-Type` is whatever
+  the client chose to send, and a truncated upload over a bad link lands here too.
+
+---
+
+## Worked example
+
+```bash
+export KEY=aero_...          # from scripts/create_api_key.py
+export URL=http://127.0.0.1:8000
+
+curl -s $URL/health | python3 -m json.tool
+curl -s -H "X-API-Key: $KEY" $URL/api/auth/me | python3 -m json.tool
+
+# Create a mission
+curl -s -X POST $URL/api/missions \
+     -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
+     -d '{"name":"bench-1","description":"desk test"}'
+
+# Ingest a detection
+cat > /tmp/det.json <<'EOF'
+{
+  "client_detection_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+  "mission_name": "bench-1",
+  "class_name": "landmine_metal",
+  "class_id": 0,
+  "confidence": 0.87,
+  "bbox_x1": 640, "bbox_y1": 360, "bbox_x2": 730, "bbox_y2": 450,
+  "latitude": 12.9716214, "longitude": 77.5946101,
+  "relative_altitude_m": 30.0, "heading_deg": 90.0,
+  "gps_fix_type": 3, "satellites_visible": 14, "horizontal_error_m": 3.4,
+  "frame_width": 1280, "frame_height": 720,
+  "captured_at": "2026-08-23T09:14:22.481Z"
+}
+EOF
+
+curl -s -X POST $URL/api/detections \
+     -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
+     -d @/tmp/det.json
+
+# Same request again -> duplicate: true, still one row
+curl -s -X POST $URL/api/detections \
+     -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
+     -d @/tmp/det.json
+
+# Attach the frame
+curl -s -X PUT $URL/api/detections/1/image \
+     -H "X-API-Key: $KEY" -F 'image=@frame.jpg;type=image/jpeg'
+
+# Query
+curl -s -H "X-API-Key: $KEY" "$URL/api/detections?near=12.9716,77.5946,500"
+curl -s -H "X-API-Key: $KEY" $URL/api/detections/geojson | python3 -m json.tool
+curl -s -H "X-API-Key: $KEY" $URL/api/missions/1/stats | python3 -m json.tool
+```
+
+---
+
+## Running it
+
+```bash
+docker compose up -d db                     # PostGIS
+
+cd backend
+python3 -m venv .venv && source .venv/bin/activate    # macOS/Linux
+# .\.venv\Scripts\Activate.ps1                        # Windows PowerShell
+pip install -r requirements.txt
+cp .env.example .env
+alembic upgrade head
+python scripts/create_api_key.py --name laptop --preset admin
+```
+
+Then start the API **through `make api` from the repo root**, not by hand:
+
+```bash
+make api        # uvicorn on 0.0.0.0:8000
+```
+
+uvicorn's default bind is `127.0.0.1`, which is reachable from this laptop and from
+nowhere else. A drone that cannot reach the API looks perfectly healthy while spooling
+every detection and reporting nothing, so the LAN bind is not left to memory.
+
+Health is **`/health`**, not `/api/health`.
+
+Verify the schema really is spatial:
+
+```bash
+docker compose exec db psql -U aeroshield -d aeroshield \
+  -c "SELECT PostGIS_Version();" \
+  -c "\d detections"        # expect ix_detections_geog USING gist
+```
+
+Tests — note the interpreters are not interchangeable:
+
+```bash
+cd backend && ./.venv/bin/python -m pytest -q   # API suite (86 passed)
+make test-local                                 # root: jetson/ + scripts (119 passed)
+cd frontend && npm test                         # Node's built-in runner (40 tests)
+cd frontend && npm run build                    # tsc --noEmit && vite build
+```
+
+`/usr/local/bin/python3.12` is the interpreter to use for anything importing `jetson/`
+(it is the only one with `requests` and no pytest); `.venv312/bin/python` has both and
+is what `make test-local` uses.
+
+### Proving the telemetry path without the aircraft
+
+`scripts/verify_telemetry_path.py` drives the *real* `jetson/beacon.py` and
+`jetson/uplink.py` against a live backend using a hand-built `GpsFix`, so the whole
+position path can be verified at a desk with no drone:
+
+```bash
+/usr/local/bin/python3.12 scripts/verify_telemetry_path.py \
+  --backend-url http://127.0.0.1:8000 --mission-name kmit-01 --frames 4 --interval-s 0.4
+```
+
+It exits `0` only when `pos_sent > 0` and `pos_failed == 0`. Run it after touching any
+of the beacon, uplink, or telemetry route.

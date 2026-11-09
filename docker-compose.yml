@@ -1,0 +1,64 @@
+# AeroShield - development infrastructure.
+#
+# PRD section 7 locks PostgreSQL + PostGIS and Docker Compose, so this is the
+# on-plan way to run the database. PostGIS is not optional decoration: the Week 11
+# safe-path planner runs A* over a proximity-weighted risk graph, which means
+# ST_DWithin / ST_Distance and a GiST index. Starting on plain PostgreSQL (or
+# SQLite) means rewriting the detections table later.
+#
+#   docker compose up -d db          # start the database
+#   docker compose logs -f db        # watch it come up
+#   docker compose down              # stop (data survives in the volume)
+#   docker compose down -v           # stop and DESTROY the data
+#
+# The API itself is deliberately NOT in here during development - you want
+# `uvicorn --reload` on the host so edits apply instantly. An api service is
+# sketched at the bottom for the Week 12 deployment story.
+
+services:
+  db:
+    # postgis/postgis bundles the extension; the plain `postgres` image does not.
+    image: postgis/postgis:16-3.4
+    container_name: aeroshield-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aeroshield
+      POSTGRES_PASSWORD: aeroshield_dev
+      POSTGRES_DB: aeroshield
+      # Deterministic collation, so ORDER BY does not differ between machines.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      # Exposed on the host so uvicorn (and psql, and your IDE) can reach it.
+      - "5432:5432"
+    volumes:
+      - aeroshield_pgdata:/var/lib/postgresql/data
+      # Creates the separate database the test suite uses. Runs once, on an
+      # empty data directory only.
+      - ./backend/scripts/init-db.sql:/docker-entrypoint-initdb.d/10-init-db.sql:ro
+    healthcheck:
+      # `alembic upgrade head` fails confusingly if it starts before Postgres is
+      # accepting connections, so make the readiness explicit.
+      test: ["CMD-SHELL", "pg_isready -U aeroshield -d aeroshield"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # Week 12 deployment shape. Not used day to day - run uvicorn on the host with
+  # --reload instead, and note that DB_HOST becomes `db` in here, not localhost.
+  #
+  # api:
+  #   build: ./backend
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     AEROSHIELD_DATABASE_URL: postgresql+asyncpg://aeroshield:aeroshield_dev@db:5432/aeroshield
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - ./backend/storage:/app/storage
+
+volumes:
+  aeroshield_pgdata:
+    name: aeroshield_pgdata

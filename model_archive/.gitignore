@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.site/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.*
+!*.example
+
+# Logs
+*.log
+logs/
+log/
+
+# --- SafeMine-specific exclusions ---
+
+# Training artifacts (too large for git, produced by week3_train_yolov8.py)
+weights/*.pt
+weights/*.onnx
+weights/*.engine
+!weights/README.txt
+
+# Large model checkpoints in repo root (downloaded / trained weights)
+yolo26n.pt
+yolov8m.pt
+yolo26s.pt
+*.pt
+*.onnx
+*.engine
+!weights/README.txt
+
+# Full run history (keep only summary JSON + key plots)
+runs/detect/**/*
+!runs/detect/**/safemine_summary.json
+!runs/detect/**/results.csv
+
+# Dataset (external, sourced separately)
+datasets/
+Datasets/
+
+# Docker / CI
+pg_data/
+__pycache__/
+*.pyc
+
+# Coverage
+.coverage
+htmlcov/
+.coverage.*
+
+# Git
+.git/
