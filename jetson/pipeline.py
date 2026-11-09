@@ -84,6 +84,13 @@ class PipelineStats(object):
         self.capture_fps = 0.0
         self.detect_fps = 0.0
         self.render_total_s = 0.0
+        #: How the inference thread attached to the GPU, or why it could not.
+        #: Reported in the summary so "inferred 0" is never unexplained.
+        self.cuda_context = "not requested"
+        #: True once the worker has attached a context (or has nothing to attach).
+        self.context_ready = False
+        #: True if the worker thread had to be abandoned at shutdown.
+        self.worker_hung = False
 
     def elapsed(self):
         return time.time() - self.t_start
@@ -105,10 +112,19 @@ class PipelineStats(object):
         return self
 
     def __str__(self):
-        return ("capture {0} frames | inferred {1} | skipped {2} | "
+        text = ("capture {0} frames | inferred {1} | skipped {2} | "
                 "{3} detections").format(
             self.frames_captured, self.frames_inferred,
             self.frames_skipped, self.detections)
+        # Surface a dead worker. "inferred 0" on its own is the exact string
+        # this bug printed for hours while the cause sat in the CUDA context,
+        # so the reason rides along with the count.
+        if self.frames_captured and not self.frames_inferred:
+            text += "\n           inference produced NOTHING - {0}".format(
+                self.cuda_context)
+        if self.worker_hung:
+            text += "\n           inference thread was abandoned at shutdown"
+        return text
 
 
 class DetectorThread(threading.Thread):
@@ -149,7 +165,13 @@ class DetectorThread(threading.Thread):
         self.error = None
         # Capture the caller's CUDA context NOW, while we are still on the thread
         # that ran pycuda.autoinit.
-        self._cuda_ctx = _current_cuda_context()
+        #
+        # `verbose` is on only for the TensorRT backend: an ONNX/Ultralytics/mock
+        # detector has no use for a context, and warning about one on a laptop
+        # with pycuda installed but no GPU would be noise.
+        wants_cuda = getattr(detector, "name", "") == "trt"
+        self._cuda_ctx = _current_cuda_context(verbose=wants_cuda)
+        self._wants_cuda = wants_cuda
 
     def run(self):
         pushed = False
@@ -157,10 +179,27 @@ class DetectorThread(threading.Thread):
             try:
                 self._cuda_ctx.push()
                 pushed = True
+                self.stats.cuda_context = "attached via {0}".format(
+                    _CUDA_CTX_REASON or "unknown strategy")
             except Exception as exc:  # noqa: BLE001
+                self.stats.cuda_context = "push() FAILED: {0}".format(exc)
                 print("WARNING: could not attach the CUDA context to the inference "
                       "thread ({0}); falling back to the calling thread's".format(exc),
                       file=sys.stderr)
+        elif self._wants_cuda:
+            # This is the field failure. Say it plainly, once, here - because the
+            # symptom downstream is a silent hang, not an exception.
+            self.stats.cuda_context = _CUDA_CTX_REASON or "no context found"
+            print("ERROR: the TensorRT backend has NO CUDA context on the inference "
+                  "thread ({0}).".format(self.stats.cuda_context), file=sys.stderr)
+            print("       Inference will hang or fail on this thread. Run "
+                  "`make probe-cuda` on the aircraft.", file=sys.stderr)
+            print("       Workaround: run with DECOUPLED=0 so inference stays on "
+                  "the thread that created the context.", file=sys.stderr)
+        else:
+            self.stats.cuda_context = "not needed ({0} backend)".format(
+                getattr(self.detector, "name", "unknown"))
+        self.stats.context_ready = True
 
         last_seq = -1
         try:
@@ -219,25 +258,142 @@ class DetectorThread(threading.Thread):
                     pass
 
 
-def _current_cuda_context():
+#: Why _current_cuda_context() returned what it did. Set as a side effect so a
+#: caller (and the end-of-run summary) can explain a Missing context instead of
+#: reporting a silent zero. Read-only after the first call in practice.
+_CUDA_CTX_REASON = ""
+
+
+def _current_cuda_context(verbose=False):
     """The CUDA context current on THIS thread, or None if pycuda is absent.
 
     Called on the main thread before the inference thread starts. Never raises -
     a missing pycuda just means a non-TensorRT backend.
+
+    STRATEGIES, IN ORDER (this is the bug fix - read it before editing)
+    -----------------------------------------------------------------
+    JetPack 4.6 ships pycuda 2019.1.2, which has NO ``Context.get_current``
+    (that landed in pycuda 2020.1). The original implementation called it inside
+    a bare ``except Exception: return None``, so on the aircraft every run took
+    the None branch, the worker thread never attached a context, and the first
+    ``execute_async_v2`` had nothing to execute on. The result was not an error:
+    it was a HANG. ``detect()`` never returned, the worker never fed the display
+    slot, and the run reported ``inferred 0`` with a clean exit.
+
+    So we now try every API that has existed across pycuda versions:
+
+      1. ``Context.get_current()``      pycuda >= 2020.1  (laptops, newer stacks)
+      2. ``pycuda.autoinit.context``    every version      (the context autoinit
+                                                           actually created)
+      3. ``retain_primary_context()``   very old pycuda   (1.0-era Jetson images;
+                                                           stores a context for
+                                                           later push())
+      4. ``make_default_context()``     last resort        (creates a NEW context
+                                                           - only correct when
+                                                           nothing else owns one,
+                                                           because a TensorRT
+                                                           engine built against
+                                                           a different context
+                                                           will reject it)
+
+    Whatever is found is also checked for a ``push`` attribute, because a
+    context that cannot be pushed is useless to the worker and is worse than an
+    honest None: it would look like success.
+
+    ``verbose=True`` prints the strategy table. Never raises.
     """
+    global _CUDA_CTX_REASON
+
     try:
         import pycuda.driver as cuda
-    except Exception:  # noqa: BLE001 - ImportError, or no CUDA driver at all
+    except Exception as exc:  # noqa: BLE001 - ImportError, or no CUDA driver at all
+        _CUDA_CTX_REASON = "pycuda not importable ({0})".format(exc)
         return None
+
+    tried = []
+
+    def _usable(name, ctx):
+        """A context the worker can actually attach to itself."""
+        if ctx is None:
+            tried.append("{0}: None".format(name))
+            return None
+        if not hasattr(ctx, "push"):
+            # e.g. a markered pointer, or an API that changed shape.
+            tried.append("{0}: no push()".format(name))
+            return None
+        tried.append("{0}: OK".format(name))
+        return ctx
+
+    # 1. Modern pycuda: Context.get_current() landed in 2020.1.
+    get_current = getattr(getattr(cuda, "Context", None), "get_current", None)
+    if get_current is not None:
+        try:
+            ctx = _usable("get_current", get_current())
+            if ctx is not None:
+                _CUDA_CTX_REASON = "get_current"
+                return ctx
+        except Exception as exc:  # noqa: BLE001
+            tried.append("get_current: raised {0}".format(exc))
+    else:
+        tried.append("get_current: absent (pycuda < 2020.1)")
+
+    # 2. The context pycuda.autoinit created. Available on EVERY version, which
+    #    is exactly why it is the reliable path on JetPack 4.6.
     try:
-        return cuda.Context.get_current()
-    except Exception:  # noqa: BLE001 - no context current on this thread
-        return None
+        import pycuda.autoinit as _autoinit
+        ctx = _usable("autoinit.context", getattr(_autoinit, "context", None))
+        if ctx is not None:
+            _CUDA_CTX_REASON = "pycuda.autoinit.context"
+            return ctx
+    except Exception as exc:  # noqa: BLE001 - autoinit can fail with no GPU
+        tried.append("autoinit: raised {0}".format(exc))
+
+    # 3. Pre-autoinit pycuda: retain the primary context, push() it later.
+    retain = getattr(cuda, "retain_primary_context", None)
+    if retain is not None:
+        try:
+            ctx = _usable("retain_primary_context", retain())
+            if ctx is not None:
+                _CUDA_CTX_REASON = "retain_primary_context"
+                return ctx
+        except Exception as exc:  # noqa: BLE001
+            tried.append("retain_primary_context: raised {0}".format(exc))
+    else:
+        tried.append("retain_primary_context: absent")
+
+    # 4. Create one. LAST resort: an engine deserialized against a different
+    #    context will refuse to run, so this only helps a fresh process.
+    make_default = getattr(cuda, "make_default_context", None)
+    if make_default is not None:
+        try:
+            ctx = _usable("make_default_context", make_default())
+            if ctx is not None:
+                _CUDA_CTX_REASON = "make_default_context (created a NEW context)"
+                if verbose:
+                    print("WARNING: no existing CUDA context was current; created a "
+                          "new one. A TensorRT engine built against another context "
+                          "will fail here. Run `make probe-cuda` to see why.",
+                          file=sys.stderr)
+                return ctx
+        except Exception as exc:  # noqa: BLE001
+            tried.append("make_default_context: raised {0}".format(exc))
+
+    _CUDA_CTX_REASON = "; ".join(tried)
+    if verbose:
+        # LOUD. The old silent None is what turned a missing API into a 4-hour
+        # hunt through a pipeline that looked merely slow.
+        print("WARNING: pycuda is installed but no CUDA context could be "
+              "acquired on this thread.", file=sys.stderr)
+        for line in tried:
+            print("           - {0}".format(line), file=sys.stderr)
+        print("         The TensorRT backend needs one. Run `make probe-cuda`.",
+              file=sys.stderr)
+    return None
 
 
 def run_threaded(cap, detector, stop_event, on_detections,
                  render_and_publish, max_frames=0, stats=None,
-                 box_hold_s=1.0, quiet=False):
+                 box_hold_s=1.0, quiet=False, worker_join_s=5.0):
     """Thread A: the capture loop. Returns when the camera ends or is stopped.
 
     render_and_publish(frame, boxes, fps, fresh, stats) draws the HUD and pushes
@@ -320,6 +476,16 @@ def run_threaded(cap, detector, stop_event, on_detections,
                 break
     finally:
         stop_event.set()
-        worker.join(timeout=5.0)
+        # A single detect() on the Nano is ~0.7 s, so this has to be generous
+        # enough not to fire on a slow-but-working board. It must NOT be
+        # infinite: a worker wedged inside execute_async_v2 ignores the stop
+        # event entirely, and the only honest thing to do is report that.
+        worker.join(timeout=worker_join_s)
+        if worker.is_alive():
+            stats.worker_hung = True
+            print("WARNING: the inference thread did not stop within {0:.1f} s. It is "
+                  "almost certainly blocked inside TensorRT (no usable CUDA context "
+                  "on that thread) - it is a daemon thread, so the process can still "
+                  "exit.".format(worker_join_s), file=sys.stderr)
 
     return stats.refresh_rates()

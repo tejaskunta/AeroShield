@@ -8,7 +8,7 @@ import { useContainerProjection } from '@/components/map/useMapHooks'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfidenceBar } from '@/components/ui/ConfidenceBar'
-import { PlaceholderFrame } from '@/components/ui/PlaceholderFrame'
+import { DetectionFrame } from '@/components/ui/DetectionFrame'
 
 /**
  * DetectionCallout — the selected detection, as a cartographic callout.
@@ -116,7 +116,7 @@ export function DetectionCallout({
 
         {/* Frame with bbox */}
         <div className="relative aspect-video border-b border-rule bg-ink-deep">
-          <PlaceholderFrame seed={detection.id} bbox={detection.bbox} risk={level} />
+          <DetectionFrame detection={detection} risk={level} />
         </div>
 
         {/* Facts — all monospaced, all copyable. */}

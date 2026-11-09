@@ -5,6 +5,8 @@ import {
   JETSON_STREAM_PAGE_URL,
   JETSON_STREAM_URL,
 } from '@/lib/config'
+import { usePersistedState } from '@/hooks/usePersistedState'
+import { isBoolean } from '@/lib/persistedState'
 
 /**
  * LiveFeed — the aircraft's camera.
@@ -15,16 +17,19 @@ import {
  * no CORS preflight. A `<video>` would need the stream re-muxed, so `<img>` is not
  * a shortcut — it is the correct element for this format.
  *
- * ── Two display modes, because one is not enough ────────────────────────────────
+ * ── Three display modes, because one is not enough ─────────────────────────────
  *
  *   normal  a 320 px picture-in-picture, docked bottom-left over the map. Shown
  *           while the operator is working the map and wants the camera as a
  *           peripheral glance.
+ *   docked  a full-height column beside the map, the camera as a co-equal panel.
+ *           This is the resting state on Mission Control: the picture is the
+ *           subject and the map is the context, not the other way round.
  *   full    a full-viewport view, letterboxed against black. For the moments the
  *           picture *is* the task — reading a suspicious patch of ground, or
  *           checking the detector's boxes against the imagery behind them.
  *
- * Both modes render the *same* `<img>` element in the *same* DOM position, and only
+ * All three render the *same* `<img>` element in the *same* DOM position, and only
  * the container's classes change. That is deliberate: re-parenting the element would
  * remount it, which drops the MJPEG connection and re-opens a publisher slot on the
  * Jetson. Switching view size must not interrupt the stream.
@@ -32,8 +37,7 @@ import {
  * ── Why the states are this explicit ─────────────────────────────────────────────
  *
  * This panel sits over a map that is currently showing a live mission. A blank
- * rectangle there is ambiguous in the worst way: is the camera off, is the aircraft
- * out of range, is the detector down, or did the page fail to load it? An operator
+ * rectangle there is ambiguous in the worst way: is the camera off, is the aircraf out of range, is the detector down, or did the page fail to load it? An operator
  * cannot act on any of those if they cannot tell them apart. So the feed resolves to
  * a named state with its own remedy, and says which one it is.
  *
@@ -45,8 +49,8 @@ import {
 
 type FeedState = 'idle' | 'loading' | 'live' | 'offline'
 
-/** How the picture is presented. Not a size setting — two different jobs. */
-type DisplayMode = 'normal' | 'full'
+/** How the picture is presented. Not a size setting — three different jobs. */
+type DisplayMode = 'normal' | 'docked' | 'full'
 
 /** How long to wait for a first frame before calling it offline. */
 const CONNECT_TIMEOUT_MS = 12_000
@@ -64,12 +68,24 @@ export function LiveFeed({
    * MJPEG stream is just pixels by the time it reaches the browser.
    */
   detectorRunning = false,
+  /**
+   * Fill the parent as a column instead of floating over the map.
+   *
+   * The caller owns the column's width and height (it is a flex/grid child); this
+   * component only decides how the picture is laid out inside whatever box it is
+   * given. It starts in `docked` rather than `normal`, because a caller that has
+   * set aside a column for the camera is not asking for a picture-in-picture.
+   */
+  docked = false,
 }: {
   defaultOpen?: boolean
   detectorRunning?: boolean
+  docked?: boolean
 }) {
-  const [open, setOpen] = useState(defaultOpen)
-  const [mode, setMode] = useState<DisplayMode>('normal')
+  // Remembered across reloads: an operator who hid the camera to clear the map
+  // should not have it reappear every time the console is refreshed.
+  const [open, setOpen] = usePersistedState('camera-open', defaultOpen, isBoolean)
+  const [mode, setMode] = useState<DisplayMode>(docked ? 'docked' : 'normal')
   const [state, setState] = useState<FeedState>('idle')
   /**
    * The frame's real pixel size, read off the decoded image.
@@ -135,22 +151,34 @@ export function LiveFeed({
    * Escape leaves full view.
    *
    * Registered only while full, so it cannot compete with the map's own Escape
-   * handling (which clears the detection selection) the rest of the time.
+   * handling (which clears the detection selection) the rest of the time. It
+   * returns to whichever view the panel was given, not always to the PiP.
    */
   useEffect(() => {
     if (mode !== 'full') return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMode('normal')
+      if (e.key === 'Escape') setMode(docked ? 'docked' : 'normal')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [mode])
+  }, [mode, docked])
 
   if (!HAS_JETSON_STREAM) return null
 
   if (!open) {
+    /*
+     * Hidden. In docked form the chip fills the column the feed owns rather than
+     * floating over the map — otherwise "hidden" would leave an empty column and a
+     * stray button in the corner of the map, which is worse than either state.
+     */
     return (
-      <div className="pointer-events-auto absolute bottom-3 left-3 z-[520]">
+      <div
+        className={
+          docked
+            ? 'flex min-h-[260px] w-full shrink-0 items-center justify-center border-t border-rule bg-ink-deep/92 lg:min-h-0 lg:w-[38%] lg:min-w-[20rem] lg:border-l lg:border-t-0'
+            : 'pointer-events-auto absolute bottom-3 left-3 z-[520]'
+        }
+      >
         <button
           type="button"
           onClick={() => {
@@ -168,6 +196,7 @@ export function LiveFeed({
   }
 
   const full = mode === 'full'
+  const isDocked = docked && mode === 'docked'
 
   return (
     <div
@@ -179,7 +208,20 @@ export function LiveFeed({
             // the panel would then be fixed to itself and fill only the PiP box.
             // An opaque backdrop does the same job with no cascade side effect.
             'pointer-events-auto fixed inset-0 z-[900] flex flex-col bg-ink-deep animate-rise-in'
-          : 'pointer-events-auto absolute bottom-3 left-3 z-[520] w-[320px] animate-rise-in border border-rule-bright bg-ink-deep/94 backdrop-blur-sm'
+          : isDocked
+            ? // The column, owned by the feed itself.
+              //
+              // This used to be a wrapper in `MissionControl` — a `shrink-0` flex
+              // child holding the feed. That arrangement could not be unmounted
+              // when the operator switched to PiP without also unmounting the feed
+              // (and dropping the MJPEG socket with it), so the column had to stay
+              // and became an empty bordered plate where the picture used to be.
+              //
+              // Sizing the root here instead means one element swaps between a
+              // column and a floating box. Nothing is left behind, and the `<img>`
+              // is never re-parented, so the stream survives the switch.
+              'flex min-h-[260px] w-full shrink-0 flex-col border-t border-rule bg-ink-deep lg:min-h-0 lg:w-[38%] lg:min-w-[20rem] lg:border-l lg:border-t-0'
+            : 'pointer-events-auto absolute bottom-3 left-3 z-[520] w-[320px] animate-rise-in border border-rule-bright bg-ink-deep/94 backdrop-blur-sm'
       }
     >
       {/* Status strip — the honest header. */}
@@ -210,9 +252,17 @@ export function LiveFeed({
            * a study, and the labels should say which is which.
            */}
           <div role="radiogroup" aria-label="Camera view" className="flex border border-rule">
+            {docked && (
+              <ModeButton
+                active={isDocked}
+                label="Panel"
+                title="Beside the map, at full height"
+                onClick={() => setMode('docked')}
+              />
+            )}
             <ModeButton
-              active={!full}
-              label="Normal"
+              active={!full && !isDocked}
+              label="Pip"
               title="Docked over the map, for keeping an eye on the picture"
               onClick={() => setMode('normal')}
             />
@@ -226,7 +276,7 @@ export function LiveFeed({
           <button
             type="button"
             onClick={() => {
-              setMode('normal')
+              setMode(docked ? 'docked' : 'normal')
               setOpen(false)
               // Release the socket immediately rather than waiting for the effect.
               const img = imgRef.current
@@ -243,12 +293,45 @@ export function LiveFeed({
       </div>
 
       {/*
-       * The feed itself. Aspect is fixed to the source in normal mode, and takes the
-       * remaining height in full mode — `object-contain` letterboxes either way, so
-       * the picture is never cropped or stretched to fit the panel.
+       * The feed itself.
+       *
+       * Sizing is per mode because the failure is different in each one.
+       *
+       *   full    the picture takes the window and is letterboxed against black.
+       *   docked  a tall, narrow column holding a 16:9 picture. Taking the full
+       *           height there and letterboxing inside it produced a 587×834 black
+       *           slab of which ~330 px was image — the rest read as a dead feed,
+       *           not a letterbox. So a live picture is fitted to the column's
+       *           *width* and the column simply ends where the picture does; the
+       *           leftover height is chrome, not a black rectangle. Before a frame
+       *           lands there is no aspect to fit to, so the box takes the height
+       *           and the message centres in it.
+       *   normal  a fixed `aspect-video` tile, but only once there is a picture.
+       *
+       * The `<img>` element itself never moves in the tree, only its classes change.
        */}
       <div
-        className={full ? 'relative min-h-0 flex-1 bg-black' : 'relative aspect-video bg-ink-deep'}
+        className={
+          full
+            ? 'relative min-h-0 flex-1 bg-black'
+            : isDocked
+              ? state === 'live'
+                ? 'relative shrink-0 bg-black'
+                : 'relative grid min-h-0 flex-1 place-items-center bg-black'
+              : state === 'live'
+                ? // PiP with a picture: a fixed tile, so the map behind never
+                  // reflows as frames arrive.
+                  'relative aspect-video bg-ink-deep'
+                : // PiP without one: no tile at all.
+                  //
+                  // Reserving an `aspect-video` plate for a stream that has not
+                  // delivered a frame drew a 320×180 bordered black rectangle in
+                  // the corner of the map with a 10 px "connecting..." inside it —
+                  // a dead box that could be mistaken for a hole in the layout. The
+                  // panel shrink-wraps the message instead, so the footprint
+                  // matches what is actually on screen.
+                  'relative bg-ink-deep'
+        }
       >
         {state !== 'offline' && (
           <img
@@ -262,7 +345,15 @@ export function LiveFeed({
             ref={imgRef}
             src={attempt === 0 ? JETSON_STREAM_URL : `${JETSON_STREAM_URL}?t=${attempt}`}
             alt="Live camera feed from the aircraft"
-            className="h-full w-full object-contain"
+            /*
+             * `object-contain` throughout: the picture is evidence, so it is never
+             * cropped to fill a box. In the docked column the image is allowed to
+             * size from its own aspect (`w-full`, height auto) and is capped rather
+             * than stretched, which is what keeps the black down to nothing.
+             */
+            className={
+              isDocked ? 'max-h-full w-full object-contain' : 'h-full w-full object-contain'
+            }
             onLoad={(e) => {
               setState('live')
               const el = e.currentTarget
@@ -274,22 +365,60 @@ export function LiveFeed({
           />
         )}
 
-        {state === 'offline' && <FeedOffline onRetry={retry} />}
+        {state === 'offline' &&
+          (full || isDocked ? (
+            <FeedOffline onRetry={retry} />
+          ) : (
+            /*
+             * PiP with no picture.
+             *
+             * This state gets its own compact treatment instead of the full
+             * `FeedOffline` card, because the card is `absolute inset-0` and needs
+             * a box to fill — and the whole point of this branch is that there is
+             * no box. A 320 px tile with a paragraph in it was itself the clutter.
+             * So: one line of what happened, and the retry.
+             */
+            <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+              <span className="min-w-0 truncate font-mono text-[10px] text-paper-dim">
+                No signal from the aircraft
+              </span>
+              <button
+                type="button"
+                onClick={retry}
+                className="shrink-0 border border-rule px-1.5 py-0.5 font-display text-[10px] uppercase tracking-[0.1em] text-paper hover:bg-ink-hover"
+              >
+                Retry
+              </button>
+            </div>
+          ))}
         {state === 'loading' && (
-          <div className="absolute inset-0 grid place-items-center">
-            <span className="font-mono text-[10px] text-paper-faint">connecting…</span>
+          <div
+            className={
+              full || isDocked
+                ? 'absolute inset-0 grid place-items-center'
+                : 'px-2 py-1.5'
+            }
+          >
+            <span className="font-mono text-[10px] text-paper-faint">connecting...</span>
           </div>
         )}
 
-        {/* Provenance. The map beside this is simulated; the picture is not. */}
-        <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center justify-between bg-gradient-to-t from-ink-deep/90 to-transparent px-2 py-1">
-          <span className="font-mono text-[9px] text-paper-faint">
-            {state === 'live' ? 'LIVE' : state === 'offline' ? 'NO SIGNAL' : '—'}
-          </span>
-          <span className="font-mono text-[9px] text-paper-faint">
-            {intrinsic ? `${intrinsic.w}×${intrinsic.h}` : '—'}
-          </span>
-        </div>
+        {/*
+         * Provenance. The map beside this is simulated; the picture is not.
+         *
+         * Only drawn over an actual picture. On a PiP with no frame there is no
+         * `bottom` to sit on and the labels would stack onto the message above.
+         */}
+        {(state === 'live' || full || isDocked) && (
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center justify-between bg-gradient-to-t from-ink-deep/90 to-transparent px-2 py-1">
+            <span className="font-mono text-[9px] text-paper-faint">
+              {state === 'live' ? 'LIVE' : state === 'offline' ? 'NO SIGNAL' : '—'}
+            </span>
+            <span className="font-mono text-[9px] text-paper-faint">
+              {intrinsic ? `${intrinsic.w}×${intrinsic.h}` : '—'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Task-relevant caveat, stated once, where it is read. */}
@@ -327,7 +456,7 @@ function ModeButton({
       aria-checked={active}
       onClick={onClick}
       title={title}
-      className={`px-1.5 py-0.5 font-display text-[9px] uppercase tracking-[0.1em] transition-colors ${
+      className={`px-2 py-0.5 font-display text-[10px] uppercase tracking-[0.1em] transition-colors ${
         active ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper'
       }`}
     >

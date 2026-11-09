@@ -78,8 +78,7 @@ export function AdjudicationPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <GradCamWipe
-          seed={detection.id}
-          bbox={detection.bbox}
+          detection={detection}
           risk={level}
           available={detection.gradCamUri !== null}
         />

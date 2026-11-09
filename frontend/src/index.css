@@ -217,3 +217,33 @@
     display: none !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+ * Dock rail
+ *
+ * The dock is a fixed-width column. Folding a panel shrinks the panel, but the
+ * column stayed 320 px wide, so a 32 px icon ended up centred in a tall empty
+ * plate — the panel had collapsed but the box had not.
+ *
+ * `:has()` is doing the work here and there is no alternative that is as cheap.
+ * The question is "are *all* of my children folded?", which is a question about
+ * siblings. React state cannot answer it from inside a panel, and lifting every
+ * panel's fold state into the dock would mean the dock knowing which panels
+ * exist and holding duplicated state for each one. CSS can ask the DOM directly
+ * and re-evaluate on every fold with no re-render.
+ *
+ * `:not(:has(...))` rather than counting: a dock with zero panels should not
+ * narrow, and `any-collapsed` would be the wrong question anyway — one open
+ * panel still needs the full width.
+ *
+ * The width collapses to `fit-content`, not to a fixed icon size, so the rail is
+ * exactly as wide as the widest folded tile plus its padding. No magic number to
+ * drift out of step with `size-8`.
+ */
+@media (min-width: 1024px) {
+  .dock:has([data-collapsed='true']):not(:has([data-collapsed='false'])) {
+    width: fit-content;
+    min-width: 0;
+    padding-inline: 0.375rem;
+  }
+}

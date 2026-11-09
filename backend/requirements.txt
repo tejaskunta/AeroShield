@@ -8,16 +8,23 @@
 
 # --- web layer ---------------------------------------------------------------
 fastapi==0.116.1
-uvicorn[standard]==0.35.0      # [standard] adds uvloop/httptools; also the ws deps Week 6 needs
+uvicorn[standard]==0.35.0      # [standard] adds uvloop/httptools and the ws deps
 python-multipart==0.0.20       # multipart parsing for the detection image upload
+
+# Pinned explicitly even though uvicorn[standard] pulls it in. The live mission
+# socket (app/api/ws.py) is a real feature, not a transitive side effect, so a
+# future `uvicorn` without [standard] must not silently take it away - and that
+# failure would look like "the dashboard stopped updating", not like a missing
+# package. uvicorn's default ws="auto" uses this.
+websockets>=12.0,<18.0
 
 # --- config ------------------------------------------------------------------
 pydantic-settings>=2.4.0,<3.0.0   # .env -> typed Settings, no hand-rolled os.getenv
 
 # --- database ----------------------------------------------------------------
-# Async throughout: Week 6 pushes over Socket.IO and Weeks 7-10 make LLM/RAG
-# calls, all of which are I/O-bound. A synchronous session inside an `async def`
-# route blocks the whole event loop, so going async now avoids a rewrite later.
+# Async throughout: the live mission socket and the Weeks 7-10 LLM/RAG calls are
+# all I/O-bound. A synchronous session inside an `async def` route blocks the
+# whole event loop, so going async now avoids a rewrite later.
 sqlalchemy[asyncio]>=2.0.30,<3.0.0
 asyncpg>=0.29.0,<0.31.0
 geoalchemy2>=0.15.0,<0.18.0    # Geography(POINT, 4326) column + ST_* functions

@@ -39,6 +39,7 @@ from app.schemas.detection_io import (
     ReviewPatch,
 )
 from app.services import detection_repository, mission_service, storage
+from app.services.broadcast import bus, detection_frame
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,21 @@ async def ingest_detection(
 
     if duplicate:
         response.status_code = status.HTTP_200_OK
+
+    # Push to any open dashboard, but ONLY when this is a genuinely new row. A
+    # duplicate is the drone draining its offline spool, and re-announcing it would
+    # make the dashboard flash a mine that the operator has already been told about -
+    # at best noise, at worst an operator who stops believing the alert.
+    #
+    # `mission_id` may be None (a detection stored without mission context). The bus
+    # treats that as a deliberate no-op: there is no channel to belong to, and
+    # inventing one would put a detection on a mission's dashboard that it did not
+    # come from.
+    if not duplicate:
+        bus.publish(
+            detection.mission_id,
+            detection_frame(DetectionRead.model_validate(detection)),
+        )
 
     return DetectionIngestResult(
         id=detection.id,

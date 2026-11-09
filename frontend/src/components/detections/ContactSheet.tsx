@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { Detection } from '@/types'
 import { RISK_CLASSES, formatConfidence, riskOf } from '@/lib/risk'
-import { PlaceholderFrame } from '@/components/ui/PlaceholderFrame'
+import { DetectionFrame } from '@/components/ui/DetectionFrame'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 
@@ -78,12 +78,7 @@ export function ContactSheet({
               }`}
             >
               <div className="relative aspect-video border-b border-rule bg-ink-deep">
-                <PlaceholderFrame
-                  seed={d.id}
-                  bbox={d.bbox}
-                  risk={level}
-                  showStamp={false}
-                />
+                <DetectionFrame detection={d} risk={level} showStamp={false} />
                 {/* Review mark, top-right — shape-coded to match the map pins. */}
                 <span className="absolute right-1 top-1">
                   <ReviewMark state={d.review.state} level={level} />

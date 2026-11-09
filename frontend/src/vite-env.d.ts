@@ -39,6 +39,15 @@ interface ImportMetaEnv {
   readonly VITE_GOOGLE_MAPS_MAP_ID?: string
 
   /**
+   * Backend mission to follow for live telemetry, by call-sign. Must match the
+   * drone's `--mission-name` (`make run MISSION=...`).
+   *
+   * Unset, the dashboard keeps using the in-process simulator for position — so
+   * the zero-key classroom demo is unaffected by this variable's absence.
+   */
+  readonly VITE_MISSION_NAME?: string
+
+  /**
    * Mapbox access token, used for imagery at zooms Google's built-in raster types
    * will not reach. Public by construction, like the Google key — restrict it by URL
    * in the Mapbox account rather than treating it as a secret.

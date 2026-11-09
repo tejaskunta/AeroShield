@@ -1,3 +1,4 @@
+import { Grid3x3 } from 'lucide-react'
 import type { MissionProgress } from '@/types'
 import { MISSION } from '@/lib/mockData'
 import { Panel } from '@/components/ui/Panel'
@@ -16,7 +17,7 @@ import { formatArea, formatDuration } from '@/lib/geo'
 export function CoveragePanel({ progress }: { progress: MissionProgress | null }) {
   if (!progress) {
     return (
-      <Panel title="Coverage">
+      <Panel title="Coverage" collapsible collapseId="coverage" icon={Grid3x3}>
         <p className="text-[11px] text-paper-dim">Waiting for mission data…</p>
       </Panel>
     )
@@ -26,7 +27,7 @@ export function CoveragePanel({ progress }: { progress: MissionProgress | null }
   const remaining = totalCells - progress.coveredCells.length
 
   return (
-    <Panel title="Coverage">
+    <Panel title="Coverage" collapsible collapseId="coverage" icon={Grid3x3}>
       <StatReadout
         label="Surveyed"
         value={<CountUp value={progress.coveragePct} />}

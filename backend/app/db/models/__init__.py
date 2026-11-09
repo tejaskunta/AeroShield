@@ -10,5 +10,6 @@ import.
 from app.db.models.api_key import ApiKey
 from app.db.models.detection import Detection
 from app.db.models.mission import Mission, MissionStatus
+from app.db.models.telemetry import Telemetry
 
-__all__ = ["ApiKey", "Detection", "Mission", "MissionStatus"]
+__all__ = ["ApiKey", "Detection", "Mission", "MissionStatus", "Telemetry"]

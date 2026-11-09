@@ -22,10 +22,23 @@
  * `debris_negative` is the hard-negative class: it is a *detection* the model
  * made, not a hazard. It exists so the UI can show what the model correctly
  * ruled out, which is how an operator builds trust in the confidence numbers.
+ *
+ * `landmine` is the single class the shipped engine actually predicts. The
+ * TensorRT build the drone flies (`best_512x288.engine`) was trained with
+ * `names: {0: landmine}`, so every real row the aircraft uploads says exactly
+ * that. It sits alongside the three-way split rather than replacing it, because
+ * the split is what the dataset and the simulator were specified against and the
+ * live model is what is on the aircraft today; `lib/api.ts` maps one vocabulary
+ * onto the other at the seam instead of letting both leak into the UI.
  */
-export type DetectionClass = 'landmine_metal' | 'landmine_plastic' | 'debris_negative'
+export type DetectionClass =
+  | 'landmine'
+  | 'landmine_metal'
+  | 'landmine_plastic'
+  | 'debris_negative'
 
 export const DETECTION_CLASSES: DetectionClass[] = [
+  'landmine',
   'landmine_metal',
   'landmine_plastic',
   'debris_negative',
@@ -33,6 +46,7 @@ export const DETECTION_CLASSES: DetectionClass[] = [
 
 /** Human-facing labels. The UI never shows a raw class id to an operator. */
 export const CLASS_LABELS: Record<DetectionClass, string> = {
+  landmine: 'Landmine',
   landmine_metal: 'Metal-cased',
   landmine_plastic: 'Plastic-cased',
   debris_negative: 'Debris (ruled out)',
@@ -93,7 +107,23 @@ export interface Detection {
   capturedAt: string
   /** Survey grid reference, e.g. `C4`. How detections get talked about in the field. */
   gridCell: string
-  /** Source frame. Placeholder until the ML pipeline emits real crops. */
+  /**
+   * Pixel size of the source frame.
+   *
+   * `bbox` is in these coordinates. Without them a real photo cannot be
+   * annotated: a box drawn from raw pixel values onto a scaled `<img>` lands in
+   * the wrong place. Optional because a simulated detection has no source frame —
+   * `PlaceholderFrame` invents its own geometry.
+   */
+  frameWidth?: number
+  frameHeight?: number
+  /**
+   * Source frame. Placeholder until the ML pipeline emits real crops.
+   *
+   * Empty string means "no real image". Real rows start empty and are filled by
+   * the frame store (`lib/detectionFrames.ts`) with an object URL, because the
+   * image route needs an `X-API-Key` header that an `<img>` cannot send.
+   */
   frameUri: string
   /** Grad-CAM heatmap over the same frame, or null if not yet computed. */
   gradCamUri: string | null
@@ -124,12 +154,20 @@ export interface Telemetry {
   groundSpeedMs: number
   /** 0..359, compass degrees. Drives the drone glyph rotation. */
   headingDeg: number
-  batteryPct: number
-  batteryVolts: number
+  /**
+   * `null` when the aircraft did not report it.
+   *
+   * A dust-off flight with no MAVLink link sends no battery frame, and the ingest
+   * schema stores that as NULL rather than 0. Coercing NULL to 0 (which is what a
+   * plain `num()` did) made the panel assert "0 %" and "0.0 V" — a flat battery
+   * on a healthy aircraft, which is worse than admitting the value is unknown.
+   */
+  batteryPct: number | null
+  batteryVolts: number | null
   satellites: number
   gpsFix: GpsFixType
-  /** Telemetry link quality, 0..100. */
-  linkPct: number
+  /** Telemetry link quality, 0..100, or `null` when the aircraft did not report it. */
+  linkPct: number | null
   mode: FlightMode
   armed: boolean
 }

@@ -239,6 +239,45 @@ rejoin the existing mission rather than fork it.
 Setting `status` to `completed` or `aborted` stamps `ended_at` automatically, so the
 Week 11 report agent always has a duration.
 
+### Telemetry
+
+| Method | Path | Scope |
+|---|---|---|
+| POST | `/api/missions/{id}/telemetry` | `drone:ingest` |
+| GET | `/api/missions/{id}/telemetry` | `detections:read` |
+| GET | `/api/missions/{id}/telemetry/latest` | `detections:read` |
+
+This is how the dashboard knows where the aircraft is. The drone runs a 1 Hz position
+beacon (`jetson/beacon.py`) that posts the current fix; the dashboard polls
+`/telemetry/latest` once a second.
+
+`.../telemetry/latest` answers even when nothing has been received, which is what makes
+it safe to poll unconditionally:
+
+```json
+{
+  "found": true,
+  "live": false,
+  "age_s": 412.6,
+  "mission_name": "kmit-01",
+  "latitude": 17.397220,
+  "longitude": 78.489540,
+  "altitude_m": 482.4,
+  "relative_altitude_m": 4.2,
+  "heading_deg": 277.7,
+  "gps_fix_type": 3,
+  "satellites_visible": 7,
+  "recorded_at": "2026-10-30T13:25:41Z"
+}
+```
+
+- `found` is `false` until the first fix arrives - the frontend shows the simulator
+  rather than an empty map.
+- `live` is a server-side freshness decision (fix younger than a few seconds), not a
+  "did the request succeed" flag. A `200` with `live: false` means the aircraft is
+  silent, which is exactly the state the dashboard must be able to tell apart from
+  "no mission at all".
+
 ### Auth and admin
 
 | Method | Path | Scope |
@@ -377,8 +416,19 @@ pip install -r requirements.txt
 cp .env.example .env
 alembic upgrade head
 python scripts/create_api_key.py --name laptop --preset admin
-uvicorn app.main:app --reload
 ```
+
+Then start the API **through `make api` from the repo root**, not by hand:
+
+```bash
+make api        # uvicorn on 0.0.0.0:8000
+```
+
+uvicorn's default bind is `127.0.0.1`, which is reachable from this laptop and from
+nowhere else. A drone that cannot reach the API looks perfectly healthy while spooling
+every detection and reporting nothing, so the LAN bind is not left to memory.
+
+Health is **`/health`**, not `/api/health`.
 
 Verify the schema really is spatial:
 
@@ -388,10 +438,29 @@ docker compose exec db psql -U aeroshield -d aeroshield \
   -c "\d detections"        # expect ix_detections_geog USING gist
 ```
 
-Tests (needs the database container up; uses the separate `aeroshield_test`
-database, so development data is never touched):
+Tests — note the interpreters are not interchangeable:
 
 ```bash
-cd backend && pytest -v      # API suite
-cd .. && pytest -v           # jetson/ geolocation + GPS unit tests, no DB needed
+cd backend && ./.venv/bin/python -m pytest -q   # API suite (86 passed)
+make test-local                                 # root: jetson/ + scripts (119 passed)
+cd frontend && npm test                         # Node's built-in runner (40 tests)
+cd frontend && npm run build                    # tsc --noEmit && vite build
 ```
+
+`/usr/local/bin/python3.12` is the interpreter to use for anything importing `jetson/`
+(it is the only one with `requests` and no pytest); `.venv312/bin/python` has both and
+is what `make test-local` uses.
+
+### Proving the telemetry path without the aircraft
+
+`scripts/verify_telemetry_path.py` drives the *real* `jetson/beacon.py` and
+`jetson/uplink.py` against a live backend using a hand-built `GpsFix`, so the whole
+position path can be verified at a desk with no drone:
+
+```bash
+/usr/local/bin/python3.12 scripts/verify_telemetry_path.py \
+  --backend-url http://127.0.0.1:8000 --mission-name kmit-01 --frames 4 --interval-s 0.4
+```
+
+It exits `0` only when `pos_sent > 0` and `pos_failed == 0`. Run it after touching any
+of the beacon, uplink, or telemetry route.

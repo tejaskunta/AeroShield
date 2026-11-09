@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import type { BoundingBox, RiskLevel } from '@/types'
-import { PlaceholderFrame } from '@/components/ui/PlaceholderFrame'
+import type { Detection, RiskLevel } from '@/types'
+import { DetectionFrame } from '@/components/ui/DetectionFrame'
 
 /**
  * GradCamWipe — compare the frame against its activation map by wiping across it.
@@ -15,13 +15,13 @@ import { PlaceholderFrame } from '@/components/ui/PlaceholderFrame'
  * being rebuilt on mousemove.
  */
 export function GradCamWipe({
-  seed,
-  bbox,
+  detection,
   risk,
   available,
 }: {
-  seed: string
-  bbox: BoundingBox
+  /** The detection itself, not its parts: the base image and the map are two
+   *  fetches keyed by its id, so the component that draws them needs the id. */
+  detection: Detection
   risk: RiskLevel
   /** False when the pipeline has not produced a Grad-CAM for this detection. */
   available: boolean
@@ -31,7 +31,7 @@ export function GradCamWipe({
   if (!available) {
     return (
       <div className="relative aspect-video w-full border border-rule bg-ink-deep">
-        <PlaceholderFrame seed={seed} bbox={bbox} risk={risk} />
+        <DetectionFrame detection={detection} risk={risk} />
         <p className="absolute inset-x-0 bottom-0 border-t border-rule bg-ink-deep/95 px-2 py-1 text-[10px] text-paper-dim">
           No activation map for this detection. Grad-CAM runs on the Jetson after
           capture; this frame has not been processed.
@@ -44,7 +44,7 @@ export function GradCamWipe({
     <div className="space-y-1.5">
       <div className="relative aspect-video w-full select-none overflow-hidden border border-rule bg-ink-deep">
         {/* Base: the capture. */}
-        <PlaceholderFrame seed={seed} bbox={bbox} risk={risk} />
+        <DetectionFrame detection={detection} risk={risk} />
 
         {/* Overlay: the activation map, clipped to the wipe position. */}
         <div
@@ -52,7 +52,7 @@ export function GradCamWipe({
           style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}
           aria-hidden
         >
-          <PlaceholderFrame seed={seed} bbox={bbox} risk={risk} mode="gradcam" />
+          <DetectionFrame detection={detection} risk={risk} variant="gradcam" />
         </div>
 
         {/* The wipe edge, with a grip. */}

@@ -37,6 +37,7 @@ PYTHON 3.6 ONLY - see the note at the top of infer_trt.py.
 import argparse
 import csv
 import json
+import math
 import os
 import sys
 import threading
@@ -47,8 +48,9 @@ import cv2
 
 # jetson/ is sys.path[0] when this file is run as a script, from any cwd.
 import pipeline as pipeline_mod
+from beacon import TelemetryBeacon, frame_from_fix
 from detector import make_detector
-from geo import CameraModel, bbox_to_latlon
+from geo import METRES_PER_DEG_LAT, CameraModel, bbox_to_latlon
 from gps import make_provider
 from stream import FrameBroadcaster, start_server
 from uplink import BackendUplink, new_client_id
@@ -65,6 +67,25 @@ CSV_COLUMNS = [
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def metres_between(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Planar distance in metres between two nearby points.
+
+    Deliberately not haversine. The points being compared are two sightings of
+    the same object, seconds apart, so they are metres apart and the spherical
+    correction is far below the +/-2.5 m GPS error already in both numbers. The
+    equirectangular form keeps this cheap enough to call for every box against
+    every recent object on a 4-core A57, which is the constraint that matters.
+
+    Longitude is scaled by cos(lat) because a degree of longitude shrinks
+    towards the poles; at the latitudes this flies, ignoring that would report a
+    1.5 m threshold as a ~2.1 m one, i.e. it would merge two genuinely separate
+    objects.
+    """
+    dlat_m = (lat2 - lat1) * METRES_PER_DEG_LAT
+    dlon_m = (lon2 - lon1) * METRES_PER_DEG_LAT * math.cos(math.radians(lat1))
+    return math.sqrt(dlat_m * dlat_m + dlon_m * dlon_m)
 
 
 class DetectionLog(object):
@@ -250,6 +271,22 @@ def parse_args() -> argparse.Namespace:
     gps.add_argument("--sim-origin", nargs=2, type=float, default=[12.9716, 77.5946],
                      metavar=("LAT", "LON"), help="Origin for --gps sim")
     gps.add_argument("--sim-altitude", type=float, default=30.0, help="Altitude for --gps sim")
+    # Geometry of the simulated walk. These exist because the defaults describe a
+    # survey the dashboard is not drawing: 60 m legs over 6 lanes 15 m apart is a
+    # 60 x 75 m flown area, while the on-screen block is 10 x 10 m. Left at their
+    # defaults the aircraft leaves the block almost immediately and spends the
+    # rest of the run being drawn off the edge of the site - which reads as a
+    # position fault, not as a mis-set simulator. Args rather than constants so
+    # the walk can be fitted to whatever block is actually being surveyed.
+    gps.add_argument("--sim-leg-length", type=float, default=60.0,
+                     help="--gps sim: length of each straight run, metres. The walk is "
+                          "flown with legs running EAST-WEST, so this is the east-west "
+                          "extent of the tracked area")
+    gps.add_argument("--sim-lane-spacing", type=float, default=15.0,
+                     help="--gps sim: distance between parallel runs, metres. Lanes step "
+                          "NORTH, so lanes x spacing is the north-south extent")
+    gps.add_argument("--sim-lanes", type=int, default=6,
+                     help="--gps sim: how many straight runs before the pattern repeats")
 
     cam = p.add_argument_group("camera geometry (needed to turn pixels into coordinates)")
     cam.add_argument("--hfov", type=float, default=62.2,
@@ -272,6 +309,13 @@ def parse_args() -> argparse.Namespace:
     net.add_argument("--jpeg-quality", type=int, default=85)
     net.add_argument("--replay-spool", action="store_true",
                      help="Re-send detections spooled by an earlier run, then continue")
+    net.add_argument("--telemetry-hz", type=float, default=1.0,
+                     help="Position updates per second to the dashboard (0 = off). "
+                          "Not tied to the camera rate: the dashboard cannot use "
+                          "30 position updates a second, so this is paced "
+                          "independently and always sends the newest sample")
+    net.add_argument("--no-telemetry", action="store_true",
+                     help="Never send aircraft position (detections still upload)")
 
     out = p.add_argument_group("output")
     out.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
@@ -291,6 +335,10 @@ def parse_args() -> argparse.Namespace:
                      help="--decoupled only: seconds to keep the last boxes on screen "
                           "after a detecting frame, so a missed frame does not blank "
                           "the display (default 1.5)")
+    out.add_argument("--dedupe-radius-m", type=float, default=1.5,
+                     help="Suppress a detection of a class already seen within this many "
+                          "metres, so a fixed object is recorded once rather than once "
+                          "per frame it appears in. 0 disables (default 1.5)")
     out.add_argument("--quiet", action="store_true", help="Only print detections and the summary")
 
     return p.parse_args()
@@ -410,6 +458,11 @@ def main() -> int:
         origin_lat=args.sim_origin[0],
         origin_lon=args.sim_origin[1],
         altitude_m=args.sim_altitude,
+        # Dropped by make_provider for every provider except `sim`, so the
+        # mavlink path is unaffected by their presence here.
+        leg_length_m=args.sim_leg_length,
+        lane_spacing_m=args.sim_lane_spacing,
+        lanes=args.sim_lanes,
     )
 
     uplink = None
@@ -429,6 +482,16 @@ def main() -> int:
     log = None
     frames_seen = 0
     detections_total = 0
+    suppressed_total = 0
+    # Ground objects already recorded this run: (lat, lon, class_name). A fixed
+    # object is visible on dozens of consecutive frames, and each sighting is
+    # geotagged with a +/-2.5 m error, so without this the same stone is filed as
+    # a scatter of near-identical rows and the operator cannot tell whether they
+    # are looking at one object or twenty. The list is linear-scanned rather than
+    # indexed because a single run has on the order of tens of distinct objects,
+    # not thousands, and a distance comparison is a handful of arithmetic ops.
+    seen_objects = []
+    beacon = None
     broadcaster = None
     stream_server = None
     if args.stream_port:
@@ -453,9 +516,13 @@ def main() -> int:
         older frame) never reach here, so they can never be uploaded as if they
         had been measured on the current frame.
 
+        Boxes already suppressed as repeats of an object recorded earlier in the
+        run never reach `log.write` or `uplink.submit`, so this is the one place
+        that decides how many rows exist.
+
         Returns the GPS fix used, so callers can render the same one.
         """
-        nonlocal detections_total, geotagged_total, gradcam_session
+        nonlocal detections_total, suppressed_total, geotagged_total, gradcam_session
 
         frame_h, frame_w = frame.shape[:2]
         cam = CameraModel(hfov_deg=args.hfov, image_width=frame_w,
@@ -501,6 +568,35 @@ def main() -> int:
                 pos = bbox_to_latlon(cam, fix, d.x1, d.y1, d.x2, d.y2)
                 if pos is not None:
                     geotagged_total += 1
+
+                # -- spatial de-duplication -------------------------------------
+                # A fixed object stays in frame for many consecutive frames, and
+                # the GPS jitters by metres between them, so the same object is
+                # re-detected as a slightly different position each time. Within
+                # --dedupe-radius-m of an object of the SAME class already
+                # recorded, this is that object seen again: drop it before it is
+                # logged or uploaded, so one object yields one row.
+                #
+                # The class is part of the key on purpose - two things a metre
+                # apart that the model calls different classes are two objects,
+                # and merging them would hide one.
+                #
+                # Only applies to geotagged boxes: without coordinates there is
+                # no notion of "the same place", so an ungeotagged detection is
+                # always kept rather than silently discarded.
+                if args.dedupe_radius_m > 0 and pos is not None:
+                    repeat = False
+                    for (seen_lat, seen_lon, seen_class) in seen_objects:
+                        if seen_class != d.class_name:
+                            continue
+                        if metres_between(pos.lat, pos.lon, seen_lat, seen_lon) \
+                                <= args.dedupe_radius_m:
+                            repeat = True
+                            break
+                    if repeat:
+                        suppressed_total += 1
+                        continue
+                    seen_objects.append((pos.lat, pos.lon, d.class_name))
 
                 record = {
                     "client_detection_id": new_client_id(),
@@ -570,6 +666,27 @@ def main() -> int:
             if mission_id is None and not args.quiet:
                 print("[live] no mission id - detections will spool until the backend returns")
 
+        # The position beacon needs a mission to file positions against, so it is
+        # built AFTER ensure_mission and stays inert (a no-op update()) when there
+        # is no id. That is deliberate: retrying a 404 at 1 Hz for a whole flight
+        # would be noise, and positions are dropped rather than spooled anyway.
+        if not args.no_telemetry and not args.no_uplink and args.telemetry_hz > 0:
+            beacon = TelemetryBeacon(
+                args.backend_url,
+                api_key=args.api_key,
+                mission_id=mission_id,
+                interval_s=1.0 / args.telemetry_hz,
+            )
+            if beacon.enabled:
+                beacon.start()
+                if not args.quiet:
+                    print("[live] position beacon: {0:.1f} Hz -> {1}".format(
+                        args.telemetry_hz, beacon.url))
+            else:
+                beacon = None
+                if not args.quiet:
+                    print("[live] position beacon off (no mission id)")
+
         log = DetectionLog(args.log_dir, mission_name)
         if not args.quiet:
             print("[live] logging to {0}".format(log.jsonl_path))
@@ -616,13 +733,22 @@ def main() -> int:
                 `frame` is NEVER written to - it is still in the inference slot.
                 """
                 fps_box[0] = fps
+
+                # The position sample is taken here, before the early return, so
+                # a headless run still beacons. This callback runs once per
+                # CAPTURED frame (~30 Hz), and the beacon reduces that to its own
+                # rate; putting it below the early return would have made
+                # --headless silently stop reporting position.
+                fix = gps.get_fix()
+                last_render_fix[0] = fix
+                if beacon is not None:
+                    beacon.update(frame_from_fix(fix))
+
                 need_render = ((not args.headless) or (broadcaster is not None)
                                or bool(args.save_frames and fresh))
                 if not need_render:
                     return
 
-                fix = gps.get_fix()
-                last_render_fix[0] = fix
                 shown = frame.copy()
                 gps_text = "no fix" if fix is None else "{0:.6f},{1:.6f} fix{2} sats{3}".format(
                     fix.lat, fix.lon, fix.fix_type, fix.satellites)
@@ -696,6 +822,14 @@ def main() -> int:
 
             fix = handle_detections(frame, dets, inference_s)
 
+            # Position goes out here, on the caller's thread, but only as far as
+            # a lock and a dict copy - the send itself is on the beacon's own
+            # thread. Offering every frame means the beacon always has the
+            # newest sample to send at its next tick, rather than sending a
+            # position that was already superseded.
+            if beacon is not None:
+                beacon.update(frame_from_fix(fix))
+
             # -- display / save -------------------------------------------
             # Keep the last boxes on screen for a few frames when a frame misses them.
             if dets:
@@ -762,6 +896,8 @@ def main() -> int:
         gps.close()
         if log is not None:
             log.close()
+        if beacon is not None:
+            beacon.close()
         if uplink is not None:
             uplink.close()
 
@@ -778,6 +914,13 @@ def main() -> int:
     else:
         print("  wall-clock FPS     : {0:.1f}".format(frames_seen / wall_s))
     print("  detections         : {0}".format(detections_total))
+    if suppressed_total:
+        # Shown even when --quiet, because a silent filter is indistinguishable
+        # from a broken detector: the operator has to be able to see that the
+        # model found things and the filter removed them, not that it found one
+        # thing all run.
+        print("  suppressed (dedupe): {0}  ({1} object(s) recorded)".format(
+            suppressed_total, len(seen_objects)))
     print("  geotagged          : {0}{1}".format(
         geotagged_total,
         "" if detections_total == 0 else "  ({0:.0f}%)".format(
@@ -792,6 +935,11 @@ def main() -> int:
             print("  spooled (pending)  : {0} record(s)".format(pending))
             print("                       drain with: python3 jetson/uplink.py --replay "
                   "--backend-url {0} --api-key ...".format(args.backend_url))
+    if beacon is not None:
+        # Positions are dropped rather than spooled, so `pos_dropped` here is
+        # frames superseded before they left - expected at any camera rate above
+        # --telemetry-hz, not a fault.
+        print("  position beacon    : {0}".format(beacon.stats))
     if detections_total and not geotagged_total:
         print("")
         print("  NOTE: nothing was geotagged. Every detection is recorded but has no")

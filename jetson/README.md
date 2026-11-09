@@ -114,7 +114,7 @@ first. Skip that and every number you measure is meaningless.
 
 # Live camera, headless (over SSH with no display)
 python3 infer_trt.py --engine best.engine --source 0 --headless \
-    --names metal random_plastic_debris
+    --names landmine
 
 # Single image, save the annotated result
 python3 infer_trt.py --engine best.engine --source test.jpg \
@@ -123,6 +123,53 @@ python3 infer_trt.py --engine best.engine --source test.jpg \
 
 Pass `--names` in **exactly your training class order** — the same order as
 `names:` in `data.yaml`. Get it wrong and every label is confidently mislabeled.
+
+> **This model is single-class.** The weights shipped in `weights/` were trained
+> on one class, `landmine` (`nc=1` — see `docs/TRAINING_NOTES.md`), so
+> `--names landmine` is the correct invocation and is what the `Makefile` passes.
+> An earlier version of this file showed `--names metal random_plastic_debris`,
+> which is the three-class *design* in `configs/data.yaml.example` and was never
+> the trained artifact. Passing three names to a one-class engine does not error;
+> it mislabels every detection, which is exactly the failure the paragraph above
+> warns about. Confirm the count on the board with:
+>
+> ```bash
+> python3 -c "import tensorrt as trt; e=trt.Runtime(trt.Logger()).deserialize_cuda_engine(open('weights/best.engine','rb').read()); print(e.num_bindings, e.get_tensor_shape('output0'))"
+> ```
+
+## Simulated flight geometry
+
+With `--gps sim` there is no aircraft, so the track is generated: straight legs
+flown **east-west**, stepping **north** one lane at a time, looping when it
+reaches the last lane. Three flags set its shape, all defaulting to the values
+`Makefile` passes:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--sim-origin LAT LON` | `12.9716 77.5946` | South-west corner of the flown area |
+| `--sim-leg-length M` | `60` | Length of each straight run — the **east-west** extent |
+| `--sim-lane-spacing M` | `15` | Gap between parallel runs — lanes step **north** |
+| `--sim-lanes N` | `6` | Number of runs before the pattern repeats |
+
+So the tracked area is `leg_length` metres east-west by `lanes × lane_spacing`
+metres north-south. **This has to match the block the dashboard draws**, which is
+10 × 10 m, or the aircraft is plotted off the edge of the survey for the whole
+run and reads as a position fault rather than a mis-set simulator. The defaults
+are tuned for the `Makefile`'s block:
+
+```bash
+# 10 m east-west, 4 lanes at 3 m = 9 m north-south: sits inside a 10 x 10 m block
+make stream DECOUPLED=1
+# equivalent to:
+#   --sim-leg-length 10 --sim-lane-spacing 3 --sim-lanes 4
+
+# the bare defaults fly 60 m x 75 m - six times too long and seven times too wide
+python3 jetson/live_detect.py --detector mock --gps sim --headless
+```
+
+The provider's own defaults are deliberately left at the large survey, because
+they are what the tests in `tests/test_gps.py` assert against. `Makefile` passes
+the small block explicitly.
 
 ---
 
@@ -300,7 +347,7 @@ On the drone:
 pip3 install -r jetson/requirements-nano.txt
 
 python3 jetson/live_detect.py \
-    --detector trt --engine best.engine --names metal random_plastic_debris \
+    --detector trt --engine best.engine --names landmine \
     --gps mavlink --gps-url /dev/ttyTHS1:921600 \
     --hfov 62.2 \
     --backend-url http://<server>:8000 --api-key $AEROSHIELD_API_KEY \

@@ -179,21 +179,27 @@ Key screens are mounted via the router in [frontend/src/App.tsx](frontend/src/Ap
 
 ## Backend API
 
-The current FastAPI implementation exposes:
+The FastAPI implementation exposes a full ingest, query and telemetry surface. The
+handful of routes people reach for first:
 
 ```http
-GET /
-GET /health
-POST /api/detect
+GET  /                         service banner
+GET  /health                   health, includes a real DB round-trip
+POST /api/missions             get-or-create a mission by name
+POST /api/missions/{id}/telemetry   drone position beacon (1 Hz)
+GET  /api/missions/{id}/telemetry/latest
+POST /api/detections           ingest a detection
+GET  /api/detections/geojson
 ```
 
-Example behavior:
+`/api/detect` also exists but is a **dev tool**: it accepts an uploaded image and
+returns a mock detection, storing nothing. It predates the ingest path and is not the
+flight path.
 
-- `/` returns a simple service-running message
-- `/health` returns a health status payload
-- `/api/detect` accepts an uploaded image and returns a mock detection response
+Health is `/health`, not `/api/health`. Start the API with `make api` — uvicorn's
+default `127.0.0.1` bind is invisible to the aircraft.
 
-The mock detection service is defined in [backend/app/services/detection_service.py](backend/app/services/detection_service.py) and is intended to be replaced later with real detection logic.
+Full route table, scopes and worked examples: [docs/API.md](docs/API.md).
 
 ---
 
@@ -201,18 +207,42 @@ The mock detection service is defined in [backend/app/services/detection_service
 
 ### Frontend verification
 
-The current frontend was validated by running:
-
 ```bash
-cd "AeroShield Project\frontend"
-npm run build
+cd frontend
+npm test         # Node's built-in runner -> 40 tests
+npm run build    # tsc --noEmit && vite build
 ```
 
-This completed successfully, confirming the app compiles cleanly in its current state.
+`npm test` is **Node's built-in test runner** with TypeScript stripping
+(`node --experimental-strip-types --import ./scripts/register.mjs --test src/lib/*.test.ts`).
+This repo has no vitest and no jest; `npx vitest` will sit on an install prompt forever.
+
+### End-to-end verification without the aircraft
+
+The position path can be proven at a desk, because the beacon and uplink modules are
+importable and drive a real backend:
+
+```bash
+make doctor                                      # from the aircraft: can it reach /health?
+/usr/local/bin/python3.12 scripts/verify_telemetry_path.py \
+  --backend-url http://127.0.0.1:8000 --mission-name kmit-01
+```
 
 ### Current design assumption
 
 The current project is simulation-led and operator-first. That means the interface and workflow are already shaped around real mission operations even though the underlying detection pipeline is not fully or continuously connected to a live model yet.
+
+When the drone is not posting, the dashboard falls back to simulator data rather than
+displaying an empty map. `GET .../telemetry/latest` always answers, with `live: false`
+when the aircraft has gone quiet, so "silent aircraft" is distinguishable from "no
+mission".
+
+### The mission name has to match in three places
+
+The drone tags telemetry with `--mission-name` (from `make MISSION`), the frontend
+looks its mission up by `VITE_MISSION_NAME` in `frontend/.env.local`, and the API
+finds-or-creates by name. If they disagree the dashboard silently shows the simulator
+while the aircraft is flying perfectly — the least obvious failure mode in the system.
 
 ---
 

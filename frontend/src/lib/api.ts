@@ -1,4 +1,12 @@
-import type { Citation, CopilotMessage, Detection, MissionReport } from '@/types'
+import type {
+  Citation,
+  CopilotMessage,
+  Detection,
+  FlightMode,
+  GpsFixType,
+  MissionReport,
+  Telemetry,
+} from '@/types'
 import { COPILOT_CORPUS, REPORTS, UNGROUNDED_REPLY } from './mockData'
 
 /**
@@ -13,6 +21,8 @@ import { COPILOT_CORPUS, REPORTS, UNGROUNDED_REPLY } from './mockData'
  *   askCopilot      POST /api/copilot/query
  *   listReports     GET  /api/reports
  *   generateReport  POST /api/reports
+ *   findMissionByName  GET /api/missions
+ *   fetchLatestTelemetry GET /api/missions/{id}/telemetry/latest
  *
  * Each wired call keeps its old fixture as a fallback: if the backend is
  * unreachable or rejects us (no key, a simulated id that has no server row),
@@ -164,6 +174,192 @@ export async function saveReview(
     }
   } catch {
     return { persisted: false }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Detections — GET /api/detections, GET /api/detections/{id}/image
+// ---------------------------------------------------------------------------
+
+/**
+ * One row of `GET /api/detections` (`DetectionRead` in schemas/detection_io.py).
+ *
+ * Flat and snake_case because it is a database row. Note `class_name` is whatever
+ * the model was trained to say — the drone posts `"landmine"`, a single class,
+ * while the UI's `DetectionClass` union is the three-way dataset split. See
+ * `toDetection` for how that mismatch is handled rather than papered over.
+ */
+export interface BackendDetectionRow {
+  id: number
+  client_detection_id: string
+  mission_id: number
+  class_name: string
+  class_id: number
+  confidence: number
+  bbox_x1: number
+  bbox_y1: number
+  bbox_x2: number
+  bbox_y2: number
+  latitude: number | null
+  longitude: number | null
+  altitude_m: number | null
+  relative_altitude_m: number | null
+  heading_deg: number | null
+  gps_fix_type: number | null
+  horizontal_error_m: number | null
+  frame_width: number | null
+  frame_height: number | null
+  image_path: string | null
+  gradcam_path: string | null
+  review_state: string | null
+  review_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  model_version: string | null
+  captured_at: string
+}
+
+interface BackendDetectionList {
+  items: BackendDetectionRow[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/**
+ * Map the model's `class_name` onto the UI's three-way class union.
+ *
+ * This is an adapter, not a guess. The shipped engine (`best_512x288.engine`) was
+ * trained with `names: {0: landmine}` — one class — so every real row says
+ * `"landmine"`. The UI's union has three classes because the dataset spec it was
+ * written against does. Rather than widen the union to include a fourth spelling
+ * and let two vocabularies drift, a bare `"landmine"` maps to the metal-cased
+ * label: the demo's targets are metal-cased, and `riskOf` treats it as a hazard
+ * either way, which is the reading that matters for safety.
+ *
+ * Anything unrecognised also falls back to `landmine_metal` rather than throwing.
+ * A detection the UI cannot classify is still a detection, and dropping it would
+ * silently shorten the record of what the aircraft saw.
+ */
+function toDetectionClass(name: string): Detection['class'] {
+  switch (name) {
+    case 'landmine_metal':
+      return 'landmine_metal'
+    case 'landmine_plastic':
+      return 'landmine_plastic'
+    case 'debris_negative':
+      return 'debris_negative'
+    default:
+      return 'landmine_metal'
+  }
+}
+
+/**
+ * Backend row -> UI detection.
+ *
+ * `frameUri` is deliberately left empty, because the bytes need an authenticated
+ * fetch that must not block this list from rendering. An empty string means "no
+ * image yet" and every consumer treats that as "draw the placeholder"; the actual
+ * blob URL is looked up by `lib/detectionFrames.ts` against the detection id.
+ *
+ * Exported because the mission socket receives single rows in exactly this shape
+ * (`{"type": "detection", "data": <DetectionRead>}`) and must map them the same
+ * way. Two mappers for one wire shape is how a socket frame and a polled row end
+ * up disagreeing about which field is the position.
+ *
+ * Rows with no GPS fix return null. A detection with `latitude: null` has no
+ * position, and the UI's `Detection.position` is not optional because a pin with
+ * no position is not a pin — so the honest place to handle that is at the seam.
+ */
+export function toDetection(r: BackendDetectionRow): Detection | null {
+  if (r.latitude === null || r.longitude === null) return null
+
+  const level = r.confidence
+  return {
+    id: `D-${String(r.id).padStart(4, '0')}`,
+    missionId: String(r.mission_id),
+    class: toDetectionClass(r.class_name),
+    confidence: level,
+    bbox: { x1: r.bbox_x1, y1: r.bbox_y1, x2: r.bbox_x2, y2: r.bbox_y2 },
+    position: { lat: r.latitude, lon: r.longitude },
+    captureAltitudeM: r.relative_altitude_m ?? r.altitude_m ?? 0,
+    positionErrorM: r.horizontal_error_m ?? 0,
+    capturedAt: r.captured_at,
+    // Frame dimensions matter even when there is no image yet: the bbox is in
+    // these coordinates, and the map callout draws the box over the photo.
+    frameWidth: r.frame_width ?? undefined,
+    frameHeight: r.frame_height ?? undefined,
+    // Grid cell is a *survey-block* reference and the real aircraft is not
+    // flying the simulated block, so there is no honest cell to name. Empty is
+    // the truthful value; the UI renders nothing rather than a fabricated `A1`.
+    gridCell: '',
+    frameUri: '',
+    gradCamUri: null,
+    review: {
+      state: (r.review_state as Detection['review']['state']) ?? 'unreviewed',
+      reason: r.review_reason ?? undefined,
+      reviewedAt: r.reviewed_at ?? undefined,
+      reviewedBy: r.reviewed_by ?? undefined,
+    },
+    source: 'backend',
+  }
+}
+
+/**
+ * REAL — `GET /api/detections?mission_id=`.
+ *
+ * Returns `[]` on any failure rather than throwing, matching the rest of this
+ * file: the caller merges what it gets onto the simulator, so an empty list means
+ * "nothing real to add", which is the same thing the keyless demo sees.
+ *
+ * Rows with no geotag are filtered out (see `toDetection`). They are still on the
+ * server and still in the drone's log — they simply cannot be drawn on a map, and
+ * the honest place to notice that is the backend, not a pin at (0, 0).
+ */
+export async function listDetections(missionId: number, limit = 500): Promise<Detection[]> {
+  if (!DASHBOARD_KEY) return []
+  try {
+    const r = await fetch(`${BASE}/detections?mission_id=${missionId}&limit=${limit}`, {
+      headers: authHeaders(),
+    })
+    if (!r.ok) return []
+    const body = (await r.json()) as BackendDetectionList
+    return body.items.map(toDetection).filter((d): d is Detection => d !== null)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * REAL — `GET /api/detections/{id}/image` or `/{id}/gradcam`, as an object URL.
+ *
+ * An `<img src>` **cannot** send an `X-API-Key` header, and the image route is
+ * behind `SCOPE_DETECTIONS_READ`, so the bytes have to be fetched with
+ * `authHeaders()` and handed to the DOM as a blob URL. That is why this returns a
+ * string to be assigned to `src` rather than a URL to be pasted into markup.
+ *
+ * The caller owns the URL and **must** call `URL.revokeObjectURL` when it is done;
+ * these are JPEGs around 20 KB and a mission's worth of them held for the life of
+ * the tab is a real leak. `lib/detectionFrames.ts` does that bookkeeping.
+ *
+ * Null means "no picture", which every consumer already has to handle for
+ * simulated rows.
+ */
+export async function fetchDetectionImage(
+  id: string,
+  variant: 'frame' | 'gradcam' = 'frame',
+): Promise<string | null> {
+  const numericId = toIntId(id)
+  if (!DASHBOARD_KEY || numericId === null) return null
+  const path = variant === 'gradcam' ? 'gradcam' : 'image'
+  try {
+    const r = await fetch(`${BASE}/detections/${numericId}/${path}`, { headers: authHeaders() })
+    if (!r.ok) return null
+    const blob = await r.blob()
+    if (blob.size === 0) return null
+    return URL.createObjectURL(blob)
+  } catch {
+    return null
   }
 }
 
@@ -351,4 +547,228 @@ export async function generateReport(missionId: string): Promise<MissionReport> 
   const existing = REPORTS.find((rep) => rep.missionId === missionId)
   if (!existing) throw new ApiError(`No report for mission ${missionId}.`)
   return { ...existing, generatedAt: new Date().toISOString(), status: 'draft' }
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry — GET /api/missions/{id}/telemetry/latest
+// ---------------------------------------------------------------------------
+
+/**
+ * A telemetry frame as the backend stores it (`TelemetryRead` in
+ * schemas/telemetry.py). Flat and snake_case, because it is a database row.
+ */
+interface BackendTelemetryRead {
+  id: number
+  mission_id: number | null
+  latitude: number
+  longitude: number
+  altitude_m: number | null
+  relative_altitude_m: number | null
+  heading_deg: number | null
+  ground_speed_ms: number | null
+  gps_fix_type: number | null
+  satellites_visible: number | null
+  battery_pct: number | null
+  battery_volts: number | null
+  link_pct: number | null
+  flight_mode: string | null
+  armed: boolean | null
+  captured_at: string
+  created_at: string
+}
+
+/**
+ * `TelemetryLatest` in schemas/telemetry.py.
+ *
+ * Exported because the mission socket sends this same object inside its frames -
+ * the hook that consumes the socket types its frames with this, and uses the same
+ * `toLatestTelemetry` mapper the polling call uses.
+ */
+export interface BackendTelemetryLatest {
+  found: boolean
+  mission_id: number
+  mission_name: string | null
+  telemetry: BackendTelemetryRead | null
+  age_s: number | null
+  live: boolean
+}
+
+/** `MissionListSummary` in schemas/mission.py, inside the `Page` envelope. */
+interface BackendMissionSummary {
+  id: number
+  name: string
+}
+
+interface BackendMissionPage {
+  items: BackendMissionSummary[]
+}
+
+/**
+ * The aircraft's latest known position, once it has been mapped into the UI's
+ * vocabulary.
+ */
+export interface LatestTelemetry {
+  missionId: number
+  missionName: string | null
+  telemetry: Telemetry
+  /** Seconds since the aircraft last reported. Null when the backend did not say. */
+  ageS: number | null
+  /** True when the frame fell inside the backend's freshness window. */
+  live: boolean
+}
+
+/**
+ * ArduPilot's numeric `gps_fix_type` (MAVLink `GPS_FIX_TYPE`) to the UI's name.
+ *
+ * The backend stores the number because that is what the flight controller
+ * sends; the UI shows the name because "3d" tells an operator whether they can
+ * trust a geotag and "3" does not. Anything unrecognised resolves to `no-fix`,
+ * which is the safe direction to be wrong in: claiming a better fix than the
+ * data supports is what would put a detection in the wrong place.
+ */
+const GPS_FIX_BY_CODE: Record<number, GpsFixType> = {
+  0: 'no-fix',
+  1: 'no-fix',
+  2: '2d',
+  3: '3d',
+  4: '3d',
+  5: '3d',
+  6: 'rtk',
+}
+
+/**
+ * ArduPilot mode names to the four the dashboard renders.
+ *
+ * The UI's union is deliberately small; the flight controller's is not. Modes
+ * that are not in the union (ALT_HOLD, POSHOLD, STABILIZE, ...) all mean the same
+ * thing to this dashboard — a human is on the sticks — so they resolve to MANUAL
+ * rather than being invented as new members. The aircraft has no autopilot, so
+ * every mode it actually flies is MANUAL or one of the assisted hold modes.
+ */
+const FLIGHT_MODE_BY_NAME: Record<string, FlightMode> = {
+  AUTO: 'AUTO',
+  GUIDED: 'GUIDED',
+  LOITER: 'LOITER',
+  RTL: 'RTL',
+  MANUAL: 'MANUAL',
+}
+
+/** Map one backend row into the frame the dashboard renders. */
+function toTelemetry(t: BackendTelemetryRead): Telemetry {
+  return {
+    timestamp: t.captured_at,
+    position: { lat: t.latitude, lon: t.longitude },
+    // relative_altitude is height above the arming point, which is the closest
+    // thing to the ground the aircraft has; altitude_m is above mean sea level
+    // and would read as tens of metres on a site near sea level.
+    altitudeM: num(t.relative_altitude_m ?? t.altitude_m),
+    groundSpeedMs: num(t.ground_speed_ms),
+    headingDeg: num(t.heading_deg),
+    // Passed through as null instead of defaulting to 0: a NULL column means the
+    // aircraft never sent that frame, and rendering it as 0% / 0V states a fact
+    // the drone never asserted. The panel renders null as "not reported".
+    batteryPct: t.battery_pct ?? null,
+    batteryVolts: t.battery_volts ?? null,
+    satellites: num(t.satellites_visible),
+    gpsFix: GPS_FIX_BY_CODE[t.gps_fix_type ?? 0] ?? 'no-fix',
+    linkPct: t.link_pct ?? null,
+    mode: FLIGHT_MODE_BY_NAME[(t.flight_mode ?? '').toUpperCase()] ?? 'MANUAL',
+    armed: t.armed ?? false,
+  }
+}
+
+/**
+ * Resolve a mission call-sign (e.g. `KMIT-01`) to the backend's integer id.
+ *
+ * The dashboard addresses missions by name, because that is what a pilot reads
+ * out and what the drone passes to `--mission-name`; the backend keys them by
+ * integer. Returns null when the key is unset, the backend is down, or no
+ * mission has that name yet - all of which are normal before the first flight,
+ * not errors. Newest first, so a repeated call-sign resolves to the live one.
+ */
+export async function findMissionByName(name: string): Promise<number | null> {
+  if (!DASHBOARD_KEY || !name) return null
+  try {
+    const r = await fetch(`${BASE}/missions`, { headers: authHeaders() })
+    if (!r.ok) return null
+    const page = (await r.json()) as BackendMissionPage
+    const hit = page.items.find((m) => m.name === name)
+    return hit ? hit.id : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Map a backend `TelemetryLatest` envelope into the UI's vocabulary.
+ *
+ * ONE MAPPER, TWO TRANSPORTS. The polling call and the live socket both receive
+ * this exact JSON, so both go through this function. Two copies of this mapping
+ * would eventually disagree (one learning about a new field first), and the
+ * symptom would be a dashboard whose altitude is right over the socket and wrong
+ * over the fallback - a bug nobody would think to look for.
+ *
+ * Returns null when `found` is false or the frame is absent: "this mission has no
+ * telemetry yet" is a normal state at the start of a flight, and the caller's
+ * job is to keep showing whatever it was showing rather than to render a zero.
+ */
+export function toLatestTelemetry(body: BackendTelemetryLatest): LatestTelemetry | null {
+  if (!body.found || !body.telemetry) return null
+  return {
+    missionId: body.mission_id,
+    missionName: body.mission_name,
+    telemetry: toTelemetry(body.telemetry),
+    ageS: body.age_s ?? null,
+    live: body.live,
+  }
+}
+
+/**
+ * The mission socket for a given id, or null when this build cannot open one.
+ *
+ * Built from `window.location` rather than hard-coded, so it inherits the page's
+ * scheme and host: served over https (or through a tunnel) it becomes `wss://`
+ * automatically, because a `ws://` socket opened from an https page is blocked by
+ * the browser and would fail with a console error that says nothing about the
+ * real cause. The path stays relative (`/api/...`) for the same reason every
+ * other call does - the dev server proxies it, and the browser never needs to
+ * know the backend's port.
+ *
+ * The key rides in the query string because the `WebSocket` constructor offers no
+ * way to set a header. See `backend/app/api/ws.py` for the full reasoning.
+ */
+export function missionSocketUrl(missionId: number): string | null {
+  if (!DASHBOARD_KEY || !Number.isInteger(missionId) || missionId <= 0) return null
+  if (typeof window === 'undefined' || !window.location) return null
+
+  const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const key = encodeURIComponent(DASHBOARD_KEY)
+  return `${scheme}//${window.location.host}${BASE}/ws/missions/${missionId}?key=${key}`
+}
+
+/**
+ * REAL (simulator fallback) — `GET /api/missions/{id}/telemetry/latest`.
+ *
+ * This is the call that puts the real aircraft on the map. Returns null - never
+ * throws - when there is no key, no backend, the mission does not exist (404),
+ * or no frame has arrived yet (`found: false`, which is a 200). The caller keeps
+ * the simulator in every one of those cases, so a keyless classroom demo looks
+ * exactly as it did before this function existed.
+ *
+ * This stays even though `useMissionStream` prefers the socket: it is the
+ * fallback for a socket that cannot connect (a proxy without `ws: true`, a
+ * backend restart, a flaky link) and the source of the first position before the
+ * socket has opened. A push transport does not remove the need to be able to ask.
+ */
+export async function fetchLatestTelemetry(missionId: number): Promise<LatestTelemetry | null> {
+  if (!DASHBOARD_KEY || !Number.isInteger(missionId) || missionId <= 0) return null
+  try {
+    const r = await fetch(`${BASE}/missions/${missionId}/telemetry/latest`, {
+      headers: authHeaders(),
+    })
+    if (!r.ok) return null
+    return toLatestTelemetry((await r.json()) as BackendTelemetryLatest)
+  } catch {
+    return null
+  }
 }

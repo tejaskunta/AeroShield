@@ -46,6 +46,27 @@ export const GOOGLE_MAPS_MAP_ID: string | undefined =
   (env.VITE_GOOGLE_MAPS_MAP_ID ?? '').trim() || undefined
 
 // ---------------------------------------------------------------------------
+// Live telemetry
+// ---------------------------------------------------------------------------
+
+/**
+ * The backend mission whose telemetry this dashboard follows, by call-sign.
+ *
+ * Must match the `--mission-name` the drone was started with (`make run
+ * MISSION=...`). The drone creates the mission on startup if it does not exist,
+ * so the two only have to agree on the string — the dashboard then resolves it
+ * to the backend's integer id by name.
+ *
+ * Empty by default. With it unset the dashboard never asks the backend for a
+ * position and the simulator stays the only source of telemetry, which is what
+ * keeps the zero-config classroom demo working exactly as before.
+ */
+export const MISSION_NAME: string = (env.VITE_MISSION_NAME ?? '').trim()
+
+/** True when a mission is named, i.e. live telemetry can be attempted at all. */
+export const HAS_LIVE_MISSION: boolean = MISSION_NAME.length > 0
+
+// ---------------------------------------------------------------------------
 // Imagery provider
 // ---------------------------------------------------------------------------
 

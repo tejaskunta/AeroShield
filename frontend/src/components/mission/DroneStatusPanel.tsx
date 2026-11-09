@@ -1,4 +1,4 @@
-import { Radio, Satellite } from 'lucide-react'
+import { Radio, Satellite, Plane } from 'lucide-react'
 import type { Telemetry } from '@/types'
 import { Panel } from '@/components/ui/Panel'
 import { Badge } from '@/components/ui/Badge'
@@ -20,7 +20,7 @@ import { compassPoint, formatLatLng } from '@/lib/geo'
 export function DroneStatusPanel({ telemetry }: { telemetry: Telemetry | null }) {
   if (!telemetry) {
     return (
-      <Panel title="Drone status">
+      <Panel title="Drone status" collapsible collapseId="drone-status" icon={Plane}>
         <p className="text-[11px] text-paper-dim">Waiting for first telemetry frame…</p>
       </Panel>
     )
@@ -40,13 +40,29 @@ export function DroneStatusPanel({ telemetry }: { telemetry: Telemetry | null })
     position,
   } = telemetry
 
-  const batteryTone = batteryPct <= 20 ? 'bad' : batteryPct <= 35 ? 'warn' : 'normal'
-  const linkTone = linkPct < 60 ? 'bad' : linkPct < 80 ? 'warn' : 'normal'
+  /*
+   * Battery and link are `null` when the aircraft never sent those frames — the
+   * normal state on this airframe, which flies with no MAVLink link, so the only
+   * telemetry it can report is GPS.
+   *
+   * That distinction has to survive into the rendering. Grading a null against
+   * the 20%/60% thresholds picks the "bad" branch every time, so an aircraft that
+   * simply has nothing to say about its battery was drawn in hazard red at 0 V —
+   * indistinguishable from a flat pack about to force an RTL. "Not reported" is
+   * the honest reading and it is what a missing link actually means.
+   */
+  const batteryTone =
+    batteryPct === null ? 'normal' : batteryPct <= 20 ? 'bad' : batteryPct <= 35 ? 'warn' : 'normal'
+  const linkTone =
+    linkPct === null ? 'normal' : linkPct < 60 ? 'bad' : linkPct < 80 ? 'warn' : 'normal'
   const fixOk = gpsFix === '3d' || gpsFix === 'rtk'
 
   return (
     <Panel
       title="Drone status"
+      collapsible
+      collapseId="drone-status"
+      icon={Plane}
       aside={
         <div className="flex items-center gap-1.5">
           <Badge>{mode}</Badge>
@@ -58,15 +74,17 @@ export function DroneStatusPanel({ telemetry }: { telemetry: Telemetry | null })
       <div className="mb-2.5">
         <StatReadout
           label="Battery"
-          value={<CountUp value={batteryPct} />}
-          unit="%"
+          value={batteryPct === null ? '—' : <CountUp value={batteryPct} />}
+          unit={batteryPct === null ? undefined : '%'}
           tone={batteryTone}
           aside={
-            <span className="font-mono text-[10px] text-paper-faint">{batteryVolts} V</span>
+            <span className="font-mono text-[10px] text-paper-faint">
+              {batteryVolts === null ? 'not reported' : `${batteryVolts} V`}
+            </span>
           }
         />
         <Meter
-          value={batteryPct / 100}
+          value={batteryPct === null ? 0 : batteryPct / 100}
           tone={batteryTone === 'bad' ? 'hazard' : batteryTone === 'warn' ? 'caution' : 'paper'}
           className="mt-1.5"
           label="Battery remaining"
@@ -79,8 +97,8 @@ export function DroneStatusPanel({ telemetry }: { telemetry: Telemetry | null })
       <div className="grid grid-cols-2 gap-3 py-2.5">
         <StatReadout
           label="Link"
-          value={linkPct}
-          unit="%"
+          value={linkPct === null ? '—' : linkPct}
+          unit={linkPct === null ? undefined : '%'}
           tone={linkTone}
           size="sm"
           aside={<Radio size={10} className="text-paper-faint" aria-hidden />}

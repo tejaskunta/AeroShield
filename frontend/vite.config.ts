@@ -21,9 +21,21 @@ export default defineConfig({
     port: 5173,
     // Mission data is simulated (see plan), but two backend routes do exist today:
     // POST /api/detect and GET /health. Proxying them means the Detection Center's
-    // backend check works without adding CORS middleware to FastAPI.
+    // backend check works without adding CORS middleware to FastAPI. The mission
+    // socket and telemetry also live here, which is why /api carries `ws: true`.
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      /**
+       * `ws: true` IS REQUIRED, not optional tidying.
+       *
+       * `/api/ws/missions/{id}` is a real WebSocket behind this prefix. Vite only
+       * forwards an Upgrade handshake when the proxy entry says `ws: true`; without
+       * it the connection is treated as a plain HTTP GET, the browser gets a normal
+       * response instead of a 101, and `new WebSocket(...)` fires `onerror`
+       * immediately. The dashboard then silently stays on its polling fallback —
+       * which works, which is exactly why the bug would go unnoticed for a long
+       * time. Setting it changes nothing for the existing REST calls.
+       */
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true, ws: true },
       '/health': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       /**
        * Live camera feed. Set VITE_JETSON_STREAM_URL=/jetson/stream to route the
