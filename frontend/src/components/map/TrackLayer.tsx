@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { LatLng } from '@/types'
+import { CONSOLE_HEX } from '@/lib/consoleInk'
 import { useMap } from './mapContext'
 
 /**
@@ -44,7 +45,7 @@ export function TrackLayer({ points }: { points: LatLng[] }) {
     const line = new maps.Polyline({
       map,
       path: toPath(points),
-      strokeColor: '#E8E4DA',
+      strokeColor: CONSOLE_HEX.paper,
       strokeWeight: 1.5,
       strokeOpacity: 0.55,
       clickable: false,

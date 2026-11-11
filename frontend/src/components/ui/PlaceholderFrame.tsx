@@ -77,7 +77,7 @@ export function PlaceholderFrame({
       </defs>
 
       {/* Ground */}
-      <rect width={W} height={H} fill="#1E2529" />
+      <rect width={W} height={H} fill={CONSOLE_HEX.inkGround} />
       {blobs.map((b, i) => (
         <circle key={i} cx={b.cx} cy={b.cy} r={b.r} fill={b.tone} opacity={b.o} />
       ))}
@@ -99,7 +99,7 @@ export function PlaceholderFrame({
 
       {showStamp && (
         <>
-          <rect x={14} y={H - 40} width={252} height={26} fill="#0E141A" opacity="0.86" />
+          <rect x={14} y={H - 40} width={252} height={26} fill={CONSOLE_HEX.inkDeep} opacity="0.86" />
           <text
             x={26}
             y={H - 22}

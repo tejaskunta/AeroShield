@@ -1,4 +1,5 @@
 import type { LatLng } from '@/types'
+import { CONSOLE_HEX } from '@/lib/consoleInk'
 
 /**
  * DroneOverlay — the aircraft mark, drawn as a DOM element so it can carry a raster
@@ -115,7 +116,7 @@ function droneOverlayClass(): new () => DroneOverlayHandle {
       fallback.style.position = 'absolute'
       fallback.style.inset = '0'
       fallback.style.display = 'none'
-      fallback.style.background = '#E8E4DA'
+      fallback.style.background = CONSOLE_HEX.paper
       fallback.style.clipPath = 'polygon(50% 4%, 96% 96%, 50% 70%, 4% 96%)'
 
       image.addEventListener('error', () => {

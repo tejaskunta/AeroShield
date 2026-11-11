@@ -3,6 +3,7 @@ import type { Telemetry } from '@/types'
 import { createDroneOverlay } from './DroneOverlay'
 import type { DroneOverlayHandle } from './DroneOverlay'
 import { useMap } from './mapContext'
+import { CONSOLE_HEX } from '@/lib/consoleInk'
 
 /**
  * DronePlatform — the aircraft, and the ground it can see.
@@ -59,10 +60,10 @@ export function DronePlatform({ telemetry }: { telemetry: Telemetry }) {
       map,
       center: position,
       radius: footprintM(telemetry.altitudeM),
-      strokeColor: '#E8E4DA',
+      strokeColor: CONSOLE_HEX.paper,
       strokeWeight: 1,
       strokeOpacity: 0.4,
-      fillColor: '#E8E4DA',
+      fillColor: CONSOLE_HEX.paper,
       fillOpacity: 0.06,
       clickable: false,
       zIndex: 900,

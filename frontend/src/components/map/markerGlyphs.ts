@@ -1,4 +1,5 @@
 import type { Detection, RiskLevel } from '@/types'
+import { CONSOLE_HEX } from '@/lib/consoleInk'
 import { RISK_HEX } from '@/lib/risk'
 
 /**
@@ -30,7 +31,7 @@ import { RISK_HEX } from '@/lib/risk'
  * a CSS rotation instead. See `DroneOverlay.ts`.
  */
 
-const STROKE = '#0E141A'
+const STROKE = CONSOLE_HEX.inkDeep
 
 /** Sizes in px. Bumped when selected so the map's own scale does not hide it. */
 const SIZE_SELECTED = 26
@@ -133,9 +134,9 @@ export function endpointSymbol(): google.maps.Symbol {
   return {
     path: google.maps.SymbolPath.CIRCLE,
     scale: 5,
-    fillColor: '#0E141A',
+    fillColor: CONSOLE_HEX.inkDeep,
     fillOpacity: 1,
-    strokeColor: '#E8E4DA',
+    strokeColor: CONSOLE_HEX.paper,
     strokeOpacity: 1,
     strokeWeight: 2,
   }
@@ -148,7 +149,7 @@ export function waypointSymbol(hex: string, scale = 1): google.maps.Symbol {
     scale: 3 * scale,
     fillColor: hex,
     fillOpacity: 1,
-    strokeColor: '#0E141A',
+    strokeColor: CONSOLE_HEX.inkDeep,
     strokeOpacity: 1,
     strokeWeight: 1.5,
   }

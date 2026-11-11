@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import type { MissionGrid } from '@/types'
 import { gridBounds } from '@/lib/geo'
+import { CONSOLE_HEX } from '@/lib/consoleInk'
 import { useMap } from './mapContext'
 
 /**
@@ -82,7 +83,7 @@ export function MissionGridLayer({ grid }: { grid: MissionGrid }) {
         new maps.Polyline({
           map,
           path,
-          strokeColor: '#2C3A47',
+          strokeColor: CONSOLE_HEX.rule,
           strokeWeight: 1,
           strokeOpacity: 0.85,
           // A reference grid should never intercept a click meant for a pin.

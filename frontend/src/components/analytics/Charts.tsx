@@ -12,6 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { ConfidenceBucket, ReviewProgress, ReviewState, TimeBucket } from '@/types'
+import { CONSOLE_HEX } from '@/lib/consoleInk'
 import { HAZARD_SOFT_HEX, HAZARD_THRESHOLD, REVIEW_THRESHOLD, RISK_HEX } from '@/lib/risk'
 import { REVIEW_LABELS } from '@/types'
 import {
@@ -59,7 +60,7 @@ export function DetectionsOverTime({ data }: { data: TimeBucket[] }) {
             tickFormatter={(v: number) => `${v}%`}
           />
           <Tooltip
-            cursor={{ fill: '#22303D', opacity: 0.5 }}
+            cursor={{ fill: CONSOLE_HEX.inkHover, opacity: 0.5 }}
             content={({ active, payload, label }) => (
               <ChartTooltip
                 active={active}
@@ -140,7 +141,7 @@ export function ConfidenceHistogram({ data }: { data: ConfidenceBucket[] }) {
           />
           <YAxis {...axisProps} allowDecimals={false} width={34} />
           <Tooltip
-            cursor={{ fill: '#22303D', opacity: 0.5 }}
+            cursor={{ fill: CONSOLE_HEX.inkHover, opacity: 0.5 }}
             content={({ active, payload }) => {
               const b = payload?.[0]?.payload as ConfidenceBucket | undefined
               return (

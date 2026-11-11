@@ -1,4 +1,5 @@
 import type { Detection, RiskLevel } from '@/types'
+import { CAUTION_HEX, CLEARED_HEX, HAZARD_HEX } from '@/lib/consoleInk'
 
 /**
  * Risk semantics -- the single source of truth for hazard colour and level.
@@ -105,11 +106,14 @@ export const RISK_LABELS: Record<RiskLevel, string> = {
  * hue because 3:1 is not enough for type.
  *
  * Must stay in step with `theme.extend.colors` in `tailwind.config.ts`.
+ * Read from `lib/consoleInk.ts` rather than written again here: this object used
+ * to be a second independent copy of the same three colours, which is how the
+ * palette drifts.
  */
 export const RISK_HEX: Record<RiskLevel, string> = {
-  hazard: '#DC3840',
-  caution: '#C9922C',
-  cleared: '#51A48B',
+  hazard: HAZARD_HEX,
+  caution: CAUTION_HEX,
+  cleared: CLEARED_HEX,
 }
 
 /**
@@ -119,7 +123,7 @@ export const RISK_HEX: Record<RiskLevel, string> = {
  * dark panel, a segment inside a stacked meter. Keeps a second red from competing
  * with the primary semantic accent at full strength.
  */
-export const HAZARD_SOFT_HEX = '#3A1418'
+export { HAZARD_SOFT_HEX } from '@/lib/consoleInk'
 
 /** Tailwind class sets, so components never hand-write a hazard colour. */
 export const RISK_CLASSES: Record<RiskLevel, { text: string; bg: string; border: string }> = {

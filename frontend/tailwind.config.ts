@@ -20,6 +20,12 @@ export default {
         ink: {
           DEFAULT: '#131A21', // app base — deep blue-slate, a chart at dusk
           deep: '#0E141A', // recessed wells, map backdrop, scroll troughs
+          /*
+           * The ground under a generated frame (`PlaceholderFrame`'s procedural
+           * terrain). A touch desaturated from `raised` so a synthetic capture
+           * reads as imagery and not as another panel. See `CONSOLE_HEX`.
+           */
+          ground: '#1E2529',
           raised: '#1B2530', // panel surface
           hover: '#22303D', // panel hover / selected row
         },

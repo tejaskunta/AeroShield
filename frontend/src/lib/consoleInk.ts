@@ -26,10 +26,25 @@
 export const CONSOLE_HEX = {
   ink: '#131A21',
   inkDeep: '#0E141A',
+  /*
+   * The ground under a *generated* frame — `PlaceholderFrame`'s procedural
+   * terrain. Deliberately close to `inkRaised` but a touch desaturated, so a
+   * synthetic capture reads as imagery rather than as another UI panel. It is a
+   * declared token rather than a literal because the one thing a fake frame must
+   * never do is drift away from the surface tones it has to sit among.
+   */
+  inkGround: '#1E2529',
   inkRaised: '#1B2530',
   inkHover: '#22303D',
   rule: '#2C3A47',
   ruleBright: '#3E5060',
+  /*
+   * The stake ticks that mark the covered/uncovered boundary, per the IMAS
+   * marking convention. A warm white, deliberately not `paper` — the convention
+   * is red *and* white stakes, and reusing the body-paper tone would make the
+   * boundary read as chrome instead of as a surveyed edge.
+   */
+  tickWhite: '#F5F3EF',
   paper: '#E8E4DA',
   paperDim: '#A9B3BD',
   paperFaint: '#8A97A2',
@@ -53,6 +68,15 @@ export const HAZARD_TEXT_HEX = '#E67277'
 
 /** Unverified / low confidence. Unchanged — it already cleared 4.5:1 on its own. */
 export const CAUTION_HEX = '#C9922C'
+
+/**
+ * The recessed hazard fill, matching `hazard.soft` in `tailwind.config.ts`.
+ *
+ * A hazard that needs to be present but subordinate: a flagged badge on a dark
+ * panel, a segment inside a stacked meter, the wash behind a chart cell. It keeps
+ * a second red from competing with the primary accent at full strength.
+ */
+export const HAZARD_SOFT_HEX = '#3A1418'
 
 /**
  * Cleared / safe. Nudged one shade lighter from #4E9E86, which scored 4.21 as

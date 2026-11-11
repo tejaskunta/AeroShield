@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Check, Flag, X } from 'lucide-react'
 import type { Detection } from '@/types'
 import { CLASS_LABELS } from '@/types'
+import { CONSOLE_HEX } from '@/lib/consoleInk'
 import { RISK_LABELS, riskOf } from '@/lib/risk'
 import { formatLatLng, formatZulu } from '@/lib/geo'
 import { useContainerProjection } from '@/components/map/useMapHooks'
@@ -85,13 +86,13 @@ export function DetectionCallout({
           y1={pin.y}
           x2={anchorX}
           y2={anchorY}
-          stroke="#E8E4DA"
+          stroke={CONSOLE_HEX.paper}
           strokeWidth={1}
           strokeDasharray="1 2"
           opacity={0.8}
         />
-        <circle cx={pin.x} cy={pin.y} r={2.5} fill="#E8E4DA" />
-        <circle cx={anchorX} cy={anchorY} r={1.5} fill="#E8E4DA" />
+        <circle cx={pin.x} cy={pin.y} r={2.5} fill={CONSOLE_HEX.paper} />
+        <circle cx={anchorX} cy={anchorY} r={1.5} fill={CONSOLE_HEX.paper} />
       </svg>
 
       <article

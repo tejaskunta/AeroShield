@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Layers } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
-import { CAUTION_HEX, HAZARD_HEX } from '@/lib/consoleInk'
+import { CAUTION_HEX, CONSOLE_HEX, HAZARD_HEX } from '@/lib/consoleInk'
 
 /**
  * LayerToggles — the map's layer checklist.
@@ -42,7 +42,7 @@ export const DEFAULT_LAYERS: LayerState = {
 const ROWS: Array<{ key: keyof LayerState; label: string; swatch: ReactNode }> = [
   { key: 'detections', label: 'Detections', swatch: <Dot /> },
   { key: 'coverage', label: 'Coverage', swatch: <HatchSwatch /> },
-  { key: 'track', label: 'Flown track', swatch: <Line color="#E8E4DA" /> },
+  { key: 'track', label: 'Flown track', swatch: <Line color={CONSOLE_HEX.paper} /> },
   { key: 'grid', label: 'Survey grid', swatch: <GridSwatch /> },
 ]
 
@@ -119,7 +119,7 @@ function HatchSwatch() {
     <svg width="14" height="8" aria-hidden className="shrink-0">
       <defs>
         <pattern id="lt-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="4" stroke="#3E5060" strokeWidth="1.2" />
+          <line x1="0" y1="0" x2="0" y2="4" stroke={CONSOLE_HEX.ruleBright} strokeWidth="1.2" />
         </pattern>
       </defs>
       <rect width="14" height="8" fill="url(#lt-hatch)" />
@@ -130,8 +130,8 @@ function HatchSwatch() {
 function GridSwatch() {
   return (
     <svg width="14" height="8" aria-hidden className="shrink-0">
-      <rect x="0.5" y="0.5" width="13" height="7" fill="none" stroke="#2C3A47" strokeWidth="1" />
-      <line x1="7" y1="0" x2="7" y2="8" stroke="#2C3A47" strokeWidth="1" />
+      <rect x="0.5" y="0.5" width="13" height="7" fill="none" stroke={CONSOLE_HEX.rule} strokeWidth="1" />
+      <line x1="7" y1="0" x2="7" y2="8" stroke={CONSOLE_HEX.rule} strokeWidth="1" />
     </svg>
   )
 }

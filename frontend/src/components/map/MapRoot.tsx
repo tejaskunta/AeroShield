@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { GOOGLE_MAPS_MAP_ID, HAS_GOOGLE_MAPS_KEY } from '@/lib/config'
+import { CONSOLE_HEX } from '@/lib/consoleInk'
 import { MapContext } from './mapContext'
 import { mapboxImageryTypes, mapboxTypeIdFor } from './mapboxImagery'
 import { useGoogleMaps } from './useGoogleMaps'
@@ -32,7 +33,7 @@ import type { MapsFailure } from './useGoogleMaps'
  */
 
 /** The console's dark canvas, used when no basemap can be drawn. */
-const MAP_BACKGROUND = '#0E141A'
+const MAP_BACKGROUND = CONSOLE_HEX.inkDeep
 
 export interface MapRootProps {
   center: { lat: number; lon: number }

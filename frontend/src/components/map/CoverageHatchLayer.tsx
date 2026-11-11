@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { MissionGrid } from '@/types'
 import { cellBounds, cellId, parseCellId } from '@/lib/geo'
-import { HAZARD_HEX } from '@/lib/consoleInk'
+import { CONSOLE_HEX, HAZARD_HEX } from '@/lib/consoleInk'
 import { useMap } from './mapContext'
 
 /**
@@ -58,7 +58,7 @@ const TILE = 99
  */
 const DIAGONAL_PERIOD = (TILE / 5) * Math.SQRT2
 
-const HATCH_STROKE = '#3E5060'
+const HATCH_STROKE = CONSOLE_HEX.ruleBright
 const HATCH_ALPHA = 0.5
 const HATCH_WIDTH = 1.4
 
@@ -144,7 +144,7 @@ function tickIcon(hex: string): google.maps.Symbol {
 }
 
 const TICKS_RED = HAZARD_HEX
-const TICKS_WHITE = '#F5F3EF'
+const TICKS_WHITE = CONSOLE_HEX.tickWhite
 
 // ---------------------------------------------------------------------------
 
