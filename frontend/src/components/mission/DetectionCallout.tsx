@@ -101,7 +101,7 @@ export function DetectionCallout({
         {/* Header */}
         <header className="flex items-center justify-between gap-2 border-b border-rule px-2.5 py-1.5">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[12px] tracking-[0.06em] text-paper">{detection.id}</span>
+            <span className="font-mono text-small tracking-[0.06em] text-paper">{detection.id}</span>
             <Badge risk={level}>{RISK_LABELS[level]}</Badge>
           </div>
           <button
@@ -157,7 +157,7 @@ export function DetectionCallout({
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2 border-t border-rule px-2.5 py-2">
-            <span className="flex items-center gap-1.5 text-[10px] text-paper-dim">
+            <span className="flex items-center gap-1.5 text-tiny text-paper-dim">
               {detection.review.state === 'flagged' && (
                 <Flag size={11} className="text-caution" aria-hidden />
               )}
@@ -168,7 +168,7 @@ export function DetectionCallout({
             <button
               type="button"
               onClick={() => onOpenInCenter(detection.id)}
-              className="font-display text-[10px] uppercase tracking-[0.1em] text-paper-dim hover:text-paper"
+              className="font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:text-paper"
             >
               Open →
             </button>
@@ -176,7 +176,7 @@ export function DetectionCallout({
         )}
 
         {/* Provenance — this is simulated, and the card says so. */}
-        <p className="border-t border-rule px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.1em] text-caution/80">
+        <p className="border-t border-rule px-2.5 py-1 font-mono text-tiny uppercase tracking-[0.1em] text-caution/80">
           Simulated detection
         </p>
       </article>
@@ -188,7 +188,7 @@ function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-2">
       <span className="eyebrow w-16 shrink-0">{label}</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px] tabular text-paper">
+      <span className="min-w-0 flex-1 truncate font-mono text-small tabular text-paper">
         {value}
       </span>
     </div>

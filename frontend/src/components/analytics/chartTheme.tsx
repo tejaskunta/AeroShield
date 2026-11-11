@@ -1,5 +1,11 @@
 import type { ReactNode } from 'react'
 import { RISK_HEX } from '@/lib/risk'
+import {
+  CAUTION_HEX,
+  CONSOLE_HEX,
+  HAZARD_HEX,
+  rgbOf,
+} from '@/lib/consoleInk'
 
 /**
  * One chart system for every chart on the Analytics screen.
@@ -11,10 +17,17 @@ import { RISK_HEX } from '@/lib/risk'
  * histogram is red/ochre/green — the second one is encoding risk, the first isn't.
  */
 
-export const CHART_INK = '#0E141A'
-export const CHART_GRID = '#2C3A47'
-export const CHART_AXIS = '#5C6873'
-export const CHART_LABEL = '#8C97A1'
+/**
+ * Every value here is read from the shared console palette rather than typed
+ * out again. The chart axis ticks are real text rendered by Recharts and were
+ * holding their own copy of `paper-faint` — so when the palette was corrected
+ * for contrast the ticks kept the old #5C6873 and stayed at 2.36:1. A chart
+ * whose labels cannot be read is a chart that cannot be audited.
+ */
+export const CHART_INK = CONSOLE_HEX.inkDeep
+export const CHART_GRID = CONSOLE_HEX.rule
+export const CHART_AXIS = CONSOLE_HEX.paperFaint
+export const CHART_LABEL = CONSOLE_HEX.paperDim
 
 /**
  * Monochrome series ramp for non-risk data, brightest first.
@@ -22,7 +35,12 @@ export const CHART_LABEL = '#8C97A1'
  * Four steps is the ceiling — beyond that the greys stop being distinguishable and
  * the chart needs direct labels or small multiples instead of more colours.
  */
-export const NEUTRAL_SERIES = ['#E8E4DA', '#8C97A1', '#5C6873', '#3E5060'] as const
+export const NEUTRAL_SERIES = [
+  CONSOLE_HEX.paper,
+  CONSOLE_HEX.paperDim,
+  CONSOLE_HEX.paperFaint,
+  CONSOLE_HEX.ruleBright,
+] as const
 
 /** Shared Recharts axis props, so no chart hand-rolls its own tick styling. */
 export const axisProps = {
@@ -47,11 +65,11 @@ export const gridProps = {
  */
 export function densityColor(t: number): string {
   const clamped = Math.max(0, Math.min(1, t))
-  if (clamped <= 0.001) return '#182028'
+  if (clamped <= 0.001) return CONSOLE_HEX.inkRaised
   const stops: Array<[number, [number, number, number]]> = [
-    [0, [24, 32, 40]],
-    [0.45, [201, 146, 44]],
-    [1, [215, 38, 47]],
+    [0, rgbOf(CONSOLE_HEX.inkRaised)],
+    [0.45, rgbOf(CAUTION_HEX)],
+    [1, rgbOf(HAZARD_HEX)],
   ]
   for (let i = 1; i < stops.length; i++) {
     const [p1, c1] = stops[i - 1]!
@@ -96,7 +114,7 @@ export function ChartFrame({
         {children}
       </div>
       {note && (
-        <p className="border-t border-rule px-3 py-1.5 text-[10px] leading-snug text-paper-faint">
+        <p className="border-t border-rule px-3 py-1.5 text-tiny leading-snug text-paper-faint">
           {note}
         </p>
       )}
@@ -121,15 +139,15 @@ export function ChartTooltip({
   return (
     <div className="border border-rule-bright bg-ink-deep/95 px-2 py-1.5">
       {label != null && (
-        <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-paper-dim">
+        <p className="mb-1 font-mono text-tiny uppercase tracking-[0.08em] text-paper-dim">
           {label}
         </p>
       )}
       {rows.map((r) => (
         <div key={r.label} className="flex items-baseline gap-2">
           {r.color && <span className="h-1.5 w-1.5 shrink-0" style={{ background: r.color }} />}
-          <span className="flex-1 text-[10px] text-paper-dim">{r.label}</span>
-          <span className="font-mono text-[11px] tabular text-paper">{r.value}</span>
+          <span className="flex-1 text-tiny text-paper-dim">{r.label}</span>
+          <span className="font-mono text-small tabular text-paper">{r.value}</span>
         </div>
       ))}
     </div>

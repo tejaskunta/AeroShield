@@ -62,7 +62,7 @@ function describeFailure(err: unknown): MapsFailure {
       summary: 'Map unavailable offline',
       detail:
         'The Google Maps script could not be fetched. The mission grid, coverage, ' +
-        'and detections below are unaffected — only the background imagery is missing.',
+        'and detections below are unaffected; only the background imagery is missing.',
       configuration: false,
     }
   }

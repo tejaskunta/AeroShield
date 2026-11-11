@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { MissionGrid } from '@/types'
 import { cellBounds, cellId, parseCellId } from '@/lib/geo'
+import { HAZARD_HEX } from '@/lib/consoleInk'
 import { useMap } from './mapContext'
 
 /**
@@ -142,7 +143,7 @@ function tickIcon(hex: string): google.maps.Symbol {
   }
 }
 
-const TICKS_RED = '#D7262F'
+const TICKS_RED = HAZARD_HEX
 const TICKS_WHITE = '#F5F3EF'
 
 // ---------------------------------------------------------------------------

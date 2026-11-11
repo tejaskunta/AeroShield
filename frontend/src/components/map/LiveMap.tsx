@@ -420,8 +420,8 @@ function ScaleReadout({ view }: { view: ViewMetrics }) {
   const capped = view.affordableZoom > view.ceilingZoom
   return (
     <div
-      className={`pointer-events-none absolute bottom-6 left-2 border bg-ink-deep/90 px-2 py-1 font-mono text-[10px] backdrop-blur-sm ${
-        short ? 'border-hazard text-hazard' : 'border-rule text-paper-dim'
+      className={`pointer-events-none absolute bottom-6 left-2 border bg-ink-deep/90 px-2 py-1 font-mono text-tiny backdrop-blur-sm ${
+        short ? 'border-hazard text-hazard-lit' : 'border-rule text-paper-dim'
       }`}
     >
       zoom {view.zoom} · {view.width}x{view.height} · {view.binding}-bound ·{' '}
@@ -442,8 +442,8 @@ function ScaleReadout({ view }: { view: ViewMetrics }) {
  */
 function ScaleWarning() {
   return (
-    <div className="pointer-events-none absolute left-2 top-2 border border-hazard bg-ink-deep/90 px-2 py-1 font-mono text-[10px] text-hazard backdrop-blur-sm">
-      Map is below {MIN_LIVE_MAP_PX_PER_METRE} px/m — check the view is showing the
+    <div className="pointer-events-none absolute left-2 top-2 border border-hazard bg-ink-deep/90 px-2 py-1 font-mono text-tiny text-hazard-lit backdrop-blur-sm">
+      Map is below {MIN_LIVE_MAP_PX_PER_METRE} px/m. Check the view is showing the
       survey block
     </div>
   )
@@ -465,7 +465,7 @@ function ScaleWarning() {
 function ImageryAttribution({ basemap }: { basemap: Basemap }) {
   if (!HAS_MAPBOX_TOKEN || basemap === 'roadmap') return null
   return (
-    <div className="pointer-events-none absolute bottom-2 left-2 font-mono text-[9px] text-paper-faint">
+    <div className="pointer-events-none absolute bottom-2 left-2 font-mono text-tiny text-paper-faint">
       Imagery ©{' '}
       <a
         href="https://www.mapbox.com/about/maps/"
@@ -513,7 +513,7 @@ function BasemapSwitcher({
           role="radio"
           aria-checked={value === b}
           onClick={() => onChange(b)}
-          className={`px-2 py-1 font-display text-[10px] uppercase tracking-[0.1em] transition-colors ${
+          className={`px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
             value === b ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper-dim'
           }`}
         >
@@ -555,7 +555,7 @@ function FollowSwitcher({
           aria-checked={value === o.mode}
           onClick={() => onChange(o.mode)}
           title={o.title}
-          className={`px-2 py-1 font-display text-[10px] uppercase tracking-[0.1em] transition-colors ${
+          className={`px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
             value === o.mode ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper-dim'
           }`}
         >

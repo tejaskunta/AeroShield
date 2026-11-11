@@ -205,7 +205,7 @@ export function MapRoot({
           map is about to become the whole screen. */}
       {status === 'loading' && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
-          <p className="font-display text-[10px] uppercase tracking-[0.16em] text-paper-faint">
+          <p className="font-display text-tiny uppercase tracking-[0.16em] text-paper-faint">
             Loading imagery…
           </p>
         </div>
@@ -241,8 +241,8 @@ function MapUnavailable({ failure }: { failure: MapsFailure }) {
     <div className="pointer-events-none absolute inset-0 z-[400] grid place-items-center px-6">
       <div className="pointer-events-auto max-w-md border border-caution/50 bg-ink-deep/95 p-3">
         <p className="eyebrow text-caution">{failure.summary}</p>
-        <p className="mt-1.5 text-[11px] leading-relaxed text-paper-dim">{failure.detail}</p>
-        <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-paper-faint">
+        <p className="mt-1.5 text-small leading-relaxed text-paper-dim">{failure.detail}</p>
+        <p className="mt-2 font-mono text-tiny uppercase tracking-[0.1em] text-paper-faint">
           Mission overlays and detections below are unaffected
         </p>
       </div>

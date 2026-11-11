@@ -11,9 +11,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { ClassTally, ConfidenceBucket, TimeBucket } from '@/types'
-import { HAZARD_THRESHOLD, REVIEW_THRESHOLD, RISK_HEX } from '@/lib/risk'
-import { CLASS_LABELS } from '@/types'
+import type { ConfidenceBucket, ReviewProgress, ReviewState, TimeBucket } from '@/types'
+import { HAZARD_SOFT_HEX, HAZARD_THRESHOLD, REVIEW_THRESHOLD, RISK_HEX } from '@/lib/risk'
+import { REVIEW_LABELS } from '@/types'
 import {
   ChartFrame,
   ChartTooltip,
@@ -38,7 +38,7 @@ export function DetectionsOverTime({ data }: { data: TimeBucket[] }) {
   return (
     <ChartFrame
       title="Detections over time"
-      note="Bars count detections per minute — total, with confirmed hazards alongside. The dashed line is cumulative coverage. Coverage history is interpolated; the simulator does not log it per tick."
+      note="Bars count detections per minute, with confirmed hazards alongside. The dashed line is cumulative coverage. Coverage history is interpolated; the simulator does not log it per tick."
     >
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
@@ -123,9 +123,9 @@ export function ConfidenceHistogram({ data }: { data: ConfidenceBucket[] }) {
   return (
     <ChartFrame
       title="Confidence distribution"
-      note={`${middleBand} of ${total} detections sit between the review and hazard thresholds. That band is the review workload — neither auto-cleared nor auto-escalated.`}
+      note={`${middleBand} of ${total} detections sit between the review and hazard thresholds. That band is the review workload: neither auto-cleared nor auto-escalated.`}
       aside={
-        <span className="font-mono text-[10px] text-paper-faint">
+        <span className="font-mono text-tiny text-paper-faint">
           bins of 0.10
         </span>
       }
@@ -197,46 +197,101 @@ export function ConfidenceHistogram({ data }: { data: ConfidenceBucket[] }) {
 }
 
 /**
- * ClassBreakdown — horizontal bars, not a pie.
+ * ReviewProgressPanel -- the mission's review backlog as one stacked meter plus a
+ * legend of counts.
  *
- * Three categories with wildly different magnitudes, and the reader's question is
- * "how many of each", which is a length comparison. A pie would make the two
- * landmine classes hard to compare against each other and impossible to read
- * exact counts from.
+ * This occupies the slot the class-breakdown chart used to hold. That chart had
+ * nothing real to plot: the detector emits one class, so it rendered four rows
+ * with three of them permanently zero and the fourth equal to the total. A panel
+ * that is always 100% wide tells an operator nothing and quietly advertises a
+ * capability the aircraft does not have.
+ *
+ * Review state is the axis that genuinely varies, and it is the one that decides
+ * whether the mission is finished. A stacked single meter is used rather than
+ * grouped bars because the interesting quantity is a *proportion of a fixed
+ * whole* -- what fraction of these detections has a person ruled on -- and a
+ * single bar makes part-to-whole legible at a glance without any axis.
+ *
+ * Colours: confirmed reads as hazard (a person agreed it is a mine), dismissed as
+ * cleared, unreviewed as the neutral caution tone, and flagged as the recessed
+ * hazard fill so it is visibly red without competing with a confirmation at small
+ * sizes. Every segment also appears in the legend with a count, so colour is never
+ * the only channel carrying the meaning.
  */
-export function ClassBreakdown({ data }: { data: ClassTally[] }) {
-  const total = data.reduce((s, c) => s + c.count, 0)
-  if (total === 0) return <EmptyChart title="Class breakdown" />
-  const max = Math.max(...data.map((c) => c.count))
+export function ReviewProgressPanel({ data }: { data: ReviewProgress }) {
+  if (data.total === 0) {
+    return (
+      <ChartFrame title="Review progress" height={190}>
+        <div className="flex h-full items-center justify-center">
+          <p className="text-small text-paper-faint">Nothing to review yet.</p>
+        </div>
+      </ChartFrame>
+    )
+  }
+
+  const segments: { state: ReviewState; label: string; fill: string }[] = [
+    { state: 'confirmed', label: REVIEW_LABELS.confirmed, fill: RISK_HEX.hazard },
+    { state: 'dismissed', label: REVIEW_LABELS.dismissed, fill: RISK_HEX.cleared },
+    { state: 'flagged', label: REVIEW_LABELS.flagged, fill: HAZARD_SOFT_HEX },
+    { state: 'unreviewed', label: REVIEW_LABELS.unreviewed, fill: RISK_HEX.caution },
+  ]
 
   return (
-    <ChartFrame title="Class breakdown" height={190}>
-      <div className="flex h-full flex-col justify-center gap-3 px-1">
-        {data.map((c, i) => (
-          <div key={c.class}>
-            <div className="mb-1 flex items-baseline justify-between gap-2">
-              <span className="text-[11px] text-paper">{CLASS_LABELS[c.class]}</span>
-              <span className="font-mono text-[11px] tabular text-paper">
-                {c.count}
-                <span className="ml-1.5 text-paper-faint">
-                  {total > 0 ? `${Math.round((c.count / total) * 100)}%` : ''}
-                </span>
-              </span>
-            </div>
-            <div className="h-2.5 bg-ink-deep">
-              <div
-                className="h-full transition-[width] duration-500"
-                style={{
-                  width: `${max > 0 ? (c.count / max) * 100 : 0}%`,
-                  // debris_negative is the model's correct negative — the only
-                  // class here that is genuinely a cleared outcome.
-                  background:
-                    c.class === 'debris_negative' ? RISK_HEX.cleared : NEUTRAL_SERIES[i],
-                }}
-              />
-            </div>
+    <ChartFrame title="Review progress" height={190}>
+      <div className="flex h-full flex-col justify-center gap-4 px-1">
+        <div>
+          <div className="mb-1.5 flex items-baseline justify-between gap-2">
+            <span className="font-mono text-display leading-none tabular text-paper">
+              {data.pctDecided}%
+            </span>
+            <span className="text-small text-paper-dim">
+              {data.decided} of {data.total} ruled on
+            </span>
           </div>
-        ))}
+          <div
+            className="flex h-3 overflow-hidden bg-ink-deep"
+            role="img"
+            aria-label={`Review progress: ${data.pctDecided} percent ruled on, ${data.remaining} still needing attention`}
+          >
+            {segments.map((s) => {
+              const count = data.counts[s.state]
+              if (count === 0) return null
+              return (
+                <div
+                  key={s.state}
+                  style={{
+                    width: `${(count / data.total) * 100}%`,
+                    background: s.fill,
+                  }}
+                />
+              )
+            })}
+          </div>
+        </div>
+
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          {segments.map((s) => (
+            <div key={s.state} className="flex items-center justify-between gap-2">
+              <dt className="flex min-w-0 items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className="h-1.5 w-1.5 shrink-0"
+                  style={{ background: s.fill }}
+                />
+                <span className="truncate text-small text-paper-dim">{s.label}</span>
+              </dt>
+              <dd className="font-mono text-small tabular text-paper">{data.counts[s.state]}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {data.remaining > 0 && (
+          <p className="text-small leading-snug text-paper-dim">
+            {data.remaining === 1
+              ? '1 detection still needs a decision.'
+              : `${data.remaining} detections still need a decision.`}
+          </p>
+        )}
       </div>
     </ChartFrame>
   )
@@ -246,7 +301,7 @@ function EmptyChart({ title }: { title: string }) {
   return (
     <ChartFrame title={title}>
       <div className="flex h-full items-center justify-center bg-chart-grid [background-size:16px_16px]">
-        <p className="text-[11px] text-paper-faint">No detections to chart yet.</p>
+        <p className="text-small text-paper-faint">No detections to chart yet.</p>
       </div>
     </ChartFrame>
   )

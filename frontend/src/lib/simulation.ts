@@ -1,6 +1,7 @@
 import type {
   Detection,
   LatLng,
+  LinkStatus,
   MissionProgress,
   StreamState,
   Telemetry,
@@ -41,10 +42,36 @@ export interface MissionSnapshot {
   /** Detections known so far, in capture order. */
   detections: Detection[]
   streamState: StreamState
+  /**
+   * Which transport is feeding this snapshot, and how healthy it is.
+   *
+   * Carried alongside `streamState` rather than folded into it because the two
+   * answer different questions. `streamState` is "is this picture current?";
+   * this is "is the pipe that carries it degraded?". A snapshot can be
+   * perfectly live over polling, and an operator still needs to know the socket
+   * fell back, because polling costs a request a second on a link the aircraft
+   * shares.
+   */
+  link: LinkStatus
 }
 
 type Listener = (snapshot: MissionSnapshot) => void
 type DetectionListener = (detection: Detection) => void
+
+/**
+ * The link status reported while the simulator is the only source.
+ *
+ * Frozen and shared: it is a constant describing a constant, and the simulator
+ * emits it ~2x a second. Allocating a fresh object per tick would churn identity
+ * for every consumer that compares.
+ */
+const SIMULATED_LINK: LinkStatus = {
+  source: 'simulator',
+  transport: 'none',
+  socketAttempts: 0,
+  socketGaveUp: false,
+  reachable: true,
+}
 
 /**
  * How fast the pilot walks the aircraft across the block, m/s. A person holding a
@@ -303,6 +330,10 @@ export class MissionSimulator {
       progress: this.buildProgress(),
       detections: [...this.detections],
       streamState: this.streamState,
+      // The simulator IS the source, so it is trivially reachable over itself.
+      // This value is overwritten by `useMissionStream` whenever a real backend
+      // contributes anything; it only survives when none ever did.
+      link: SIMULATED_LINK,
     }
   }
 

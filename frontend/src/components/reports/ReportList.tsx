@@ -30,7 +30,7 @@ export function ReportList({
     <aside className="hidden w-64 shrink-0 flex-col border-r border-rule bg-ink-deep lg:flex">
       <header className="flex h-8 shrink-0 items-center justify-between border-b border-rule px-3">
         <h2 className="eyebrow">Reports</h2>
-        <span className="font-mono text-[10px] text-paper-faint">{reports.length}</span>
+        <span className="font-mono text-tiny text-paper-faint">{reports.length}</span>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -47,13 +47,13 @@ export function ReportList({
               }`}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[11px] tracking-[0.04em] text-paper">
+                <span className="font-mono text-small tracking-[0.04em] text-paper">
                   {r.missionName}
                 </span>
                 <Badge risk={r.status === 'final' ? undefined : 'caution'}>{r.status}</Badge>
               </div>
-              <span className="truncate text-[10px] text-paper-dim">{r.site}</span>
-              <div className="flex items-center gap-2 font-mono text-[10px] text-paper-faint">
+              <span className="truncate text-tiny text-paper-dim">{r.site}</span>
+              <div className="flex items-center gap-2 font-mono text-tiny text-paper-faint">
                 <span>{r.id}</span>
                 <span>·</span>
                 <span>{r.tallies.confirmed} confirmed</span>
@@ -91,7 +91,7 @@ export function ExportBar({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-rule bg-ink px-3 py-2">
-      <span className="mr-1 font-mono text-[11px] text-paper-dim">
+      <span className="mr-1 font-mono text-small text-paper-dim">
         {report.id}
         <span className="ml-2 text-paper-faint">
           generated {formatZulu(report.generatedAt)}
@@ -130,7 +130,7 @@ export function ExportBar({
         <Button
           onClick={() => window.print()}
           icon={<Printer size={12} aria-hidden />}
-          title="Uses the browser's print dialogue — server-side PDF generation is not built yet"
+          title="Uses the browser's print dialogue. Server-side PDF generation is not built yet"
         >
           Print / PDF
         </Button>

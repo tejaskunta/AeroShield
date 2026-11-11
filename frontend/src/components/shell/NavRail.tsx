@@ -50,10 +50,10 @@ export function NavRail() {
                 aria-hidden
               />
               <Icon size={17} strokeWidth={1.75} aria-hidden />
-              <span className="font-mono text-[9px] tracking-[0.1em]">{short}</span>
+              <span className="font-mono text-tiny tracking-[0.1em]">{short}</span>
 
               {/* Full label on hover/focus, as a map-style plate. */}
-              <span className="pointer-events-none absolute left-full top-1/2 z-40 ml-1 -translate-y-1/2 whitespace-nowrap border border-rule bg-ink-deep px-2 py-1 font-display text-[11px] uppercase tracking-[0.1em] text-paper opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+              <span className="pointer-events-none absolute left-full top-1/2 z-40 ml-1 -translate-y-1/2 whitespace-nowrap border border-rule bg-ink-deep px-2 py-1 font-display text-small uppercase tracking-[0.1em] text-paper opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                 {label}
               </span>
             </>

@@ -2,8 +2,8 @@ import { useMemo } from 'react'
 import { useMission } from '@/components/shell/missionContext'
 import { MISSION } from '@/lib/mockData'
 import {
-  classTallies,
   confidenceHistogram,
+  reviewProgress,
   riskCells,
   summaryStats,
   timeline,
@@ -14,9 +14,9 @@ import { formatArea, formatDuration } from '@/lib/geo'
 import { formatConfidence } from '@/lib/risk'
 import { StatTile } from '@/components/analytics/StatTile'
 import {
-  ClassBreakdown,
   ConfidenceHistogram,
   DetectionsOverTime,
+  ReviewProgressPanel,
 } from '@/components/analytics/Charts'
 import { RiskHeatmap } from '@/components/analytics/RiskHeatmap'
 
@@ -37,18 +37,18 @@ export function Analytics() {
   const stats = useMemo(() => summaryStats(detections, progress), [detections, progress])
   const time = useMemo(() => timeline(detections, progress), [detections, progress])
   const hist = useMemo(() => confidenceHistogram(detections), [detections])
-  const classes = useMemo(() => classTallies(detections), [detections])
+  const review = useMemo(() => reviewProgress(detections), [detections])
   const cells = useMemo(() => riskCells(detections, MISSION.grid), [detections])
   const gaps = useMemo(() => uncoveredWithDetections(detections, progress), [detections, progress])
-  const review = countByReview(detections)
+  const byReview = countByReview(detections)
 
   return (
     <div className="h-full overflow-y-auto">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-3 py-2">
-        <h1 className="font-display text-[15px] uppercase tracking-[0.12em] text-paper">
+        <h1 className="font-display text-title uppercase tracking-[0.12em] text-paper">
           Analytics
         </h1>
-        <p className="font-mono text-[11px] text-paper-dim">
+        <p className="font-mono text-small text-paper-dim">
           {MISSION.name} · {formatDuration(progress?.elapsedS ?? 0)} elapsed
         </p>
       </header>
@@ -60,7 +60,7 @@ export function Analytics() {
             label="Hazards"
             value={stats.hazards}
             risk="hazard"
-            sub={`${review.confirmed} confirmed by a reviewer`}
+            sub={`${byReview.confirmed} confirmed by a reviewer`}
           />
           <StatTile
             label="Awaiting review"
@@ -92,14 +92,14 @@ export function Analytics() {
           <ConfidenceHistogram data={hist} />
         </div>
 
-        {/* Where it is, and what kind. */}
+        {/* Where it is, and how much of it a person has ruled on. */}
         <div className="grid gap-2 lg:grid-cols-[1.4fr_1fr]">
           <RiskHeatmap
             cells={cells}
             grid={MISSION.grid}
             coveredCells={progress?.coveredCells ?? []}
           />
-          <ClassBreakdown data={classes} />
+          <ReviewProgressPanel data={review} />
         </div>
 
         {/* Caveats. Part of the analysis, not a footnote. */}
@@ -107,9 +107,9 @@ export function Analytics() {
           <header className="flex h-8 items-center border-b border-rule px-3">
             <h3 className="eyebrow">Reading these numbers</h3>
           </header>
-          <ul className="space-y-1.5 p-3 text-[11px] leading-relaxed text-paper-dim">
+          <ul className="space-y-1.5 p-3 text-small leading-relaxed text-paper-dim">
             <li className="flex gap-2">
-              <span className="text-paper-faint">—</span>
+              <span aria-hidden className="text-paper-faint">·</span>
               <span>
                 Mean confidence is {formatConfidence(stats.meanConfidence)}, and{' '}
                 {stats.belowThreshold} detections fall under the review threshold. Low
@@ -118,7 +118,7 @@ export function Analytics() {
               </span>
             </li>
             <li className="flex gap-2">
-              <span className="text-paper-faint">—</span>
+              <span aria-hidden className="text-paper-faint">·</span>
               <span>
                 Coverage measures ground <em className="not-italic text-paper">imaged</em>,
                 never ground cleared. {100 - (progress?.coveragePct ?? 0)}% of the block has
@@ -126,7 +126,7 @@ export function Analytics() {
               </span>
             </li>
             <li className="flex gap-2">
-              <span className="text-paper-faint">—</span>
+              <span aria-hidden className="text-paper-faint">·</span>
               <span>
                 RGB imagery detects surface indicators only. A cell with zero detections
                 may still hold buried ordnance, which this system cannot see.
@@ -134,7 +134,7 @@ export function Analytics() {
             </li>
             {gaps.length > 0 && (
               <li className="flex gap-2 text-caution">
-                <span>—</span>
+                <span aria-hidden>·</span>
                 <span>
                   {gaps.length} cell{gaps.length > 1 ? 's' : ''} hold detections but are not
                   marked surveyed ({gaps.join(', ')}). Expect this while the drone is still
@@ -143,7 +143,7 @@ export function Analytics() {
               </li>
             )}
             <li className="flex gap-2 text-caution">
-              <span>—</span>
+              <span aria-hidden>·</span>
               <span>
                 Every figure on this screen is derived from simulated detections. None of it
                 reflects a real survey.

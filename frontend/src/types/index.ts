@@ -15,41 +15,33 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Class ids in dataset order, from `configs/data.yaml.example`. The ordering is
- * baked into the YOLO weights, so this union must stay in step with `names:`
- * in that file — index 0 first.
+ * The one class the model predicts.
  *
- * `debris_negative` is the hard-negative class: it is a *detection* the model
- * made, not a hazard. It exists so the UI can show what the model correctly
- * ruled out, which is how an operator builds trust in the confidence numbers.
+ * There is exactly one: the aircraft flies `best_512x288.engine`, built with
+ * `names: {0: landmine}` (`nc=1`, see `jetson/README.md` and
+ * `docs/TRAINING_NOTES.md`). A detection is therefore a single question with a
+ * confidence attached -- "is this a landmine, and how sure is the model?" -- and
+ * not a choice between classes.
  *
- * `landmine` is the single class the shipped engine actually predicts. The
- * TensorRT build the drone flies (`best_512x288.engine`) was trained with
- * `names: {0: landmine}`, so every real row the aircraft uploads says exactly
- * that. It sits alongside the three-way split rather than replacing it, because
- * the split is what the dataset and the simulator were specified against and the
- * live model is what is on the aircraft today; `lib/api.ts` maps one vocabulary
- * onto the other at the seam instead of letting both leak into the UI.
+ * This union used to carry three more members (`landmine_metal`,
+ * `landmine_plastic`, `debris_negative`) inherited from the three-class dataset
+ * design in `configs/data.yaml.example`. They were never predicted by anything
+ * that flew. Worse, `lib/api.ts` coerced every unrecognised `class_name` to
+ * `landmine_metal`, so the "metal-cased / plastic-cased" split shown on screen
+ * was manufactured at the adapter, not measured by the model. Presenting an
+ * invented distinction as model output is the one thing a tool like this must
+ * never do, so the extra members are gone.
+ *
+ * Keeping the type as a union of one is deliberate rather than collapsing to a
+ * bare `string`: a second class is a real possibility (the dataset design exists,
+ * and a hard-negative class would genuinely help), and widening this union is the
+ * correct, reviewable way to add one. Nothing may widen it implicitly.
  */
-export type DetectionClass =
-  | 'landmine'
-  | 'landmine_metal'
-  | 'landmine_plastic'
-  | 'debris_negative'
-
-export const DETECTION_CLASSES: DetectionClass[] = [
-  'landmine',
-  'landmine_metal',
-  'landmine_plastic',
-  'debris_negative',
-]
+export type DetectionClass = 'landmine'
 
 /** Human-facing labels. The UI never shows a raw class id to an operator. */
 export const CLASS_LABELS: Record<DetectionClass, string> = {
   landmine: 'Landmine',
-  landmine_metal: 'Metal-cased',
-  landmine_plastic: 'Plastic-cased',
-  debris_negative: 'Debris (ruled out)',
 }
 
 /**
@@ -74,12 +66,41 @@ export interface LatLng {
 /** Where a detection stands in the human review workflow. */
 export type ReviewState = 'unreviewed' | 'confirmed' | 'dismissed' | 'flagged'
 
+/**
+ * Human-facing review labels, shared so a filter chip and a chart legend cannot
+ * drift apart. `flagged` is phrased as work still outstanding rather than as a
+ * completed decision, because reopening a detection means it needs attention again.
+ */
+export const REVIEW_LABELS: Record<ReviewState, string> = {
+  unreviewed: 'Unreviewed',
+  confirmed: 'Confirmed',
+  dismissed: 'Dismissed',
+  flagged: 'Flagged',
+}
+
 export interface ReviewRecord {
   state: ReviewState
   /** Required for `dismissed` and `flagged` — a decision without a reason is not auditable. */
   reason?: string
   reviewedAt?: string
   reviewedBy?: string
+}
+
+/**
+ * How far the human review of a mission has got.
+ *
+ * The dashboard's only genuinely multi-valued axis now that the model is
+ * single-class: every detection is either still someone's job or already decided.
+ */
+export interface ReviewProgress {
+  counts: Record<ReviewState, number>
+  total: number
+  /** Confirmed plus dismissed -- the detections a person has actually ruled on. */
+  decided: number
+  /** Unreviewed plus flagged -- still needs attention, including reopened work. */
+  remaining: number
+  /** 0..100, rounded. Zero when there is nothing to review yet. */
+  pctDecided: number
 }
 
 /**
@@ -95,7 +116,18 @@ export interface Detection {
   id: string
   missionId: string
   class: DetectionClass
-  /** 0..1 model confidence. Never rounded before display — `risk.ts` formats it. */
+  /**
+   * The `class_name` the aircraft actually sent, verbatim.
+   *
+   * `class` above is the display vocabulary (one value); this is the wire value,
+   * preserved so an export or an audit records what the detector said rather than
+   * what the UI rendered. Historic rows on the aircraft say `landmine_metal`
+   * because an older adapter coerced them, and rewriting that to `landmine` on the
+   * way out would quietly doctor the record. Absent on simulated rows, which have
+   * no wire value to preserve.
+   */
+  classRaw?: string
+  /** 0..1 model confidence. Never rounded before display -- `risk.ts` formats it. */
   confidence: number
   bbox: BoundingBox
   /** Geotagged position, projected from drone pose at capture time. */
@@ -172,8 +204,80 @@ export interface Telemetry {
   armed: boolean
 }
 
-/** Connection state of the telemetry stream itself, distinct from link quality. */
-export type StreamState = 'connecting' | 'live' | 'stalled' | 'offline'
+/**
+ * Connection state of the telemetry stream itself, distinct from link quality.
+ *
+ * The four members are four different things an operator must be able to tell
+ * apart, because each one implies a different action:
+ *
+ *   - `connecting`  — asked, no answer yet. Wait.
+ *   - `live`        — a frame arrived recently. Normal.
+ *   - `stalled`     — we can reach the backend, and it says the aircraft is not
+ *                     reporting. The radio link or the aircraft is the problem.
+ *   - `unreachable` — we cannot reach the backend at all. The aircraft may well
+ *                     be flying and reporting perfectly; the *dashboard* is the
+ *                     thing that is broken. Remedy is on this machine.
+ *
+ * `stalled` and `unreachable` were the same value once. That was wrong in the
+ * expensive direction: a stale pin plus "Stream stalled" sent an operator to
+ * inspect the aircraft when the actual fault was a stopped backend. Splitting
+ * them costs one enum member and saves that wild goose chase.
+ *
+ * There is deliberately no `offline`. A keyless build still receives telemetry,
+ * from the simulator, so its stream is `live` — and the "Simulated" chip in the
+ * status rail is what says so. A fifth member meaning "not configured" would be
+ * a fourth way to draw the same dot.
+ */
+export type StreamState = 'connecting' | 'live' | 'stalled' | 'unreachable'
+
+/**
+ * How the dashboard is currently getting its telemetry, and how well that is
+ * going. Rendered by the status rail so a degradation is visible rather than
+ * merely survivable.
+ *
+ * Deliberately separate from `StreamState`. `StreamState` answers "is the data
+ * current?", which is the question the map needs answered. `LinkStatus` answers
+ * "which path is the data taking, and is it healthy?", which is the question a
+ * person debugging a demo needs answered. A socket that fell back to polling is
+ * fully `live` and still worth showing, because polling is genuinely worse
+ * (latency, and a request a second against the drone's ingest budget) and
+ * silently accepting the regression is how it becomes permanent.
+ */
+export interface LinkStatus {
+  /** Where telemetry is coming from. */
+  source: 'simulator' | 'backend'
+  /** Which backend transport is carrying it. `none` before the first attempt. */
+  transport: 'socket' | 'polling' | 'none'
+  /** Reconnect attempts since the last successful handshake. 0 when healthy. */
+  socketAttempts: number
+  /** True once retries are exhausted and polling has taken over for good. */
+  socketGaveUp: boolean
+  /**
+   * Network-level reachability of the backend.
+   *
+   * False means the request never got a response at all — not that it got a
+   * 4xx or a 5xx, which are answers. This is the field that distinguishes "the
+   * aircraft went quiet" from "this laptop lost the network".
+   */
+  reachable: boolean
+}
+
+/**
+ * The link status before the first snapshot arrives.
+ *
+ * Browsers paint the shell on the first frame, before any effect has run, so
+ * `AppShell` has to render the rail with no snapshot in hand. `connecting` is the
+ * honest claim at that moment: something has been attempted and nothing is known
+ * yet. Reporting `live` there would be a claim the app has not earned, and
+ * reporting `offline` would flash a fault on every single page load.
+ */
+export const CONNECTING_LINK: LinkStatus = {
+  source: 'simulator',
+  transport: 'none',
+  socketAttempts: 0,
+  socketGaveUp: false,
+  reachable: false,
+}
 
 // ---------------------------------------------------------------------------
 // Mission
@@ -309,12 +413,6 @@ export interface ConfidenceBucket {
   binStart: number
   count: number
   level: RiskLevel
-}
-
-export interface ClassTally {
-  class: DetectionClass
-  label: string
-  count: number
 }
 
 /** A cell of the risk-density heatmap, addressed by grid reference. */

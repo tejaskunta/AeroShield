@@ -175,7 +175,7 @@ export function LiveFeed({
       <div
         className={
           docked
-            ? 'flex min-h-[260px] w-full shrink-0 items-center justify-center border-t border-rule bg-ink-deep/92 lg:min-h-0 lg:w-[38%] lg:min-w-[20rem] lg:border-l lg:border-t-0'
+            ? 'flex min-h-[260px] w-full shrink-0 items-center justify-center border-t border-rule bg-ink-deep/92 lg:min-h-0 lg:w-camera lg:border-l lg:border-t-0'
             : 'pointer-events-auto absolute bottom-3 left-3 z-[520]'
         }
       >
@@ -185,7 +185,7 @@ export function LiveFeed({
             setOpen(true)
             if (state !== 'live') retry()
           }}
-          className="flex items-center gap-1.5 border border-rule bg-ink-deep/92 px-2 py-1.5 font-display text-[10px] uppercase tracking-[0.1em] text-paper-dim backdrop-blur-sm hover:bg-ink-hover hover:text-paper"
+          className="flex items-center gap-1.5 border border-rule bg-ink-deep/92 px-2 py-1.5 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim backdrop-blur-sm hover:bg-ink-hover hover:text-paper"
           title="Show camera feed"
         >
           <Radio size={11} />
@@ -220,7 +220,11 @@ export function LiveFeed({
               // Sizing the root here instead means one element swaps between a
               // column and a floating box. Nothing is left behind, and the `<img>`
               // is never re-parented, so the stream survives the switch.
-              'flex min-h-[260px] w-full shrink-0 flex-col border-t border-rule bg-ink-deep lg:min-h-0 lg:w-[38%] lg:min-w-[20rem] lg:border-l lg:border-t-0'
+              //
+              // The width is `w-camera` — a clamp, not a percentage. See the token:
+              // a percentage here resolved against the whole flex row (dock
+              // included) and left the map 50px wider than the camera.
+              'flex min-h-[260px] w-full shrink-0 flex-col border-t border-rule bg-ink-deep lg:min-h-0 lg:w-camera lg:border-l lg:border-t-0'
             : 'pointer-events-auto absolute bottom-3 left-3 z-[520] w-[320px] animate-rise-in border border-rule-bright bg-ink-deep/94 backdrop-blur-sm'
       }
     >
@@ -228,10 +232,10 @@ export function LiveFeed({
       <div className="flex items-center justify-between gap-2 border-b border-rule px-2 py-1">
         <div className="flex min-w-0 items-center gap-1.5">
           <StateDot state={state} />
-          <span className="font-display text-[10px] uppercase tracking-[0.1em] text-paper">
+          <span className="font-display text-tiny uppercase tracking-[0.1em] text-paper">
             Camera
           </span>
-          <span className="truncate font-mono text-[10px] text-paper-faint">
+          <span className="truncate font-mono text-tiny text-paper-faint">
             {statusText(state, detectorRunning)}
           </span>
         </div>
@@ -379,13 +383,13 @@ export function LiveFeed({
              * So: one line of what happened, and the retry.
              */
             <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-              <span className="min-w-0 truncate font-mono text-[10px] text-paper-dim">
+              <span className="min-w-0 truncate font-mono text-tiny text-paper-dim">
                 No signal from the aircraft
               </span>
               <button
                 type="button"
                 onClick={retry}
-                className="shrink-0 border border-rule px-1.5 py-0.5 font-display text-[10px] uppercase tracking-[0.1em] text-paper hover:bg-ink-hover"
+                className="shrink-0 border border-rule px-1.5 py-0.5 font-display text-tiny uppercase tracking-[0.1em] text-paper hover:bg-ink-hover"
               >
                 Retry
               </button>
@@ -399,7 +403,7 @@ export function LiveFeed({
                 : 'px-2 py-1.5'
             }
           >
-            <span className="font-mono text-[10px] text-paper-faint">connecting...</span>
+            <span className="font-mono text-tiny text-paper-faint">connecting...</span>
           </div>
         )}
 
@@ -411,23 +415,23 @@ export function LiveFeed({
          */}
         {(state === 'live' || full || isDocked) && (
           <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center justify-between bg-gradient-to-t from-ink-deep/90 to-transparent px-2 py-1">
-            <span className="font-mono text-[9px] text-paper-faint">
-              {state === 'live' ? 'LIVE' : state === 'offline' ? 'NO SIGNAL' : '—'}
+            <span className="font-mono text-tiny text-paper-faint">
+              {state === 'live' ? 'LIVE' : state === 'offline' ? 'NO SIGNAL' : '--'}
             </span>
-            <span className="font-mono text-[9px] text-paper-faint">
-              {intrinsic ? `${intrinsic.w}×${intrinsic.h}` : '—'}
+            <span className="font-mono text-tiny text-paper-faint">
+              {intrinsic ? `${intrinsic.w}×${intrinsic.h}` : '--'}
             </span>
           </div>
         )}
       </div>
 
       {/* Task-relevant caveat, stated once, where it is read. */}
-      <p className="border-t border-rule px-2 py-1 text-[10px] leading-snug text-paper-faint">
+      <p className="border-t border-rule px-2 py-1 text-tiny leading-snug text-paper-faint">
         {detectorRunning ? (
           <>Detections on this feed are drawn on the aircraft, not here.</>
         ) : (
           <>
-            Camera feed only — the detector is not running, so no boxes are drawn.
+            Camera feed only. The detector is not running, so no boxes are drawn.
             Recorded detections on the map may be older than this picture.
           </>
         )}
@@ -456,7 +460,7 @@ function ModeButton({
       aria-checked={active}
       onClick={onClick}
       title={title}
-      className={`px-2 py-0.5 font-display text-[10px] uppercase tracking-[0.1em] transition-colors ${
+      className={`px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
         active ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper'
       }`}
     >
@@ -476,10 +480,10 @@ function ModeButton({
 function FeedOffline({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
-      <span className="font-display text-[10px] uppercase tracking-[0.14em] text-caution">
+      <span className="font-display text-tiny uppercase tracking-[0.14em] text-caution">
         No signal
       </span>
-      <p className="max-w-[34ch] text-[10px] leading-relaxed text-paper-dim">
+      <p className="max-w-[34ch] text-tiny leading-relaxed text-paper-dim">
         Nothing is publishing on the camera port. Either the aircraft's capture
         pipeline is stopped, or this machine cannot reach it.
       </p>
@@ -487,7 +491,7 @@ function FeedOffline({ onRetry }: { onRetry: () => void }) {
         <button
           type="button"
           onClick={onRetry}
-          className="border border-rule px-2 py-0.5 font-display text-[10px] uppercase tracking-[0.1em] text-paper hover:bg-ink-hover"
+          className="border border-rule px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] text-paper hover:bg-ink-hover"
         >
           Retry
         </button>
@@ -495,7 +499,7 @@ function FeedOffline({ onRetry }: { onRetry: () => void }) {
           href={JETSON_STREAM_PAGE_URL}
           target="_blank"
           rel="noreferrer"
-          className="border border-rule px-2 py-0.5 font-display text-[10px] uppercase tracking-[0.1em] text-paper-dim hover:bg-ink-hover hover:text-paper"
+          className="border border-rule px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:bg-ink-hover hover:text-paper"
         >
           Open direct ↗
         </a>

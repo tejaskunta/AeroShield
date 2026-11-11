@@ -36,10 +36,10 @@ export function Conversation({
         {messages.map((m) =>
           m.role === 'operator' ? (
             <div key={m.id} className="flex gap-3">
-              <span className="mt-0.5 shrink-0 font-mono text-[9px] uppercase tracking-[0.12em] text-paper-faint">
+              <span className="mt-0.5 shrink-0 font-mono text-tiny uppercase tracking-[0.12em] text-paper-faint">
                 You
               </span>
-              <p className="font-display text-[15px] leading-snug tracking-[0.02em] text-paper">
+              <p className="font-display text-title leading-snug tracking-[0.02em] text-paper">
                 {m.text}
               </p>
             </div>
@@ -55,10 +55,10 @@ export function Conversation({
 
         {pending && (
           <div className="flex gap-3">
-            <span className="mt-0.5 shrink-0 font-mono text-[9px] uppercase tracking-[0.12em] text-paper-faint">
+            <span className="mt-0.5 shrink-0 font-mono text-tiny uppercase tracking-[0.12em] text-paper-faint">
               Copilot
             </span>
-            <p className="text-[13px] text-paper-dim">Searching the reference set…</p>
+            <p className="text-compact text-paper-dim">Searching the reference set…</p>
           </div>
         )}
 
@@ -79,18 +79,18 @@ function Answer({
 }) {
   return (
     <div className="flex gap-3">
-      <span className="mt-1 shrink-0 font-mono text-[9px] uppercase tracking-[0.12em] text-paper-faint">
+      <span className="mt-1 shrink-0 font-mono text-tiny uppercase tracking-[0.12em] text-paper-faint">
         Copilot
       </span>
       <div className="min-w-0 flex-1">
         {/* An ungrounded answer is marked before it is read, not after. */}
         {!message.grounded && (
-          <p className="mb-1.5 border-l-2 border-caution pl-2 font-mono text-[10px] uppercase tracking-[0.08em] text-caution">
+          <p className="mb-1.5 border-l-2 border-caution pl-2 font-mono text-tiny uppercase tracking-[0.08em] text-caution">
             No supporting source found
           </p>
         )}
 
-        <div className="space-y-2 text-[13px] leading-relaxed text-paper">
+        <div className="space-y-2 text-compact leading-relaxed text-paper">
           {message.text.split('\n\n').map((para, i) => (
             <p key={i}>{para}</p>
           ))}
@@ -107,7 +107,7 @@ function Answer({
                 onMouseLeave={() => onCiteHover(null)}
                 onFocus={() => onCiteHover(c.id)}
                 onBlur={() => onCiteHover(null)}
-                className={`border px-1.5 py-px font-mono text-[10px] transition-colors ${
+                className={`border px-1.5 py-px font-mono text-tiny transition-colors ${
                   activeCitationId === c.id
                     ? 'border-paper text-paper'
                     : 'border-rule text-paper-dim hover:border-rule-bright hover:text-paper'
@@ -119,7 +119,7 @@ function Answer({
           </div>
         )}
 
-        <p className="mt-1.5 font-mono text-[9px] text-paper-faint">{formatZulu(message.at)}</p>
+        <p className="mt-1.5 font-mono text-tiny text-paper-faint">{formatZulu(message.at)}</p>
       </div>
     </div>
   )
@@ -146,12 +146,12 @@ export function CitationsRail({
     <aside className="hidden w-[300px] shrink-0 flex-col border-l border-rule bg-ink-deep xl:flex">
       <header className="flex h-8 shrink-0 items-center justify-between border-b border-rule px-3">
         <h2 className="eyebrow">Sources</h2>
-        <span className="font-mono text-[10px] text-paper-faint">{citations.length}</span>
+        <span className="font-mono text-tiny text-paper-faint">{citations.length}</span>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {citations.length === 0 ? (
-          <p className="p-2 text-[11px] leading-relaxed text-paper-faint">
+          <p className="p-2 text-small leading-relaxed text-paper-faint">
             Sources behind each answer appear here. Ask something to populate the rail.
           </p>
         ) : (
@@ -168,14 +168,14 @@ export function CitationsRail({
                 }`}
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-mono text-[11px] tracking-[0.04em] text-paper">
+                  <span className="font-mono text-small tracking-[0.04em] text-paper">
                     {c.document}
                   </span>
-                  <span className="shrink-0 font-mono text-[10px] tabular text-paper-dim">
+                  <span className="shrink-0 font-mono text-tiny tabular text-paper-dim">
                     {c.relevance.toFixed(2)}
                   </span>
                 </div>
-                <p className="mt-0.5 font-mono text-[10px] text-paper-faint">
+                <p className="mt-0.5 font-mono text-tiny text-paper-faint">
                   {c.clause} · p.{c.page}
                 </p>
                 {/* Relevance as a bar — a number alone doesn't convey "weak". */}
@@ -185,7 +185,7 @@ export function CitationsRail({
                     style={{ width: `${Math.round(c.relevance * 100)}%` }}
                   />
                 </div>
-                <p className="mt-1.5 border-l border-rule pl-2 text-[11px] leading-relaxed text-paper-dim">
+                <p className="mt-1.5 border-l border-rule pl-2 text-small leading-relaxed text-paper-dim">
                   {c.excerpt}
                 </p>
               </article>
@@ -194,7 +194,7 @@ export function CitationsRail({
         )}
       </div>
 
-      <p className="shrink-0 border-t border-rule px-3 py-1.5 font-mono text-[9px] leading-snug text-caution/80">
+      <p className="shrink-0 border-t border-rule px-3 py-1.5 font-mono text-tiny leading-snug text-caution/80">
         Fixture corpus. No retrieval or model is running.
       </p>
     </aside>
@@ -249,9 +249,9 @@ export function Composer({
             }}
             rows={2}
             placeholder={listening ? 'Listening…' : 'Ask about procedure, standoff, marking…'}
-            className="w-full resize-none border border-rule bg-ink-raised px-2.5 py-1.5 text-[13px] text-paper placeholder:text-paper-faint focus:border-rule-bright focus:outline-none"
+            className="w-full resize-none border border-rule bg-ink-raised px-2.5 py-1.5 text-compact text-paper placeholder:text-paper-faint focus:border-rule-bright focus:outline-none"
           />
-          {error && <p className="mt-1 text-[10px] text-caution">{error}</p>}
+          {error && <p className="mt-1 text-tiny text-caution">{error}</p>}
         </div>
 
         <Button
@@ -281,9 +281,9 @@ export function Composer({
         </Button>
       </div>
 
-      <p className="mx-auto mt-1.5 max-w-2xl text-[10px] leading-snug text-paper-faint">
-        Decision support only. Nothing here authorises entry, clearance, or disposal —
-        those are an accredited EOD operator's call.
+      <p className="mx-auto mt-1.5 max-w-2xl text-tiny leading-snug text-paper-faint">
+        Decision support only. Nothing here authorises entry, clearance, or disposal.
+        Those are an accredited EOD operator's call.
       </p>
     </div>
   )

@@ -18,7 +18,13 @@ export function CoveragePanel({ progress }: { progress: MissionProgress | null }
   if (!progress) {
     return (
       <Panel title="Coverage" collapsible collapseId="coverage" icon={Grid3x3}>
-        <p className="text-[11px] text-paper-dim">Waiting for mission data…</p>
+        <div className="flex flex-col gap-1 py-1">
+          <p className="text-small text-paper-dim">No coverage recorded yet.</p>
+          <p className="text-tiny leading-snug text-paper-faint">
+            A cell counts as surveyed once the camera footprint has passed over it. The grid
+            starts filling on the first pass.
+          </p>
+        </div>
       </Panel>
     )
   }
@@ -34,7 +40,7 @@ export function CoveragePanel({ progress }: { progress: MissionProgress | null }
         unit="%"
         size="lg"
         aside={
-          <span className="font-mono text-[10px] text-paper-faint">
+          <span className="font-mono text-tiny text-paper-faint">
             {progress.coveredCells.length}/{totalCells} cells
           </span>
         }
@@ -48,7 +54,7 @@ export function CoveragePanel({ progress }: { progress: MissionProgress | null }
 
       <div className="rule-line my-2.5" />
 
-      <p className="text-[10px] leading-snug text-paper-faint">
+      <p className="text-tiny leading-snug text-paper-faint">
         Surveyed means imaged from the air, <span className="text-paper-dim">not cleared</span>.
         {remaining > 0 && ` ${remaining} cells still unflown.`}
       </p>

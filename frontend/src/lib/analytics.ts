@@ -1,13 +1,13 @@
 import type {
-  ClassTally,
   ConfidenceBucket,
   Detection,
   MissionGrid,
   MissionProgress,
+  ReviewProgress,
+  ReviewState,
   RiskCell,
   TimeBucket,
 } from '@/types'
-import { CLASS_LABELS, DETECTION_CLASSES } from '@/types'
 import { MISSION_EPOCH } from './mockData'
 import { REVIEW_THRESHOLD, riskOf, riskOfConfidence } from './risk'
 import { cellId, parseCellId } from './geo'
@@ -90,12 +90,39 @@ export function confidenceHistogram(detections: Detection[]): ConfidenceBucket[]
   return bins
 }
 
-export function classTallies(detections: Detection[]): ClassTally[] {
-  return DETECTION_CLASSES.map((c) => ({
-    class: c,
-    label: CLASS_LABELS[c],
-    count: detections.filter((d) => d.class === c).length,
-  }))
+/**
+ * How far the human review of this mission has got.
+ *
+ * This replaces the class-breakdown chart, which had nothing real to plot once the
+ * model turned out to have a single class. Review state is the genuinely
+ * multi-valued thing the dashboard knows about, and it answers the question an
+ * operator actually has at the end of a flight: how much of this have I ruled on,
+ * and how much is still sitting there unexamined?
+ *
+ * Ordered by decision rather than by enum, so the bar reads left to right as
+ * "needs a person", then the two ways a person can finish, then the flag that
+ * reopens work. Percentages are of the total, and `remaining` is what keeps the
+ * number honest: an indispensable companion to a review meter is the count of
+ * what has *not* been reviewed.
+ */
+export function reviewProgress(detections: Detection[]): ReviewProgress {
+  const counts: Record<ReviewState, number> = {
+    unreviewed: 0,
+    confirmed: 0,
+    dismissed: 0,
+    flagged: 0,
+  }
+  for (const d of detections) counts[d.review.state]++
+
+  const total = detections.length
+  const decided = counts.confirmed + counts.dismissed
+  return {
+    counts,
+    total,
+    decided,
+    remaining: counts.unreviewed + counts.flagged,
+    pctDecided: total > 0 ? Math.round((decided / total) * 100) : 0,
+  }
 }
 
 /**
