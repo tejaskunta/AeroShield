@@ -94,11 +94,11 @@ export function MissionReports() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-3 py-2">
-          <h1 className="font-display text-[15px] uppercase tracking-[0.12em] text-paper">
+          <h1 className="font-display text-title uppercase tracking-[0.12em] text-paper">
             Mission Reports
           </h1>
           {reconciled && (
-            <p className="font-mono text-[11px] text-paper-dim">
+            <p className="font-mono text-small text-paper-dim">
               {reconciled.register.length} detections in register
             </p>
           )}
@@ -119,9 +119,9 @@ export function MissionReports() {
                 mission={MISSION}
                 detections={reconciled.register}
               />
-              <p className="mx-auto mt-3 max-w-[820px] text-[10px] leading-snug text-paper-faint">
+              <p className="mx-auto mt-3 max-w-[820px] text-tiny leading-snug text-paper-faint">
                 Preview only. Server-side generation (WeasyPrint) is a backend task that
-                does not exist yet — Print / PDF hands off to the browser's own dialogue,
+                does not exist yet. Print / PDF hands off to the browser's own dialogue,
                 and CSV and GeoJSON are built in the browser from the live detection set.
               </p>
             </div>

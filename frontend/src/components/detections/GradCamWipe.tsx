@@ -32,7 +32,7 @@ export function GradCamWipe({
     return (
       <div className="relative aspect-video w-full border border-rule bg-ink-deep">
         <DetectionFrame detection={detection} risk={risk} />
-        <p className="absolute inset-x-0 bottom-0 border-t border-rule bg-ink-deep/95 px-2 py-1 text-[10px] text-paper-dim">
+        <p className="absolute inset-x-0 bottom-0 border-t border-rule bg-ink-deep/95 px-2 py-1 text-tiny text-paper-dim">
           No activation map for this detection. Grad-CAM runs on the Jetson after
           capture; this frame has not been processed.
         </p>
@@ -68,10 +68,10 @@ export function GradCamWipe({
         </div>
 
         {/* Corner labels tell you which side is which. */}
-        <span className="pointer-events-none absolute left-2 top-2 border border-rule bg-ink-deep/85 px-1.5 py-px font-mono text-[9px] uppercase tracking-[0.1em] text-paper-dim">
+        <span className="pointer-events-none absolute left-2 top-2 border border-rule bg-ink-deep/85 px-1.5 py-px font-mono text-tiny uppercase tracking-[0.1em] text-paper-dim">
           Activation
         </span>
-        <span className="pointer-events-none absolute right-2 top-2 border border-rule bg-ink-deep/85 px-1.5 py-px font-mono text-[9px] uppercase tracking-[0.1em] text-paper-dim">
+        <span className="pointer-events-none absolute right-2 top-2 border border-rule bg-ink-deep/85 px-1.5 py-px font-mono text-tiny uppercase tracking-[0.1em] text-paper-dim">
           Capture
         </span>
 
@@ -87,8 +87,8 @@ export function GradCamWipe({
         />
       </div>
 
-      <p className="text-[10px] leading-snug text-paper-faint">
-        Drag to wipe. The activation should sit on the object, not beside it — a hot
+      <p className="text-tiny leading-snug text-paper-faint">
+        Drag to wipe. The activation should sit on the object, not beside it. A hot
         region offset from the box is a sign the model keyed on something else.
       </p>
     </div>

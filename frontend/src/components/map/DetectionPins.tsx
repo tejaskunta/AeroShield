@@ -102,7 +102,7 @@ export function DetectionPins({
         position: { lat: d.position.lat, lng: d.position.lon },
         icon: detectionSymbol(level, d.review.state, selected, scale),
         zIndex: selected ? 800 : level === 'hazard' ? 600 : 400,
-        title: `${d.id} — ${level} — cell ${d.gridCell}`,
+        title: `${d.id} · ${level} · cell ${d.gridCell}`,
         clickable: true,
       })
 

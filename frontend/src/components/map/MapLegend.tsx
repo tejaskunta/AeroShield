@@ -39,7 +39,7 @@ export function MapLegend({ detections }: { detections: Detection[] }) {
       />
 
       <div className="rule-line my-1.5" />
-      <p className="text-[10px] leading-snug text-paper-faint">
+      <p className="text-tiny leading-snug text-paper-faint">
         Rings show how far a position could be out. One grid square is 1 m.
       </p>
     </div>
@@ -58,8 +58,8 @@ function LegendRow({
   return (
     <div className="flex items-center gap-2 py-px">
       <span className="grid h-3.5 w-3.5 shrink-0 place-items-center">{mark}</span>
-      <span className="flex-1 truncate text-[10px] text-paper-dim">{label}</span>
-      <span className="font-mono text-[10px] tabular text-paper">{count}</span>
+      <span className="flex-1 truncate text-tiny text-paper-dim">{label}</span>
+      <span className="font-mono text-tiny tabular text-paper">{count}</span>
     </div>
   )
 }

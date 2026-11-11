@@ -62,10 +62,10 @@ export function SafetyCopilot() {
     <div className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-3 py-2">
-          <h1 className="font-display text-[15px] uppercase tracking-[0.12em] text-paper">
+          <h1 className="font-display text-title uppercase tracking-[0.12em] text-paper">
             Safety Copilot
           </h1>
-          <p className="font-mono text-[11px] text-paper-dim">
+          <p className="font-mono text-small text-paper-dim">
             {citations.length} source{citations.length === 1 ? '' : 's'} cited
           </p>
         </header>
@@ -90,7 +90,7 @@ export function SafetyCopilot() {
                     type="button"
                     onClick={() => void ask(q)}
                     disabled={pending}
-                    className="border border-rule px-2 py-1 text-left text-[11px] text-paper-dim transition-colors hover:border-rule-bright hover:text-paper disabled:opacity-50"
+                    className="border border-rule px-2 py-1 text-left text-small text-paper-dim transition-colors hover:border-rule-bright hover:text-paper disabled:opacity-50"
                   >
                     {q}
                   </button>

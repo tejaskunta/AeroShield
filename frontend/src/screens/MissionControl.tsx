@@ -9,7 +9,6 @@ import { DetectionCallout } from '@/components/mission/DetectionCallout'
 import { LiveFeed } from '@/components/mission/LiveFeed'
 import { DroneStatusPanel } from '@/components/mission/DroneStatusPanel'
 import { CoveragePanel } from '@/components/mission/CoveragePanel'
-import { DetectionTicker } from '@/components/mission/DetectionTicker'
 
 /**
  * Mission Control — the primary screen.
@@ -36,13 +35,13 @@ import { DetectionTicker } from '@/components/mission/DetectionTicker'
  * went and what it saw, not to propose where it should go next.
  */
 /*
- * How many detections the map and the ticker will draw at once.
+ * How many detections the map will draw at once.
  *
  * This is a DISPLAY limit, not a retention one. Every detection is still
  * recorded and still uploaded - the aircraft writes the full set to its local
  * log and the backend keeps every row - and the Detection Centre, the reports
  * and the analytics all read the complete mission. Nothing is dropped here;
- * these two views simply stop drawing past this point.
+ * this one view simply stops drawing past this point.
  *
  * The number is about legibility, not performance. A survey flown at 10 m
  * altitude over a stony block produces dozens of hits a minute, and a map
@@ -111,8 +110,19 @@ export function MissionControl() {
        * `absolute` variant can resolve against.
        */}
       <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
-        {/* The canvas. */}
-        <div className="relative min-h-[320px] flex-1 lg:min-h-0">
+        {/*
+         * The canvas.
+         *
+         * `xl:min-w-canvas` is a guarantee, not a preference, and the `xl:` is
+         * load-bearing: at 1024-1150px a 512px floor plus the camera clamp plus the
+         * 320px dock exceeds the row, and `main` is `overflow-hidden` — so the dock
+         * was being clipped off-screen rather than scrolling. The floor now only
+         * applies from 1280px up, where the arithmetic is guaranteed to fit.
+         *
+         * Below that the clamp on the camera still does the real work; the floor is
+         * belt-and-braces for the wide case.
+         */}
+        <div className="relative min-h-[320px] flex-1 lg:min-h-0 xl:min-w-canvas">
           <LiveMap
             telemetry={mission?.telemetry ?? null}
             progress={mission?.progress ?? null}
@@ -173,19 +183,6 @@ export function MissionControl() {
           <CoveragePanel progress={mission?.progress ?? null} />
         </aside>
       </div>
-
-      {/*
-        * Capped to match the map, so the two views always agree on how many
-        * detections exist. `total` carries the true count so the ticker's own
-        * badge can say "60 of 214" rather than quietly claiming the mission
-        * produced sixty.
-        */}
-      <DetectionTicker
-        detections={visibleDetections}
-        total={detections.length}
-        selectedId={selectedId}
-        onSelect={select}
-      />
     </div>
   )
 }

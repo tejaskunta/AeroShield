@@ -42,7 +42,7 @@ export function ConfidenceBar({
         <Tick at={HAZARD_THRESHOLD} title="Hazard threshold 0.75" />
       </div>
       {showValue && (
-        <span className={`font-mono text-[11px] tabular ${RISK_CLASSES[resolved].text}`}>
+        <span className={`font-mono text-small tabular ${RISK_CLASSES[resolved].text}`}>
           {formatConfidence(confidence)}
         </span>
       )}

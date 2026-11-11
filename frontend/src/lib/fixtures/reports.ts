@@ -22,7 +22,7 @@ export const REPORTS: MissionReport[] = [
     // recomputes those from live mission state, so a number written here would
     // drift out of step with the sheet it sits on within seconds.
     summary:
-      'Interim report, KMIT campus block survey in progress. Detections to date are listed in the register below with their review state at time of generation. The near lanes have been walked; the far lanes are still to fly. Two metal-cased detections confirmed and one flagged for a second pass — none released, all pending ground verification.',
+      'Interim report, KMIT campus block survey in progress. Detections to date are listed in the register below with their review state at time of generation. The near lanes have been walked; the far lanes are still to fly. Two detections confirmed and one flagged for a second pass. None released, all pending ground verification.',
     areaSurveyedM2: BLOCK_W_M * BLOCK_H_M * 0.62,
     coveragePct: 62,
     flightTimeS: ELAPSED_AT_LOAD_S,
@@ -38,7 +38,7 @@ export const REPORTS: MissionReport[] = [
     generatedAt: isoAt(-86_400),
     generatedBy: 'A. RAO',
     summary:
-      'Complete survey of the KMIT campus block. 9 detections filed, 3 confirmed hazards handed to the ground team and marked to IMAS convention. No outstanding lanes. Survey only — no land released.',
+      'Complete survey of the KMIT campus block. 9 detections filed, 3 confirmed hazards handed to the ground team and marked to IMAS convention. No outstanding lanes. Survey only, no land released.',
     areaSurveyedM2: BLOCK_W_M * BLOCK_H_M,
     coveragePct: 100,
     flightTimeS: 124,

@@ -16,7 +16,7 @@ const VARIANTS: Record<Variant, string> = {
   quiet:
     'border-transparent text-paper-dim hover:border-rule hover:text-paper hover:bg-ink-hover',
   danger:
-    'border-rule text-hazard hover:border-hazard hover:bg-hazard/10',
+    'border-rule text-hazard-lit hover:border-hazard hover:bg-hazard/10',
 }
 
 export function Button({
@@ -32,7 +32,7 @@ export function Button({
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center gap-1.5 border px-2.5 py-1 font-display text-[11px] uppercase tracking-[0.1em] transition-colors disabled:cursor-not-allowed disabled:border-rule disabled:text-paper-faint disabled:hover:bg-transparent ${VARIANTS[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 border px-2.5 py-1 font-display text-small uppercase tracking-[0.1em] transition-colors disabled:cursor-not-allowed disabled:border-rule disabled:text-paper-faint disabled:hover:bg-transparent ${VARIANTS[variant]} ${className}`}
       {...rest}
     >
       {icon}

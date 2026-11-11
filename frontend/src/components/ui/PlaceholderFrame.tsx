@@ -1,6 +1,7 @@
 import { useId } from 'react'
 import type { BoundingBox, RiskLevel } from '@/types'
 import { RISK_HEX } from '@/lib/risk'
+import { CAUTION_HEX, CLEARED_HEX, CONSOLE_HEX } from '@/lib/consoleInk'
 
 /**
  * PlaceholderFrame — a synthetic stand-in for a captured RGB frame.
@@ -66,8 +67,8 @@ export function PlaceholderFrame({
         {/* Grad-CAM falloff: hot at the detection centre, cooling outward. */}
         <radialGradient id={`cam-${uid}`} cx="50%" cy="50%" r="50%">
           <stop offset="0%" stopColor={hazardHex} stopOpacity="0.85" />
-          <stop offset="45%" stopColor="#C9922C" stopOpacity="0.45" />
-          <stop offset="100%" stopColor="#4E9E86" stopOpacity="0" />
+          <stop offset="45%" stopColor={CAUTION_HEX} stopOpacity="0.45" />
+          <stop offset="100%" stopColor={CLEARED_HEX} stopOpacity="0" />
         </radialGradient>
         <pattern id={`grain-${uid}`} width="3" height="3" patternUnits="userSpaceOnUse">
           <rect width="3" height="3" fill="none" />
@@ -102,7 +103,7 @@ export function PlaceholderFrame({
           <text
             x={26}
             y={H - 22}
-            fill="#8C97A1"
+            fill={CONSOLE_HEX.paperDim}
             fontFamily="IBM Plex Mono, monospace"
             fontSize={13}
             letterSpacing={1.6}

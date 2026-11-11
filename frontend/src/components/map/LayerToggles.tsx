@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Layers } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
+import { CAUTION_HEX, HAZARD_HEX } from '@/lib/consoleInk'
 
 /**
  * LayerToggles — the map's layer checklist.
@@ -61,14 +62,14 @@ export function LayerToggles({
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 px-2 py-1 font-display text-[10px] uppercase tracking-[0.1em] text-paper-dim hover:text-paper"
+        className="flex w-full items-center gap-1.5 px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:text-paper"
       >
         <Layers size={12} strokeWidth={1.75} aria-hidden />
         Layers
         {/* Say when the map is not showing everything — a hidden layer is a
             silent omission otherwise. */}
         {hiddenCount > 0 && (
-          <span className="font-mono text-[9px] text-caution">{hiddenCount} off</span>
+          <span className="font-mono text-tiny text-caution">{hiddenCount} off</span>
         )}
       </button>
 
@@ -107,8 +108,8 @@ function Line({ color }: { color: string }) {
 function Dot() {
   return (
     <svg width="14" height="8" aria-hidden className="shrink-0">
-      <circle cx="4" cy="4" r="3" fill="none" stroke="#C9922C" strokeWidth="1.5" />
-      <rect x="9" y="1.5" width="5" height="5" fill="#D7262F" transform="rotate(45 11.5 4)" />
+      <circle cx="4" cy="4" r="3" fill="none" stroke={CAUTION_HEX} strokeWidth="1.5" />
+      <rect x="9" y="1.5" width="5" height="5" fill={HAZARD_HEX} transform="rotate(45 11.5 4)" />
     </svg>
   )
 }

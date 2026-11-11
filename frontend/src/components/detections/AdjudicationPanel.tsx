@@ -11,11 +11,11 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { GradCamWipe } from './GradCamWipe'
 
 /**
- * AdjudicationPanel — where a detection becomes a decision.
+ * AdjudicationPanel: where a detection becomes a decision.
  *
  * Dismissing and flagging require a reason. That is not friction for its own sake:
  * a dismissal removes a hazard from the map and from the safe-path planner's
- * obstacle set, so it has to be auditable. Confirming does not require one — the
+ * obstacle set, so it has to be auditable. Confirming does not require one; the
  * evidence is the frame, and confirming is the conservative direction.
  */
 export function AdjudicationPanel({
@@ -27,7 +27,7 @@ export function AdjudicationPanel({
   detection: Detection | null
   onReview: (id: string, state: ReviewState, reason?: string) => void
   onShowOnMap: (id: string) => void
-  /** Whether the last write reached a server. False today — the stub says so. */
+  /** Whether the last write reached a server. False today, the stub says so. */
   persisted: boolean
 }) {
   const [pendingAction, setPendingAction] = useState<'dismissed' | 'flagged' | null>(null)
@@ -61,7 +61,7 @@ export function AdjudicationPanel({
       {/* Header */}
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-rule px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="font-mono text-[13px] tracking-[0.04em] text-paper">
+          <span className="font-mono text-compact tracking-[0.04em] text-paper">
             {detection.id}
           </span>
           <Badge risk={level}>{RISK_LABELS[level]}</Badge>
@@ -69,7 +69,7 @@ export function AdjudicationPanel({
         <button
           type="button"
           onClick={() => onShowOnMap(detection.id)}
-          className="flex shrink-0 items-center gap-1 font-display text-[10px] uppercase tracking-[0.1em] text-paper-dim hover:text-paper"
+          className="flex shrink-0 items-center gap-1 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:text-paper"
         >
           <ExternalLink size={11} aria-hidden />
           On map
@@ -99,7 +99,7 @@ export function AdjudicationPanel({
 
         <div className="rule-line my-3" />
 
-        {/* Geotag — with the error stated, because a bare coordinate overstates it. */}
+        {/* Geotag, with the error stated, because a bare coordinate overstates it. */}
         <div>
           <p className="eyebrow mb-1.5">Geotag</p>
           <Row label="Position" value={formatLatLng(detection.position)} />
@@ -108,7 +108,7 @@ export function AdjudicationPanel({
           <Row label="Cell" value={detection.gridCell} />
           <Row label="Alt at capture" value={`${detection.captureAltitudeM.toFixed(1)} m AGL`} />
           <Row label="Captured" value={formatZulu(detection.capturedAt)} />
-          <p className="mt-1.5 text-[10px] leading-snug text-paper-faint">
+          <p className="mt-1.5 text-tiny leading-snug text-paper-faint">
             Position is projected from drone pose, not measured on the ground. Treat the
             error radius as the search area, not the coordinate as the object.
           </p>
@@ -120,20 +120,20 @@ export function AdjudicationPanel({
         {reviewed && (
           <div className="mb-3 border border-rule bg-ink-raised p-2">
             <p className="eyebrow mb-1">Review</p>
-            <p className="font-display text-[13px] uppercase tracking-[0.08em] text-paper">
+            <p className="font-display text-compact uppercase tracking-[0.08em] text-paper">
               {detection.review.state}
             </p>
             {detection.review.reason && (
-              <p className="mt-1 text-[11px] leading-relaxed text-paper-dim">
+              <p className="mt-1 text-small leading-relaxed text-paper-dim">
                 {detection.review.reason}
               </p>
             )}
-            <p className="mt-1 font-mono text-[10px] text-paper-faint">
+            <p className="mt-1 font-mono text-tiny text-paper-faint">
               {detection.review.reviewedBy} ·{' '}
-              {detection.review.reviewedAt ? formatZulu(detection.review.reviewedAt) : '—'}
+              {detection.review.reviewedAt ? formatZulu(detection.review.reviewedAt) : '--'}
             </p>
             {!persisted && (
-              <p className="mt-1.5 border-l-2 border-caution pl-2 font-mono text-[10px] leading-snug text-caution">
+              <p className="mt-1.5 border-l-2 border-caution pl-2 font-mono text-tiny leading-snug text-caution">
                 Held in this session only. There is no review endpoint yet, so this
                 decision is lost on reload.
               </p>
@@ -153,7 +153,7 @@ export function AdjudicationPanel({
                   key={r}
                   type="button"
                   onClick={() => setReason(r)}
-                  className={`border px-1.5 py-px text-[10px] transition-colors ${
+                  className={`border px-1.5 py-px text-tiny transition-colors ${
                     reason === r
                       ? 'border-paper text-paper'
                       : 'border-rule text-paper-dim hover:border-rule-bright hover:text-paper'
@@ -168,7 +168,7 @@ export function AdjudicationPanel({
               onChange={(e) => setReason(e.target.value)}
               rows={2}
               placeholder="Or write it out…"
-              className="w-full resize-none border border-rule bg-ink px-2 py-1 text-[11px] text-paper placeholder:text-paper-faint focus:border-rule-bright focus:outline-none"
+              className="w-full resize-none border border-rule bg-ink px-2 py-1 text-small text-paper placeholder:text-paper-faint focus:border-rule-bright focus:outline-none"
             />
             <div className="mt-1.5 flex gap-1.5">
               <Button
@@ -192,7 +192,7 @@ export function AdjudicationPanel({
         )}
       </div>
 
-      {/* Actions pinned to the bottom — always reachable in a long scroll. */}
+      {/* Actions pinned to the bottom, always reachable in a long scroll. */}
       <footer className="shrink-0 border-t border-rule p-2">
         <div className="flex gap-1.5">
           <Button
@@ -222,7 +222,7 @@ export function AdjudicationPanel({
             Dismiss
           </Button>
         </div>
-        <p className="mt-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-paper-faint">
+        <p className="mt-1.5 font-mono text-tiny uppercase tracking-[0.1em] text-paper-faint">
           C confirm · X dismiss · F flag · J/K move
         </p>
       </footer>
@@ -232,13 +232,13 @@ export function AdjudicationPanel({
 
 /** Canned reasons, from what an actual reviewer would write most often. */
 const DISMISS_REASONS = ['Rock or debris', 'Vegetation', 'Shadow artifact', 'Duplicate of earlier hit', 'Scrap metal']
-const FLAG_REASONS = ['Needs EOD opinion', 'Ambiguous shape', 'Poor image quality', 'Cluster — survey again']
+const FLAG_REASONS = ['Needs EOD opinion', 'Ambiguous shape', 'Poor image quality', 'Cluster, survey again']
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-2 py-0.5">
       <span className="eyebrow w-[70px] shrink-0">{label}</span>
-      <span className="min-w-0 flex-1 font-mono text-[11px] tabular text-paper">{value}</span>
+      <span className="min-w-0 flex-1 font-mono text-small tabular text-paper">{value}</span>
     </div>
   )
 }

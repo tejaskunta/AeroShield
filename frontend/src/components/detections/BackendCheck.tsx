@@ -54,7 +54,7 @@ export function BackendCheck() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex items-center gap-1.5 border border-rule px-2 py-1 font-display text-[10px] uppercase tracking-[0.1em] text-paper-dim hover:border-rule-bright hover:text-paper"
+        className="flex items-center gap-1.5 border border-rule px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:border-rule-bright hover:text-paper"
       >
         <Plug size={11} aria-hidden />
         Backend check
@@ -71,15 +71,15 @@ export function BackendCheck() {
               }`}
               aria-hidden
             />
-            <span className="font-mono text-[11px] text-paper">
+            <span className="font-mono text-small text-paper">
               {healthy === null ? 'Checking /health…' : healthy ? 'Backend up' : 'Backend unreachable'}
             </span>
           </div>
 
           {healthy === false && (
-            <p className="mt-1.5 text-[10px] leading-snug text-paper-dim">
+            <p className="mt-1.5 text-tiny leading-snug text-paper-dim">
               Start it from the repo root:
-              <code className="mt-1 block bg-ink px-1.5 py-1 font-mono text-[10px] text-paper">
+              <code className="mt-1 block bg-ink px-1.5 py-1 font-mono text-tiny text-paper">
                 uvicorn app.main:app --reload --app-dir ./backend
               </code>
             </p>
@@ -88,9 +88,9 @@ export function BackendCheck() {
           <div className="rule-line my-2.5" />
 
           <p className="eyebrow mb-1.5">POST /api/detect</p>
-          <p className="mb-2 text-[10px] leading-snug text-paper-faint">
+          <p className="mb-2 text-tiny leading-snug text-paper-faint">
             Sends one image to the live detector and prints the raw response. The result
-            is not added to the mission — this only tests the wiring.
+            is not added to the mission. This only tests the wiring.
           </p>
 
           <input
@@ -113,13 +113,13 @@ export function BackendCheck() {
           </Button>
 
           {error && (
-            <p className="mt-2 border-l-2 border-hazard pl-2 text-[10px] leading-snug text-hazard">
+            <p className="mt-2 border-l-2 border-hazard pl-2 text-tiny leading-snug text-hazard-lit">
               {error}
             </p>
           )}
 
           {result && (
-            <pre className="mt-2 max-h-40 overflow-auto border border-rule bg-ink p-2 font-mono text-[10px] leading-relaxed text-paper">
+            <pre className="mt-2 max-h-40 overflow-auto border border-rule bg-ink p-2 font-mono text-tiny leading-relaxed text-paper">
               {result}
             </pre>
           )}

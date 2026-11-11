@@ -184,10 +184,10 @@ export async function saveReview(
 /**
  * One row of `GET /api/detections` (`DetectionRead` in schemas/detection_io.py).
  *
- * Flat and snake_case because it is a database row. Note `class_name` is whatever
- * the model was trained to say — the drone posts `"landmine"`, a single class,
- * while the UI's `DetectionClass` union is the three-way dataset split. See
- * `toDetection` for how that mismatch is handled rather than papered over.
+ * Flat and snake_case because it is a database row. `class_name` is whatever the
+ * aircraft actually sent. The engine is single-class (`names: {0: landmine}`), so
+ * a current drone posts `"landmine"`; historic rows in the log may say
+ * `landmine_metal` because an older adapter coerced them before upload.
  */
 export interface BackendDetectionRow {
   id: number
@@ -227,35 +227,15 @@ interface BackendDetectionList {
 }
 
 /**
- * Map the model's `class_name` onto the UI's three-way class union.
- *
- * This is an adapter, not a guess. The shipped engine (`best_512x288.engine`) was
- * trained with `names: {0: landmine}` — one class — so every real row says
- * `"landmine"`. The UI's union has three classes because the dataset spec it was
- * written against does. Rather than widen the union to include a fourth spelling
- * and let two vocabularies drift, a bare `"landmine"` maps to the metal-cased
- * label: the demo's targets are metal-cased, and `riskOf` treats it as a hazard
- * either way, which is the reading that matters for safety.
- *
- * Anything unrecognised also falls back to `landmine_metal` rather than throwing.
- * A detection the UI cannot classify is still a detection, and dropping it would
- * silently shorten the record of what the aircraft saw.
- */
-function toDetectionClass(name: string): Detection['class'] {
-  switch (name) {
-    case 'landmine_metal':
-      return 'landmine_metal'
-    case 'landmine_plastic':
-      return 'landmine_plastic'
-    case 'debris_negative':
-      return 'debris_negative'
-    default:
-      return 'landmine_metal'
-  }
-}
-
-/**
  * Backend row -> UI detection.
+ *
+ * NO CLASS TRANSLATION HAPPENS HERE. The previous version mapped `class_name`
+ * through a lookup that fell back to `landmine_metal` for anything it did not
+ * recognise, which meant a row the UI had never heard of was silently relabelled
+ * as a specific munition case type. That is a safety-relevant claim invented by a
+ * `default:` branch, so it is gone. The detector has one class, the UI has one
+ * class, and the row's verbatim `class_name` is carried through as `classRaw` for
+ * exports and audits rather than being reinterpreted.
  *
  * `frameUri` is deliberately left empty, because the bytes need an authenticated
  * fetch that must not block this list from rendering. An empty string means "no
@@ -278,7 +258,8 @@ export function toDetection(r: BackendDetectionRow): Detection | null {
   return {
     id: `D-${String(r.id).padStart(4, '0')}`,
     missionId: String(r.mission_id),
-    class: toDetectionClass(r.class_name),
+    class: 'landmine',
+    classRaw: r.class_name,
     confidence: level,
     bbox: { x1: r.bbox_x1, y1: r.bbox_y1, x2: r.bbox_x2, y2: r.bbox_y2 },
     position: { lat: r.latitude, lon: r.longitude },
@@ -604,6 +585,52 @@ interface BackendMissionPage {
 }
 
 /**
+ * The result of asking the backend a question, told apart by *why* there is no
+ * answer.
+ *
+ * This type exists because a bare `T | null` collapses four genuinely different
+ * situations into one, and the dashboard needs to act differently on each:
+ *
+ *   - `ok`          — the backend answered with data. Use it.
+ *   - `absent`      — the backend answered, and the answer was "nothing there".
+ *                     A mission that has not flown yet, or a fleet with no
+ *                     mission by that name. Entirely normal, and the remedy is
+ *                     to fly, not to debug.
+ *   - `failed`      — the backend answered with an error status. It is running,
+ *                     but something inside it is wrong: a query blew up, a
+ *                     migration did not apply, the key was rejected. The remedy
+ *                     is the backend's own logs.
+ *   - `unreachable` — no response arrived at all. The backend is down, the proxy
+ *                     is misconfigured, or this machine has lost the network. The
+ *                     remedy is on this machine, and — critically — the aircraft
+ *                     may be flying perfectly the whole time.
+ *   - `disabled`    — this build has no API key, so nothing was attempted. The
+ *                     simulator is the intended source and everything is working
+ *                     as designed.
+ *
+ * The urgent case is `absent` versus `unreachable`. Returning null for both made
+ * a stopped backend indistinguishable from a silent aircraft, and sent the
+ * operator to inspect hardware that was fine.
+ */
+export type BackendOutcome<T> =
+  | { outcome: 'ok'; value: T }
+  | { outcome: 'absent' }
+  | { outcome: 'failed'; status: number }
+  | { outcome: 'unreachable' }
+  | { outcome: 'disabled' }
+
+/**
+ * True when a response proves the backend is running and answering.
+ *
+ * Excludes `unreachable` (nothing came back) and `disabled` (nothing was asked).
+ * A `failed` outcome counts as reachable: a 500 is proof of life, just not of
+ * health, and the two need different advice.
+ */
+export function isReachable(outcome: BackendOutcome<unknown>): boolean {
+  return outcome.outcome === 'ok' || outcome.outcome === 'absent' || outcome.outcome === 'failed'
+}
+
+/**
  * The aircraft's latest known position, once it has been mapped into the UI's
  * vocabulary.
  */
@@ -682,20 +709,25 @@ function toTelemetry(t: BackendTelemetryRead): Telemetry {
  *
  * The dashboard addresses missions by name, because that is what a pilot reads
  * out and what the drone passes to `--mission-name`; the backend keys them by
- * integer. Returns null when the key is unset, the backend is down, or no
- * mission has that name yet - all of which are normal before the first flight,
- * not errors. Newest first, so a repeated call-sign resolves to the live one.
+ * integer. Newest first, so a repeated call-sign resolves to the live one.
+ *
+ * Returns an OUTCOME, not a nullable id, because "there is no mission by this
+ * name yet" and "I could not ask" are the two cases the dashboard must not
+ * confuse: the first means fly the aircraft, the second means fix this laptop.
+ * Before the first flight the first is the normal, expected answer.
  */
-export async function findMissionByName(name: string): Promise<number | null> {
-  if (!DASHBOARD_KEY || !name) return null
+export async function findMissionByName(name: string): Promise<BackendOutcome<number>> {
+  if (!DASHBOARD_KEY || !name) return { outcome: 'disabled' }
   try {
     const r = await fetch(`${BASE}/missions`, { headers: authHeaders() })
-    if (!r.ok) return null
+    if (!r.ok) return { outcome: 'failed', status: r.status }
     const page = (await r.json()) as BackendMissionPage
     const hit = page.items.find((m) => m.name === name)
-    return hit ? hit.id : null
+    return hit ? { outcome: 'ok', value: hit.id } : { outcome: 'absent' }
   } catch {
-    return null
+    // The fetch itself rejected: DNS, refused connection, no network. Nothing
+    // answered, which is a different fault from a 500.
+    return { outcome: 'unreachable' }
   }
 }
 
@@ -749,26 +781,37 @@ export function missionSocketUrl(missionId: number): string | null {
 /**
  * REAL (simulator fallback) — `GET /api/missions/{id}/telemetry/latest`.
  *
- * This is the call that puts the real aircraft on the map. Returns null - never
- * throws - when there is no key, no backend, the mission does not exist (404),
- * or no frame has arrived yet (`found: false`, which is a 200). The caller keeps
- * the simulator in every one of those cases, so a keyless classroom demo looks
- * exactly as it did before this function existed.
+ * This is the call that puts the real aircraft on the map. Never throws; the
+ * caller keeps the simulator in every non-`ok` case, so a keyless classroom demo
+ * looks exactly as it did before this function existed.
+ *
+ * Returns an outcome rather than `LatestTelemetry | null` for one reason: a null
+ * cannot say whether the aircraft has not reported yet (`absent` — normal, and
+ * the fix is to arm it) or whether the request never reached anyone
+ * (`unreachable` — the fix is on this machine, while the aircraft may be flying
+ * fine). Those two produce the same empty map and call for opposite actions.
  *
  * This stays even though `useMissionStream` prefers the socket: it is the
  * fallback for a socket that cannot connect (a proxy without `ws: true`, a
  * backend restart, a flaky link) and the source of the first position before the
  * socket has opened. A push transport does not remove the need to be able to ask.
  */
-export async function fetchLatestTelemetry(missionId: number): Promise<LatestTelemetry | null> {
-  if (!DASHBOARD_KEY || !Number.isInteger(missionId) || missionId <= 0) return null
+export async function fetchLatestTelemetry(
+  missionId: number,
+): Promise<BackendOutcome<LatestTelemetry>> {
+  if (!DASHBOARD_KEY || !Number.isInteger(missionId) || missionId <= 0) {
+    return { outcome: 'disabled' }
+  }
   try {
     const r = await fetch(`${BASE}/missions/${missionId}/telemetry/latest`, {
       headers: authHeaders(),
     })
-    if (!r.ok) return null
-    return toLatestTelemetry((await r.json()) as BackendTelemetryLatest)
+    if (!r.ok) return { outcome: 'failed', status: r.status }
+    const parsed = toLatestTelemetry((await r.json()) as BackendTelemetryLatest)
+    // A 200 with `found: false` is the backend telling us the mission exists but
+    // no frame has arrived. That is an answer, so it is `absent`, not a failure.
+    return parsed ? { outcome: 'ok', value: parsed } : { outcome: 'absent' }
   } catch {
-    return null
+    return { outcome: 'unreachable' }
   }
 }

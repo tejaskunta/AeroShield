@@ -1,29 +1,27 @@
-import { useCallback, useState } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
-import type { Detection } from '@/types'
+import { Outlet } from 'react-router-dom'
+import { CONNECTING_LINK } from '@/types'
 import { useMissionStream } from '@/hooks/useMissionStream'
-import { riskOf } from '@/lib/risk'
 import { NavRail } from './NavRail'
-import { AlertBanner, StatusRail } from './StatusRail'
+import { StatusRail } from './StatusRail'
 import { MissionContext } from './missionContext'
 
 /**
- * AppShell — the one place the mission stream is subscribed.
+ * AppShell -- the one place the mission stream is subscribed.
  *
  * Every screen reads the mission through context rather than subscribing
  * separately, so there is a single source of truth for telemetry and detections
  * and navigating between screens never restarts the mission.
+ *
+ * Nothing here interrupts the operator. A new hazard used to raise a banner above
+ * the workspace demanding acknowledgement, which meant a person in the middle of
+ * reviewing one detection had their attention pulled to another by a dialog they
+ * had to clear before continuing. Hazards are already the loudest thing on screen
+ * -- the red tally in this rail, the red pins, the hazard stat tile -- so the
+ * banner added no information, only an interruption and a click. Interruptions are
+ * how a real hazard gets missed.
  */
 export function AppShell() {
-  const navigate = useNavigate()
-  const [alert, setAlert] = useState<Detection | null>(null)
-
-  // A hazard-level arrival is the only thing that interrupts the operator.
-  const onDetection = useCallback((d: Detection) => {
-    if (riskOf(d) === 'hazard') setAlert(d)
-  }, [])
-
-  const snapshot = useMissionStream(onDetection)
+  const snapshot = useMissionStream()
 
   return (
     <MissionContext.Provider value={snapshot}>
@@ -32,18 +30,8 @@ export function AppShell() {
           telemetry={snapshot?.telemetry ?? null}
           detections={snapshot?.detections ?? []}
           streamState={snapshot?.streamState ?? 'connecting'}
+          link={snapshot?.link ?? CONNECTING_LINK}
         />
-
-        {alert && (
-          <AlertBanner
-            detection={alert}
-            onDismiss={() => setAlert(null)}
-            onInspect={() => {
-              navigate(`/detections?focus=${alert.id}`)
-              setAlert(null)
-            }}
-          />
-        )}
 
         <div className="flex min-h-0 flex-1">
           <NavRail />

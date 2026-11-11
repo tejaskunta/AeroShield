@@ -1,4 +1,4 @@
-import type { Detection, DetectionClass, LatLng } from '@/types'
+import type { Detection, LatLng } from '@/types'
 import { M_PER_DEG_LAT, cellId, cellOrigin, mPerDegLon, offsetM } from '../geo'
 import { mulberry32 } from '../rng'
 import { BLOCK_H_M, BLOCK_W_M, ELAPSED_AT_LOAD_S, MISSION, MISSION_EPOCH, isoAt } from './mission'
@@ -13,21 +13,28 @@ import { BLOCK_H_M, BLOCK_W_M, ELAPSED_AT_LOAD_S, MISSION, MISSION_EPOCH, isoAt 
 
 /**
  * Detections are seeded at fixed grid cells so the risk heatmap has a stable,
- * believable hazard field to work against. Confidence and class are chosen to
- * exercise every risk level and review state.
+ * believable hazard field to work against. Confidence and review state are chosen to
+ * exercise every risk level.
  *
  * Cells are picked so the hazard field has a genuine cluster (C4/D4/E3) rather than
  * evenly scattered pins any straight line would miss.
  *
  * Capture times stay inside the two-minute manual flight described in `mission.ts`:
- * the last four sit just past `ELAPSED_AT_LOAD_S` and arrive every few seconds — long
- * enough to orient before the first alert fires, short enough that the ping, the
- * ticker, and the alert banner are all observable without waiting around.
+ * the last four sit just past `ELAPSED_AT_LOAD_S` and arrive every few seconds -- long
+ * enough to orient before the first detection lands, short enough to observe without
+ * waiting around.
+ *
+ * There is no class column. The model has one class, so a per-seed class field would
+ * be a fiction the rest of the code would have to keep pretending about. What the
+ * seeds do vary is confidence and review state, which together are the only things
+ * that decide how a detection reads. The reviewed seeds are load-bearing and should
+ * not be removed in a tidy-up: `confirmed` and `dismissed` are the only routes to a
+ * hazard and a cleared pin respectively, so dropping them would leave the demo unable
+ * to show two of its three states.
  */
 interface Seed {
   col: number
   row: number
-  cls: DetectionClass
   confidence: number
   reviewed?: 'confirmed' | 'dismissed' | 'flagged'
   reason?: string
@@ -36,21 +43,21 @@ interface Seed {
 }
 
 const SEEDS: Seed[] = [
-  { col: 1, row: 0, cls: 'landmine_metal', confidence: 0.94, reviewed: 'confirmed', atS: 4 },
-  { col: 2, row: 1, cls: 'landmine_metal', confidence: 0.88, atS: 7 },
-  { col: 1, row: 1, cls: 'debris_negative', confidence: 0.66, atS: 11 },
-  { col: 3, row: 1, cls: 'landmine_plastic', confidence: 0.71, atS: 15 },
-  { col: 4, row: 2, cls: 'landmine_metal', confidence: 0.83, reviewed: 'confirmed', atS: 19 },
-  { col: 5, row: 2, cls: 'landmine_plastic', confidence: 0.52, atS: 23 },
-  { col: 6, row: 2, cls: 'debris_negative', confidence: 0.41, reviewed: 'dismissed', reason: 'Scrap metal, not ordnance', atS: 28 },
-  { col: 5, row: 3, cls: 'landmine_metal', confidence: 0.79, atS: 34 },
-  { col: 4, row: 3, cls: 'landmine_plastic', confidence: 0.34, atS: 41 },
-  { col: 3, row: 3, cls: 'landmine_metal', confidence: 0.91, reviewed: 'flagged', reason: 'Possible cluster — request second pass', atS: 48 },
+  { col: 1, row: 0, confidence: 0.94, reviewed: 'confirmed', atS: 4 },
+  { col: 2, row: 1, confidence: 0.88, atS: 7 },
+  { col: 1, row: 1, confidence: 0.66, atS: 11 },
+  { col: 3, row: 1, confidence: 0.71, atS: 15 },
+  { col: 4, row: 2, confidence: 0.83, reviewed: 'confirmed', atS: 19 },
+  { col: 5, row: 2, confidence: 0.52, atS: 23 },
+  { col: 6, row: 2, confidence: 0.41, reviewed: 'dismissed', reason: 'Scrap metal, not ordnance', atS: 28 },
+  { col: 5, row: 3, confidence: 0.79, atS: 34 },
+  { col: 4, row: 3, confidence: 0.34, atS: 41 },
+  { col: 3, row: 3, confidence: 0.91, reviewed: 'flagged', reason: 'Possible cluster, request second pass', atS: 48 },
   // --- these four arrive live, after load ---
-  { col: 2, row: 4, cls: 'landmine_plastic', confidence: 0.68, atS: 74 },
-  { col: 6, row: 4, cls: 'landmine_metal', confidence: 0.86, atS: 79 },
-  { col: 5, row: 5, cls: 'debris_negative', confidence: 0.28, atS: 84 },
-  { col: 3, row: 5, cls: 'landmine_metal', confidence: 0.77, atS: 89 },
+  { col: 2, row: 4, confidence: 0.68, atS: 74 },
+  { col: 6, row: 4, confidence: 0.86, atS: 79 },
+  { col: 5, row: 5, confidence: 0.28, atS: 84 },
+  { col: 3, row: 5, confidence: 0.77, atS: 89 },
 ]
 
 /**
@@ -109,7 +116,7 @@ function makeDetection(seed: Seed, index: number, rnd: () => number): Detection 
   return {
     id,
     missionId: MISSION.id,
-    class: seed.cls,
+    class: 'landmine',
     confidence: seed.confidence,
     bbox: bboxFor(position, seed.confidence, rnd),
     position,
@@ -122,7 +129,7 @@ function makeDetection(seed: Seed, index: number, rnd: () => number): Detection 
     capturedAt: isoAt(seed.atS - ELAPSED_AT_LOAD_S),
     gridCell: cellId(seed.col, seed.row),
     frameUri: `placeholder:frame/${id}`,
-    gradCamUri: seed.cls === 'debris_negative' ? null : `placeholder:gradcam/${id}`,
+    gradCamUri: `placeholder:gradcam/${id}`,
     review: seed.reviewed
       ? {
           state: seed.reviewed,

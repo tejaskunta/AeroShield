@@ -39,9 +39,9 @@ export function StatTile({
         <span className={`font-display text-readout-lg tabular ${tone}`}>
           {typeof value === 'number' ? <CountUp value={value} decimals={decimals} /> : value}
         </span>
-        {unit && <span className="font-mono text-[11px] text-paper-dim">{unit}</span>}
+        {unit && <span className="font-mono text-small text-paper-dim">{unit}</span>}
       </div>
-      {sub && <p className="mt-1 text-[10px] leading-snug text-paper-faint">{sub}</p>}
+      {sub && <p className="mt-1 text-tiny leading-snug text-paper-faint">{sub}</p>}
     </div>
   )
 }

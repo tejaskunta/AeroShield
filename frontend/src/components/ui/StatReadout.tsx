@@ -31,11 +31,11 @@ export function StatReadout({
     normal: 'text-paper',
     good: 'text-cleared',
     warn: 'text-caution',
-    bad: 'text-hazard',
+    bad: 'text-hazard-lit',
   }[tone]
 
   const sizeClass = {
-    sm: 'text-[15px]',
+    sm: 'text-title',
     md: 'text-readout',
     lg: 'text-readout-lg',
   }[size]
@@ -48,7 +48,7 @@ export function StatReadout({
       </div>
       <div className="mt-0.5 flex items-baseline gap-1">
         <span className={`font-display tabular ${sizeClass} ${toneClass}`}>{value}</span>
-        {unit && <span className="font-mono text-[10px] text-paper-dim">{unit}</span>}
+        {unit && <span className="font-mono text-tiny text-paper-dim">{unit}</span>}
       </div>
     </div>
   )

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Detection, StreamState, Telemetry } from '@/types'
+import type { Detection, LinkStatus, StreamState, Telemetry } from '@/types'
 import {
   fetchLatestTelemetry,
   findMissionByName,
+  isReachable,
   listDetections,
   missionSocketUrl,
   toDetection,
   toLatestTelemetry,
   type BackendDetectionRow,
+  type BackendOutcome,
   type BackendTelemetryLatest,
 } from '@/lib/api'
 import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
@@ -121,6 +123,7 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
    */
   const realTelemetry = useRef<Telemetry | null>(null)
   const realStreamState = useRef<StreamState | null>(null)
+  const realLink = useRef<LinkStatus | null>(null)
   const realDetections = useRef<Detection[]>([])
 
   /**
@@ -143,6 +146,10 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       progress: b.progress,
       streamState: realStreamState.current ?? b.streamState,
       detections: extra.length > 0 ? [...b.detections, ...extra] : b.detections,
+      // Once the backend has said anything at all, its link status wins: the
+      // simulator's own status is a constant that would otherwise mask a dead
+      // socket forever.
+      link: realLink.current ?? b.link,
     }
   })
 
@@ -180,6 +187,62 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
     let socketGaveUp = false
     let polling = false
 
+    /**
+     * Whether the backend has ever proved it is running.
+     *
+     * Starts false and flips on the first response that is not `unreachable`.
+     * One-way on purpose: a single dropped request must not repaint a healthy
+     * console as broken, and the state that matters is whether we have ever had
+     * a conversation, not whether the last packet got through.
+     */
+    let reachable = false
+    /** Set when a probe fails at the network level. Cleared by the next success. */
+    let lastProbeUnreachable = false
+
+    /** The transport currently carrying telemetry. */
+    let transport: LinkStatus['transport'] = 'none'
+
+    /**
+     * Publish the current transport view.
+     *
+     * Called from every place that changes transport, reachability, or attempt
+     * count, so the status rail never has to infer any of it. Cheap: one spread
+     * over the newest simulator frame and a single setState, at most a few times
+     * a second and usually far less.
+     */
+    const publishLink = (): void => {
+      realLink.current = {
+        source: realTelemetry.current ? 'backend' : 'simulator',
+        transport,
+        socketAttempts,
+        socketGaveUp,
+        reachable,
+      }
+      const b = base.current
+      if (b) setSnapshot(compose.current(b))
+    }
+
+    /**
+     * Record one probe result, then republish if it changed anything.
+     *
+     * The status is derived from the probe rather than set directly so there is
+     * exactly one place that decides what an outcome means, and the socket and the
+     * poll cannot drift apart in how they interpret the same failure.
+     *
+     * The `changed` test covers two independent things. Reachability is monotonic
+     * (see `reachable`), so it only fires once. The second term catches a move
+     * between `unreachable` and a backend that answered with an error, because
+     * those two need different words on screen even though neither is healthy.
+     */
+    const noteOutcome = (outcome: BackendOutcome<unknown>): void => {
+      const nowReachable = isReachable(outcome)
+      const nowUnreachable = outcome.outcome === 'unreachable'
+      const changed = nowReachable !== reachable || nowUnreachable !== lastProbeUnreachable
+      reachable = reachable || nowReachable
+      lastProbeUnreachable = nowUnreachable
+      if (changed) publishLink()
+    }
+
     /** When we last managed to read a frame. Null until the first one. */
     let lastAt: number | null = null
     /** Consecutive polls that produced nothing — a mission we should re-resolve. */
@@ -192,7 +255,15 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       lastAt = Date.now()
       realTelemetry.current = telemetry
       realStreamState.current = live ? 'live' : 'stalled'
-      setSnapshot({ ...compose.current(b), telemetry, streamState: realStreamState.current })
+      const link: LinkStatus = {
+        source: 'backend',
+        transport,
+        socketAttempts,
+        socketGaveUp,
+        reachable: true,
+      }
+      realLink.current = link
+      setSnapshot({ ...compose.current(b), telemetry, streamState: realStreamState.current, link })
     }
 
     /**
@@ -209,9 +280,14 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       if (Date.now() - lastAt <= STALE_AFTER_S * 1000) return
       const b = base.current
       if (b) {
-        realStreamState.current = 'stalled'
+        // Which word is right depends on whether the backend itself is answering.
+        // "Stalled" blames the aircraft and "unreachable" blames this machine, and
+        // picking the wrong one sends someone to the wrong end of the radio link.
+        const state: StreamState = reachable ? 'stalled' : 'unreachable'
+        realStreamState.current = state
+        realLink.current = { source: 'backend', transport, socketAttempts, socketGaveUp, reachable }
         // Use compose() so backend detections are merged, not dropped.
-        setSnapshot({ ...compose.current(b), streamState: 'stalled' })
+        setSnapshot({ ...compose.current(b), streamState: state })
       }
     }
 
@@ -259,12 +335,17 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       if (b) setSnapshot(compose.current(b))
     }
 
-    /** Resolve the mission by name, once. Null is normal before the first flight. */
+    /** Resolve the mission by name, once. Absent is normal before the first flight. */
     const resolveMission = async (): Promise<number | null> => {
       if (missionId !== null) return missionId
-      missionId = await findMissionByName(MISSION_NAME)
-      if (missionId !== null) void loadDetections(missionId)
-      return missionId
+      const result = await findMissionByName(MISSION_NAME)
+      noteOutcome(result)
+      if (result.outcome === 'ok') {
+        missionId = result.value
+        void loadDetections(missionId)
+        return missionId
+      }
+      return null
     }
 
     // --- transport (b): polling -----------------------------------------
@@ -272,6 +353,8 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
     const startPolling = (): void => {
       if (polling || cancelled) return
       polling = true
+      transport = 'polling'
+      publishLink()
 
       const tick = async (): Promise<void> => {
         if (polling === false || cancelled) return
@@ -282,20 +365,25 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
           return
         }
 
-        const latest = await fetchLatestTelemetry(id)
+        const result = await fetchLatestTelemetry(id)
+        noteOutcome(result)
         if (cancelled || !polling) return
 
-        if (!latest) {
+        if (result.outcome !== 'ok') {
           misses += 1
           // The mission was deleted out from under us, or the backend restarted
           // onto a fresh database. Re-resolve rather than polling a dead id.
-          if (misses % 10 === 0) missionId = null
+          // `absent` is the only outcome that means the id may be wrong; a
+          // network failure says nothing about the mission's existence, so
+          // re-resolving on it would spend the next tick on the same failure.
+          if (result.outcome === 'absent' && misses % 10 === 0) missionId = null
           return
         }
 
         misses = 0
         // Trust the backend's own freshness verdict first, then our own: the
         // server knows when the row was written, we know when we last read one.
+        const latest = result.value
         const ageS = latest.ageS
         const fresh = latest.live && (ageS === null || ageS <= STALE_AFTER_S)
         apply(latest.telemetry, fresh)
@@ -395,10 +483,16 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
           return
         }
         socketAttempts = 0
+        // A completed handshake is the strongest reachability proof available:
+        // the backend accepted an Upgrade and is holding the connection open.
+        reachable = true
+        lastProbeUnreachable = false
         // The socket sends the current position immediately on connect, so the
         // poll becomes redundant the moment the handshake completes. Stopping it
         // is what makes this a swap rather than a doubling of traffic.
         stopPolling()
+        transport = 'socket'
+        publishLink()
       }
 
       ws.onmessage = onFrame
@@ -421,8 +515,10 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
 
         if (socketAttempts >= SOCKET_MAX_ATTEMPTS) {
           socketGaveUp = true
+          publishLink()
           return
         }
+        publishLink()
         socketRetry = setTimeout(() => void openSocket(), SOCKET_RETRY_MS)
       }
     }

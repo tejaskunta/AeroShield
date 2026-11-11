@@ -21,7 +21,13 @@ export function DroneStatusPanel({ telemetry }: { telemetry: Telemetry | null })
   if (!telemetry) {
     return (
       <Panel title="Drone status" collapsible collapseId="drone-status" icon={Plane}>
-        <p className="text-[11px] text-paper-dim">Waiting for first telemetry frame…</p>
+        <div className="flex flex-col gap-1 py-1">
+          <p className="text-small text-paper-dim">Waiting for the first telemetry frame.</p>
+          <p className="text-tiny leading-snug text-paper-faint">
+            The panel fills in as soon as the aircraft reports a position. If it stays empty,
+            check the stream state in the status bar above.
+          </p>
+        </div>
       </Panel>
     )
   }
@@ -74,11 +80,11 @@ export function DroneStatusPanel({ telemetry }: { telemetry: Telemetry | null })
       <div className="mb-2.5">
         <StatReadout
           label="Battery"
-          value={batteryPct === null ? '—' : <CountUp value={batteryPct} />}
+          value={batteryPct === null ? '--' : <CountUp value={batteryPct} />}
           unit={batteryPct === null ? undefined : '%'}
           tone={batteryTone}
           aside={
-            <span className="font-mono text-[10px] text-paper-faint">
+            <span className="font-mono text-tiny text-paper-faint">
               {batteryVolts === null ? 'not reported' : `${batteryVolts} V`}
             </span>
           }
@@ -97,7 +103,7 @@ export function DroneStatusPanel({ telemetry }: { telemetry: Telemetry | null })
       <div className="grid grid-cols-2 gap-3 py-2.5">
         <StatReadout
           label="Link"
-          value={linkPct === null ? '—' : linkPct}
+          value={linkPct === null ? '--' : linkPct}
           unit={linkPct === null ? undefined : '%'}
           tone={linkTone}
           size="sm"
@@ -113,7 +119,7 @@ export function DroneStatusPanel({ telemetry }: { telemetry: Telemetry | null })
       </div>
 
       {!fixOk && (
-        <p className="mb-2 border border-hazard/50 bg-hazard/10 px-2 py-1 text-[10px] leading-snug text-hazard">
+        <p className="mb-2 border border-hazard/50 bg-hazard/10 px-2 py-1 text-tiny leading-snug text-hazard-lit">
           GPS fix below 3D. Detection positions recorded now will not be reliable.
         </p>
       )}
@@ -137,11 +143,11 @@ export function DroneStatusPanel({ telemetry }: { telemetry: Telemetry | null })
       {/* Position — monospaced, because it gets copied into Mission Planner. */}
       <div className="flex items-center justify-between gap-2 pt-2">
         <span className="eyebrow">Position</span>
-        <span className="font-mono text-[11px] tabular text-paper">{formatLatLng(position)}</span>
+        <span className="font-mono text-small tabular text-paper">{formatLatLng(position)}</span>
       </div>
       <div className="mt-1 flex items-center justify-between gap-2">
         <span className="eyebrow">Satellites</span>
-        <span className="font-mono text-[11px] tabular text-paper">{satellites}</span>
+        <span className="font-mono text-small tabular text-paper">{satellites}</span>
       </div>
     </Panel>
   )

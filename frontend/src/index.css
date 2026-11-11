@@ -20,11 +20,12 @@
   --rule: #2c3a47;
   --rule-bright: #3e5060;
   --paper: #e8e4da;
-  --paper-dim: #8c97a1;
-  --paper-faint: #5c6873;
-  --hazard: #d7262f;
+  --paper-dim: #a9b3bd;
+  --paper-faint: #8a97a2;
+  --hazard: #dc3840;
+  --hazard-lit: #e67277;
   --caution: #c9922c;
-  --cleared: #4e9e86;
+  --cleared: #51a48b;
 }
 
 @layer base {

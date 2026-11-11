@@ -87,10 +87,10 @@ export function ContactSheet({
 
               <div className="p-1.5">
                 <div className="flex items-baseline justify-between gap-1">
-                  <span className="font-mono text-[10px] tracking-[0.04em] text-paper">
+                  <span className="font-mono text-tiny tracking-[0.04em] text-paper">
                     {d.id}
                   </span>
-                  <span className="font-mono text-[10px] text-paper-faint">{d.gridCell}</span>
+                  <span className="font-mono text-tiny text-paper-faint">{d.gridCell}</span>
                 </div>
                 {/* Bare bar, no number — the number is already in the row above at
                     the size it needs. Repeating it here would be noise. */}
@@ -101,7 +101,7 @@ export function ContactSheet({
                       style={{ width: `${Math.min(100, d.confidence * 100)}%` }}
                     />
                   </div>
-                  <span className={`font-mono text-[10px] tabular ${RISK_CLASSES[level].text}`}>
+                  <span className={`font-mono text-tiny tabular ${RISK_CLASSES[level].text}`}>
                     {formatConfidence(d.confidence)}
                   </span>
                 </div>

@@ -24,7 +24,7 @@ export function Badge({
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 border px-1.5 py-px font-mono text-[10px] uppercase leading-4 tracking-[0.08em] ${tone} ${className}`}
+      className={`inline-flex items-center gap-1.5 border px-1.5 py-px font-mono text-tiny uppercase leading-4 tracking-[0.08em] ${tone} ${className}`}
     >
       {risk && <span className={`h-1.5 w-1.5 ${RISK_CLASSES[risk].bg}`} aria-hidden />}
       {children}

@@ -17,17 +17,17 @@ export interface CorpusEntry {
 }
 
 export const SUGGESTED_QUERIES = [
-  'What standoff distance for a suspected metal-cased mine?',
+  'What standoff distance for a suspected mine?',
   'Can I trust a detection at 0.5 confidence?',
   'How should I mark a confirmed hazard for the ground team?',
-  'What does a plastic-cased detection change about clearance?',
+  'What does the detector actually detect?',
 ]
 
 export const COPILOT_CORPUS: CorpusEntry[] = [
   {
-    match: ['standoff', 'distance', 'metal', 'suspected'],
+    match: ['standoff', 'distance', 'suspected', 'radius'],
     answer:
-      'Treat the detection position as the centre of a hazard area, not a point. For a suspected metal-cased anti-personnel mine, hold the ground team outside a 25 m radius until the area is verified, and approach only along a lane cleared from a known-safe start. AeroShield gives you a position estimate with a few metres of error, so the standoff must absorb that error — never walk to the pin.',
+      'Treat the detection position as the centre of a hazard area, not a point. For a suspected anti-personnel mine, hold the ground team outside a 25 m radius until the area is verified, and approach only along a lane cleared from a known-safe start. AeroShield gives you a position estimate with a few metres of error, so the standoff must absorb that error. Never walk to the pin.',
     citations: [
       { id: 'c1', document: 'IMAS 09.10', clause: '7.2 Marking of hazards', page: 14, excerpt: 'A hazardous area shall be treated as extending beyond the located item to account for positional uncertainty and the possibility of additional items.', relevance: 0.91 },
       { id: 'c2', document: 'IMAS 10.20', clause: '5.4 Safety distances', page: 9, excerpt: 'Minimum safety distances shall be established on the basis of the greatest credible threat and maintained until the area is confirmed clear.', relevance: 0.78 },
@@ -36,7 +36,7 @@ export const COPILOT_CORPUS: CorpusEntry[] = [
   {
     match: ['trust', '0.5', 'confidence', 'low'],
     answer:
-      'No — a 0.5-confidence detection is not a clearance decision either way. AeroShield treats anything below 0.75 as unverified: it is filed and shown, but it does not confirm a hazard, and it certainly does not clear the ground. A low-confidence hit is a reason for a human to look at the frame and the Grad-CAM, not a reason to dismiss it. Confidence is a triage signal, not a verdict.',
+      'No. A 0.5-confidence detection is not a clearance decision either way. AeroShield treats anything below 0.75 as unverified: it is filed and shown, but it does not confirm a hazard, and it certainly does not clear the ground. A low-confidence hit is a reason for a human to look at the frame and the Grad-CAM, not a reason to dismiss it. Confidence is a triage signal, not a verdict.',
     citations: [
       { id: 'c3', document: 'AeroShield Ops Note', clause: '3.1 Confidence bands', page: 3, excerpt: 'Detections below the review threshold are retained for human adjudication and never auto-dismissed; the model reports likelihood, not ground truth.', relevance: 0.86 },
     ],
@@ -51,23 +51,23 @@ export const COPILOT_CORPUS: CorpusEntry[] = [
     ],
   },
   {
-    match: ['plastic', 'clearance', 'change', 'cased'],
+    match: ['detect', 'detector', 'class', 'classes', 'model', 'cased', 'plastic', 'metal'],
     answer:
-      'A plastic-cased detection matters most for what comes after AeroShield: minimal-metal mines defeat metal detectors, so the ground clearance method may need to change (prodding, dual-sensor, or GPR rather than metal detector alone). It does not change your immediate action — you still stand off and mark — but flag the case type in the report so the clearance team plans for a low-metal target.',
+      'One thing: whether the frame contains at least one landmine, reported as a confidence between 0 and 1. The model has a single class, so it cannot tell you the casing, the metal content, the pattern, or the variant, and it does not estimate depth or blast radius. Those are an EOD assessment from the frame and the ground, not a model output. Treat every detection as an unidentified suspect that needs human adjudication.',
     citations: [
-      { id: 'c6', document: 'IMAS 09.10', clause: '4.3 Detection methods', page: 8, excerpt: 'Where minimum-metal items are suspected, detection and clearance drills shall not rely solely on metal detection.', relevance: 0.89 },
+      { id: 'c6', document: 'AeroShield Ops Note', clause: '2.4 Single-class output', page: 2, excerpt: 'The detector emits one class, landmine, with a confidence score. Case type and threat classification are outside the model scope and remain the responsibility of the EOD operator.', relevance: 0.93 },
     ],
   },
 ]
 
 /** Answer shown when nothing in the corpus matches — grounded: false. */
 export const UNGROUNDED_REPLY =
-  'I don\'t have a sourced answer for that in the loaded standards set. Rather than guess — which is dangerous in this domain — treat this as unanswered and consult your technical field manual or EOD lead. (This copilot is a foundation running on a small fixed corpus, not live retrieval.)'
+  'I don\'t have a sourced answer for that in the loaded standards set. Rather than guess, which is dangerous in this domain, treat this as unanswered and consult your technical field manual or EOD lead. (This copilot is a foundation running on a small fixed corpus, not live retrieval.)'
 
 export const COPILOT_INTRO: CopilotMessage = {
   id: 'intro',
   role: 'copilot',
-  text: 'Safety copilot ready. I answer from the loaded demining standards and cite every source. I support decisions — I do not authorise clearance. Ask a field question, or pick one below.',
+  text: 'Safety copilot ready. I answer from the loaded demining standards and cite every source. I support decisions. I do not authorise clearance. Ask a field question, or pick one below.',
   at: isoAt(0),
   grounded: true,
 }
