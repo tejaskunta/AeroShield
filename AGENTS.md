@@ -53,3 +53,17 @@ The drone tags telemetry with `--mission-name` (from `make MISSION`), the fronte
 - Root (jetson + scripts): `make test-local`, or `.venv312/bin/python -m pytest -q` → 119 passed.
 - Frontend: `cd frontend && npm test`. This runs **Node's built-in test runner** (`node --experimental-strip-types --import ./scripts/register.mjs --test src/lib/*.test.ts`). There is no vitest and no jest — `npx vitest` will hang forever on an install prompt.
 - Frontend build/typecheck: `cd frontend && npm run build` (runs `tsc --noEmit && vite build`).
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues on `tejaskunta/AeroShield`, driven by the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles map to the default label strings (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
