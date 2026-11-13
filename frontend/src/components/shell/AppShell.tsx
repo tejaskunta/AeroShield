@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { CONNECTING_LINK } from '@/types'
 import { useMissionStream } from '@/hooks/useMissionStream'
 import { NavRail } from './NavRail'
@@ -19,22 +19,32 @@ import { MissionContext } from './missionContext'
  * -- the red tally in this rail, the red pins, the hazard stat tile -- so the
  * banner added no information, only an interruption and a click. Interruptions are
  * how a real hazard gets missed.
+ *
+ * The launch screen is the one place the console chrome is withheld. It is a
+ * pre-flight checklist for a mission that has not started, so a status rail
+ * reporting live telemetry and a nav rail offering four screens would be offering
+ * controls over nothing. The stream is still subscribed here -- that is the whole
+ * point of this component -- so launching is a route change, not a reconnect.
  */
 export function AppShell() {
   const snapshot = useMissionStream()
+  const { pathname } = useLocation()
+  const isLaunchScreen = pathname === '/start'
 
   return (
     <MissionContext.Provider value={snapshot}>
       <div className="flex h-full flex-col overflow-hidden bg-ink">
-        <StatusRail
-          telemetry={snapshot?.telemetry ?? null}
-          detections={snapshot?.detections ?? []}
-          streamState={snapshot?.streamState ?? 'connecting'}
-          link={snapshot?.link ?? CONNECTING_LINK}
-        />
+        {!isLaunchScreen && (
+          <StatusRail
+            telemetry={snapshot?.telemetry ?? null}
+            detections={snapshot?.detections ?? []}
+            streamState={snapshot?.streamState ?? 'connecting'}
+            link={snapshot?.link ?? CONNECTING_LINK}
+          />
+        )}
 
         <div className="flex min-h-0 flex-1">
-          <NavRail />
+          {!isLaunchScreen && <NavRail />}
           <main className="min-w-0 flex-1 overflow-hidden">
             <Outlet />
           </main>
