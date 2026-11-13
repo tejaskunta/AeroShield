@@ -1,0 +1,47 @@
+# AeroShield - Jetson Nano runtime requirements (Week 4 on-drone stack).
+#
+# THIS FILE IS FOR THE NANO ONLY. Do not install it on the training PC, and do
+# not install the repo-root requirements.txt on the Nano - see jetson/README.md
+# for the full explanation.
+#
+#   pip3 install -r jetson/requirements-nano.txt
+#
+# WHY THE PINS ARE HARD, NOT CAUTIOUS:
+# The Jetson Nano P3450 is NVIDIA-EOL'd at JetPack 4.6 = Ubuntu 18.04 = Python
+# 3.6.9. `python3-libnvinfer` and `python3-opencv` are apt packages built against
+# that system interpreter, so you cannot escape 3.6 by installing a newer Python
+# without also losing TensorRT and OpenCV. Every version below is the last release
+# that still publishes a Python 3.6 wheel. Unpinned `pip3 install` picks a modern
+# release, fails on `python_requires`, and burns the week PRD section 10 warns about.
+#
+# Install these with apt where JetPack already provides them - the apt builds are
+# CUDA-aware and the pip builds are not:
+#
+#   sudo apt-get install -y python3-libnvinfer python3-opencv python3-pip
+#
+# Then this file covers only what apt does not ship.
+
+# --- MAVLink telemetry: the GPS half of Week 4 -------------------------------
+# Reads GLOBAL_POSITION_INT and GPS_RAW_INT off the Pixhawk (PRD section 8).
+# PRD section 7 rules out DroneKit (unmaintained); pymavlink is the low-level
+# option named there. 2.4.x is the last line with 3.6 wheels.
+pymavlink>=2.4.20,<2.5.0
+
+# --- HTTP uplink to the FastAPI backend --------------------------------------
+# 2.27.1 is the final release supporting Python 3.6.
+requests>=2.25.0,<2.28.0
+
+# --- numeric ------------------------------------------------------------------
+# 1.19.5 is the last numpy with 3.6 wheels. If JetPack's apt numpy is already
+# present, leave it alone - `pip3 install numpy` on top of it is a common way to
+# end up with two numpys and an ImportError inside cv2.
+numpy>=1.19.0,<1.20.0
+
+# --- also required, but install via apt, not pip -----------------------------
+# pycuda        : pip3 install pycuda   (needs CUDA on PATH; see jetson/README.md)
+# tensorrt      : sudo apt-get install python3-libnvinfer
+# cv2           : sudo apt-get install python3-opencv
+#
+# NOT installable here, by design:
+# ultralytics   : needs Python >= 3.8. This is the entire reason infer_trt.py
+#                 uses raw TensorRT instead. Use --detector trt on the Nano.

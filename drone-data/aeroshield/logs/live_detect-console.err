@@ -1,0 +1,28 @@
+[ WARN:0] global /home/nvidia/host/build_opencv/nv_opencv/modules/videoio/src/cap_gstreamer.cpp (933) open OpenCV | GStreamer warning: Cannot query video position: status=0, value=-1, duration=-1
+Traceback (most recent call last):
+  File "/home/kmit/.local/lib/python3.6/site-packages/serial/serialposix.py", line 322, in open
+    self.fd = os.open(self.portstr, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+FileNotFoundError: [Errno 2] No such file or directory: '/dev/ttyACM0'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "jetson/live_detect.py", line 958, in <module>
+    sys.exit(main())
+  File "jetson/live_detect.py", line 659, in main
+    gps.start()
+  File "/home/kmit/aeroshield/jetson/gps.py", line 362, in start
+    self._conn = mavutil.mavlink_connection(device, baud=baud)
+  File "/home/kmit/.local/lib/python3.6/site-packages/pymavlink/mavutil.py", line 1955, in mavlink_connection
+    force_connected=force_connected)
+  File "/home/kmit/.local/lib/python3.6/site-packages/pymavlink/mavutil.py", line 972, in __init__
+    raise e
+  File "/home/kmit/.local/lib/python3.6/site-packages/pymavlink/mavutil.py", line 969, in __init__
+    dsrdtr=False, rtscts=False, xonxoff=False)
+  File "/home/kmit/.local/lib/python3.6/site-packages/serial/serialutil.py", line 244, in __init__
+    self.open()
+  File "/home/kmit/.local/lib/python3.6/site-packages/serial/serialposix.py", line 325, in open
+    raise SerialException(msg.errno, "could not open port {}: {}".format(self._port, msg))
+serial.serialutil.SerialException: [Errno 2] could not open port /dev/ttyACM0: [Errno 2] No such file or directory: '/dev/ttyACM0'
+[ WARN:0] global /home/nvidia/host/build_opencv/nv_opencv/modules/videoio/src/cap_gstreamer.cpp (933) open OpenCV | GStreamer warning: Cannot query video position: status=0, value=-1, duration=-1
+[uplink] mission registration failed (HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/missions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f53094940>: Failed to establish a new connection: [Errno 111] Connection refused',))); running in spool-only mode
