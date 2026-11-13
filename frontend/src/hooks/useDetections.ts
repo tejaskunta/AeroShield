@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { Detection, ReviewState } from '@/types'
 import { simulator } from '@/lib/simulation'
+import { reviewOverrides } from '@/lib/reviewOverrides'
 import { saveReview } from '@/lib/api'
 import { riskOf } from '@/lib/risk'
 
@@ -47,7 +48,16 @@ export function useDetections(detections: Detection[]) {
         reviewedBy: 'operator',
       }
       // Update the shared mission immediately; every subscriber re-renders.
+      //
+      // Two writes, because the two sources are held differently. The simulator
+      // owns its seeded rows and re-emits, so `reviewDetection` is enough for
+      // those. It holds NOTHING for a backend row -- that list lives in a ref
+      // inside `useMissionStream` and is re-composed from the server's copy on
+      // every tick, so a decision recorded only here would be reverted within
+      // half a second. `reviewOverrides` is applied at the end of that compose,
+      // which is the only place that covers both sources.
       simulator.reviewDetection(id, record)
+      reviewOverrides.record(id, record)
 
       // Resolve provenance from the row we are actually reviewing. A simulated
       // id can collide with a real primary key after parsing (fixtures are
