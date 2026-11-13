@@ -5,6 +5,7 @@ import {
   MAPBOX_STYLE_SATELLITE,
   MAPBOX_TILE_SIZE,
   MAPBOX_TOKEN,
+  RASTER_MAX_ZOOM,
 } from '@/lib/config'
 import type { Basemap } from './LiveMap'
 
@@ -63,15 +64,31 @@ type MapsApi = typeof google.maps
  * Maps API to have loaded, and because the two types must be registered on the
  * specific map instance that will use them.
  *
- * Returns an empty map when no token is configured, which is the signal to leave the
- * built-in Google types in place — the console then behaves exactly as it did before
- * this module existed, rather than failing.
+ * Returns an empty map when no token is configured. The built-in Google types are
+ * then left in place, which is a real behavioural change and not merely a missing
+ * optimisation: `BASEMAP_CEILINGS` falls to `RASTER_MAX_ZOOM`, so the imagery stops
+ * at zoom 20 and the ground scale is a quarter of what the configured map reaches.
+ *
+ * That fallback used to be silent, and it is the reason two machines on the same
+ * commit can show visibly different maps — `VITE_MAPBOX_TOKEN` arrives through the
+ * gitignored `frontend/.env.local`, so a fresh clone or a second laptop has none.
+ * `ImageryUnconfigured` in `LiveMap.tsx` now states it on screen. Print it to the
+ * console as well, because the person reading a bug report is usually not the person
+ * looking at the map.
  */
 export function mapboxImageryTypes(
   maps: MapsApi,
 ): globalThis.Map<string, google.maps.MapType> {
   const types = new globalThis.Map<string, google.maps.MapType>()
-  if (!HAS_MAPBOX_TOKEN) return types
+  if (!HAS_MAPBOX_TOKEN) {
+    // eslint-disable-next-line no-console
+    console.info(
+      '[map] VITE_MAPBOX_TOKEN is unset — imagery falls back to Google and caps at ' +
+        `zoom ${RASTER_MAX_ZOOM} instead of ${MAPBOX_MAX_ZOOM}. Set it in ` +
+        'frontend/.env.local to enable the deep-zoom imagery.',
+    )
+    return types
+  }
 
   const build = (style: string, name: string) =>
     new maps.ImageMapType({
