@@ -134,18 +134,30 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
    * the first one to forget silently drops the drone's finds off the map.
    *
    * Detections are **appended and de-duplicated by id**, not substituted. The
-   * simulator's seeded block stays so the keyless demo still has material to show;
-   * a backend row with the same id would win the `seen` check only if it arrived
-   * first, and real ids (`D-0491`) cannot collide with seeded ones (`D-0101`).
+   * simulator's seeded block stays so the keyless demo still has material to show.
+   *
+   * De-duplication resolves in favour of the *real* row. This matters because the
+   * two id spaces overlap: fixtures are `D-0101`..`D-0113` (built as
+   * `${index + 101}`) and real ids are the integer PK, so a fixture id can name a
+   * row that exists. Resolving the other way — checking the simulator's frame
+   * first — would let a synthetic seed hide a genuine detection, which reads on
+   * screen as the drone having found nothing there.
+   *
+   * That the live missions' PKs happen to start above 113 is not a guarantee, it
+   * is luck of the sequence: a fresh database whose first detection is PK 101
+   * would collide on the very first find. So the real row wins by construction,
+   * not by PK range. (The write path is guarded separately, in `saveReview` —
+   * between the two, a fixture can neither hide a real row nor write to one.)
    */
   const compose = useRef((b: MissionSnapshot): MissionSnapshot => {
-    const seen = new Set(b.detections.map((d) => d.id))
-    const extra = realDetections.current.filter((d) => !seen.has(d.id))
+    const real = realDetections.current
+    const realIds = new Set(real.map((d) => d.id))
+    const seeds = b.detections.filter((d) => !realIds.has(d.id))
     return {
       telemetry: realTelemetry.current ?? b.telemetry,
       progress: b.progress,
       streamState: realStreamState.current ?? b.streamState,
-      detections: extra.length > 0 ? [...b.detections, ...extra] : b.detections,
+      detections: real.length > 0 ? [...seeds, ...real] : b.detections,
       // Once the backend has said anything at all, its link status wins: the
       // simulator's own status is a constant that would otherwise mask a dead
       // socket forever.

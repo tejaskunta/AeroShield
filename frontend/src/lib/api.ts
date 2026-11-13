@@ -8,6 +8,7 @@ import type {
   Telemetry,
 } from '@/types'
 import { COPILOT_CORPUS, REPORTS, UNGROUNDED_REPLY } from './mockData'
+import { canPersistReview, toIntId } from './detectionId'
 
 /**
  * The API seam.
@@ -111,15 +112,10 @@ export async function checkHealth(): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 /**
- * The UI addresses detections as `D-0147` (short enough to read over radio); the
- * backend stores an integer PK. Parse one back out, or null for anything that is
- * not a real detection id — simulated rows keep living in the simulator and their
- * review decisions keep living in memory, which is the honest state of things.
+ * The parse and the write-eligibility rule both live in `lib/detectionId.ts`, so
+ * the rule is testable and cannot be relaxed by accident at a call site. See that
+ * module for why an id alone is not enough to decide whether a write is safe.
  */
-function toIntId(id: string): number | null {
-  const m = /^D-(\d+)$/.exec(id)
-  return m ? Number(m[1]) : null
-}
 
 /** Coerce a nullable backend number to the number the report types expect. */
 function num(v: number | null | undefined, fallback = 0): number {
@@ -147,11 +143,24 @@ interface BackendDetectionRead {
  * trail actually says. A simulated id, a missing key, or a rejecting backend all
  * resolve { persisted: false } — the hook then keeps the in-memory decision and
  * marks it "not persisted", exactly as designed.
+ *
+ * `source` is required, and a non-backend row stops at `canPersistReview` before
+ * any request is made. Without that guard the call is not merely pointless, it is
+ * *wrong*: the fixtures' display ids (`D-0101`..) parse to real primary keys, and
+ * this endpoint resolves a row by PK with no mission in the path, so adjudicating
+ * a synthetic row would PATCH a genuine detection on another mission. The full
+ * reasoning is in `lib/detectionId.ts`, which owns the rule.
  */
 export async function saveReview(
   id: string,
   review: Detection['review'],
+  source: Detection['source'],
 ): Promise<{ persisted: boolean; record?: Detection['review'] }> {
+  // A synthetic detection has no row to write to. Its review is real to the
+  // operator and must keep working in memory; it just must not be persisted to
+  // somebody else's record.
+  if (!canPersistReview(id, source)) return { persisted: false }
+
   const numericId = DASHBOARD_KEY ? toIntId(id) : null
   if (numericId === null) return { persisted: false }
 
