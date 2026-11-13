@@ -52,6 +52,8 @@ type FeedState = 'idle' | 'loading' | 'live' | 'offline'
 /** How the picture is presented. Not a size setting — three different jobs. */
 type DisplayMode = 'normal' | 'docked' | 'full'
 
+export type { DisplayMode as LiveFeedDisplayMode }
+
 /** How long to wait for a first frame before calling it offline. */
 const CONNECT_TIMEOUT_MS = 12_000
 
@@ -77,10 +79,35 @@ export function LiveFeed({
    * set aside a column for the camera is not asking for a picture-in-picture.
    */
   docked = false,
+  /**
+   * Override the docked column's width, in pixels.
+   *
+   * Omitted means the `w-camera` clamp decides, which is the resting layout. The
+   * value comes from the drag divider (`SplitHandle`), which is why it is a pixel
+   * count rather than a class: the operator chose that measurement and it must
+   * survive a re-render unchanged, not be re-derived from a viewport percentage.
+   *
+   * Applied as a custom property, not `style={{ width }}` — the docked root is
+   * `w-full` below `lg`, where the panes stack and there is no column to size.
+   * A plain inline width would override that and leave a 384px-wide feed sitting
+   * in a full-width stack on a phone.
+   */
+  widthPx,
+  /**
+   * Reports which view the operator has selected.
+   *
+   * Mission Control needs this: the drag divider may only be rendered while the
+   * feed is actually a column beside the map. In `Pip` the feed is absolutely
+   * positioned and the map owns the full row, so a divider would be a 6px band
+   * with nothing on its right that resizes nothing when dragged.
+   */
+  onDisplayModeChange,
 }: {
   defaultOpen?: boolean
   detectorRunning?: boolean
   docked?: boolean
+  widthPx?: number
+  onDisplayModeChange?: (mode: DisplayMode) => void
 }) {
   // Remembered across reloads: an operator who hid the camera to clear the map
   // should not have it reappear every time the console is refreshed.
@@ -163,6 +190,34 @@ export function LiveFeed({
     return () => window.removeEventListener('keydown', onKey)
   }, [mode, docked])
 
+  /**
+   * Tell the caller which view is selected, so it can place the drag divider.
+   *
+   * Reported rather than lifted: the mode is the feed's own business — it is the
+   * thing whose DOM changes — and asking the parent to hold it would mean the
+   * parent re-rendering the map whenever the operator toggles the camera, which
+   * is the kind of coupling the comment above is about avoiding.
+   */
+  useEffect(() => {
+    onDisplayModeChange?.(mode)
+  }, [mode, onDisplayModeChange])
+
+  /**
+   * The column width, as a custom property plus a class that reads it.
+   *
+   * Only one of the two is ever emitted. `var(--feed-width)` with nothing set is
+   * invalid at computed-value time, and `width` is not inherited, so it would
+   * resolve to `auto` — a docked column that silently collapses instead of
+   * falling back to the clamp. Selecting the class by the same condition as the
+   * property is what keeps that impossible.
+   */
+  const widthStyle =
+    widthPx === undefined
+      ? undefined
+      : ({ '--feed-width': `${widthPx}px` } as React.CSSProperties)
+  const dockedWidthClass =
+    widthPx === undefined ? 'lg:w-camera' : 'lg:[width:var(--feed-width)]'
+
   if (!HAS_JETSON_STREAM) return null
 
   if (!open) {
@@ -173,9 +228,10 @@ export function LiveFeed({
      */
     return (
       <div
+        style={widthStyle}
         className={
           docked
-            ? 'flex min-h-[260px] w-full shrink-0 items-center justify-center border-t border-rule bg-ink-deep/92 lg:min-h-0 lg:w-camera lg:border-l lg:border-t-0'
+            ? `flex min-h-[260px] w-full shrink-0 items-center justify-center border-t border-rule bg-ink-deep/92 lg:min-h-0 lg:border-l lg:border-t-0 ${dockedWidthClass}`
             : 'pointer-events-auto absolute bottom-3 left-3 z-[520]'
         }
       >
@@ -223,10 +279,14 @@ export function LiveFeed({
               //
               // The width is `w-camera` — a clamp, not a percentage. See the token:
               // a percentage here resolved against the whole flex row (dock
-              // included) and left the map 50px wider than the camera.
-              'flex min-h-[260px] w-full shrink-0 flex-col border-t border-rule bg-ink-deep lg:min-h-0 lg:w-camera lg:border-l lg:border-t-0'
+              // included) and left the map 50px wider than the camera. It is
+              // replaced by an explicit pixel width when the operator has dragged
+              // the divider, which is the only case where the column should not
+              // simply take what the clamp would give it.
+              `flex min-h-[260px] w-full shrink-0 flex-col border-t border-rule bg-ink-deep lg:min-h-0 lg:border-l lg:border-t-0 ${dockedWidthClass}`
             : 'pointer-events-auto absolute bottom-3 left-3 z-[520] w-[320px] animate-rise-in border border-rule-bright bg-ink-deep/94 backdrop-blur-sm'
       }
+      style={widthStyle}
     >
       {/* Status strip — the honest header. */}
       <div className="flex items-center justify-between gap-2 border-b border-rule px-2 py-1">
