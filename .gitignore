@@ -90,3 +90,4 @@ jetson/logs/
 # Uploaded detection frames. Thousands of JPEGs per mission.
 backend/storage/
 
+.playwright-mcp/

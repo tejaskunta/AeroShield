@@ -13,6 +13,8 @@ import {
   type BackendTelemetryLatest,
 } from '@/lib/api'
 import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
+import { mergeDetections } from '@/lib/mergeDetections'
+import { reviewOverrides } from '@/lib/reviewOverrides'
 import { simulator, type MissionSnapshot } from '@/lib/simulation'
 
 /**
@@ -133,19 +135,30 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
    * one of those call sites has to remember to carry `realDetections` forward and
    * the first one to forget silently drops the drone's finds off the map.
    *
-   * Detections are **appended and de-duplicated by id**, not substituted. The
-   * simulator's seeded block stays so the keyless demo still has material to show;
-   * a backend row with the same id would win the `seen` check only if it arrived
-   * first, and real ids (`D-0491`) cannot collide with seeded ones (`D-0101`).
+   * Detections are **replaced, not appended**, once a live mission is configured.
+   * The simulator's seeded block is a keyless-demo fallback: its rows are invented
+   * fixtures whose frames are `placeholder:frame/...`, and three carry a pre-baked
+   * review verdict. Mixing those into a live feed would put synthetic landmines
+   * beside real ones with nothing on screen to tell them apart — and because they
+   * were appended first they were also what a reviewer saw at the top of the
+   * contact sheet. `mergeDetections` owns that decision and its tests.
+   *
+   * De-duplication of the *real* rows happens at admission (`addDetection`), not
+   * here: the same row legitimately arrives twice (initial load, socket snapshot,
+   * reconnect replay) and is filtered by id there.
    */
   const compose = useRef((b: MissionSnapshot): MissionSnapshot => {
-    const seen = new Set(b.detections.map((d) => d.id))
-    const extra = realDetections.current.filter((d) => !seen.has(d.id))
     return {
       telemetry: realTelemetry.current ?? b.telemetry,
       progress: b.progress,
       streamState: realStreamState.current ?? b.streamState,
-      detections: extra.length > 0 ? [...b.detections, ...extra] : b.detections,
+      // Review decisions are overlaid last, after the merge, because neither feed
+      // owns them: the simulator only knows its seeds, and the backend re-sends
+      // its rows with whatever review it had at write time. Applying them here
+      // means a decision survives every subsequent tick from either source.
+      detections: reviewOverrides.apply(
+        mergeDetections(b.detections, realDetections.current, HAS_LIVE_MISSION),
+      ),
       // Once the backend has said anything at all, its link status wins: the
       // simulator's own status is a constant that would otherwise mask a dead
       // socket forever.

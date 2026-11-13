@@ -316,7 +316,12 @@ export function LiveMap({
         </div>
         {import.meta.env.DEV && view && <ScaleReadout view={view} />}
         {!legible && <ScaleWarning />}
+        {/* Which provider is serving this imagery, and at what ceiling. Exactly one
+            of these renders: the credit when Mapbox has the token, and an explicit
+            notice when the imagery key is absent — because that fallback is silent
+            otherwise, and it costs three quarters of the ground scale. */}
         <ImageryAttribution basemap={basemap} />
+        <ImageryUnconfigured basemap={basemap} />
       </div>
     </div>
   )
@@ -484,6 +489,39 @@ function ImageryAttribution({ basemap }: { basemap: Basemap }) {
       >
         OpenStreetMap
       </a>
+    </div>
+  )
+}
+
+/**
+ * Says in the interface that the deep-zoom imagery is not loaded, and why.
+ *
+ * This exists because the fallback was **silent**, and silent is the wrong shape for
+ * this failure. With no `VITE_MAPBOX_TOKEN` set, `mapboxTypeIdFor` returns `null`,
+ * `BASEMAP_CEILINGS` drops to `RASTER_MAX_ZOOM`, and the map quietly serves Google's
+ * built-in imagery capped at zoom 20 — 7.0 px/m where the configured map gives 28.1,
+ * a quarter of the scale. Nothing says so. The basemap buttons are unchanged, no
+ * error appears, and the only visible difference is that the map looks coarser and
+ * will not zoom as far.
+ *
+ * That is not hypothetical: the token is supplied through `frontend/.env.local`, which
+ * is gitignored, so a fresh clone or a second machine is guaranteed to start without
+ * one. The result is two people looking at the same commit and describing different
+ * maps — one seeing 512x512 `@2x` tiles at zoom 22, the other a soft zoom-20 raster
+ * that reads as "Google's own map", because at that point it *is* Google's own map.
+ *
+ * Stated as a configuration notice rather than an error, because nothing is broken:
+ * the console is working exactly as designed for a deployment with no imagery key.
+ * Where it sits is deliberate too — the bottom-left corner is the attribution slot,
+ * and the question "which provider is serving these tiles" is what both elements
+ * answer, so exactly one of them renders.
+ */
+function ImageryUnconfigured({ basemap }: { basemap: Basemap }) {
+  if (HAS_MAPBOX_TOKEN || basemap === 'roadmap') return null
+  return (
+    <div className="pointer-events-none absolute bottom-2 left-2 border border-caution/60 bg-ink-deep/90 px-2 py-1 font-mono text-tiny text-paper-dim backdrop-blur-sm">
+      Imagery: Google, capped at z{RASTER_MAX_ZOOM}. Set VITE_MAPBOX_TOKEN in
+      frontend/.env.local for the deep-zoom imagery
     </div>
   )
 }
