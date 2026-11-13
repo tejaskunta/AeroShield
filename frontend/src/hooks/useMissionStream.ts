@@ -13,6 +13,7 @@ import {
   type BackendTelemetryLatest,
 } from '@/lib/api'
 import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
+import { mergeDetections } from '@/lib/mergeDetections'
 import { reviewOverrides } from '@/lib/reviewOverrides'
 import { simulator, type MissionSnapshot } from '@/lib/simulation'
 
@@ -134,26 +135,19 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
    * one of those call sites has to remember to carry `realDetections` forward and
    * the first one to forget silently drops the drone's finds off the map.
    *
-   * Detections are **appended and de-duplicated by id**, not substituted. The
-   * simulator's seeded block stays so the keyless demo still has material to show.
+   * Detections are **replaced, not appended**, once a live mission is configured.
+   * The simulator's seeded block is a keyless-demo fallback: its rows are invented
+   * fixtures whose frames are `placeholder:frame/...`, and three carry a pre-baked
+   * review verdict. Mixing those into a live feed would put synthetic landmines
+   * beside real ones with nothing on screen to tell them apart — and because they
+   * were appended first they were also what a reviewer saw at the top of the
+   * contact sheet. `mergeDetections` owns that decision and its tests.
    *
-   * De-duplication resolves in favour of the *real* row. This matters because the
-   * two id spaces overlap: fixtures are `D-0101`..`D-0113` (built as
-   * `${index + 101}`) and real ids are the integer PK, so a fixture id can name a
-   * row that exists. Resolving the other way — checking the simulator's frame
-   * first — would let a synthetic seed hide a genuine detection, which reads on
-   * screen as the drone having found nothing there.
-   *
-   * That the live missions' PKs happen to start above 113 is not a guarantee, it
-   * is luck of the sequence: a fresh database whose first detection is PK 101
-   * would collide on the very first find. So the real row wins by construction,
-   * not by PK range. (The write path is guarded separately, in `saveReview` —
-   * between the two, a fixture can neither hide a real row nor write to one.)
+   * De-duplication of the *real* rows happens at admission (`addDetection`), not
+   * here: the same row legitimately arrives twice (initial load, socket snapshot,
+   * reconnect replay) and is filtered by id there.
    */
   const compose = useRef((b: MissionSnapshot): MissionSnapshot => {
-    const real = realDetections.current
-    const realIds = new Set(real.map((d) => d.id))
-    const seeds = b.detections.filter((d) => !realIds.has(d.id))
     return {
       telemetry: realTelemetry.current ?? b.telemetry,
       progress: b.progress,
@@ -163,7 +157,7 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       // its rows with whatever review it had at write time. Applying them here
       // means a decision survives every subsequent tick from either source.
       detections: reviewOverrides.apply(
-        real.length > 0 ? [...seeds, ...real] : b.detections,
+        mergeDetections(b.detections, realDetections.current, HAS_LIVE_MISSION),
       ),
       // Once the backend has said anything at all, its link status wins: the
       // simulator's own status is a constant that would otherwise mask a dead
