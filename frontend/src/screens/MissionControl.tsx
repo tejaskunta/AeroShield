@@ -1,12 +1,21 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { LatLng } from '@/types'
 import { useMission } from '@/components/shell/missionContext'
 import { useDetections } from '@/hooks/useDetections'
+import { usePersistedState } from '@/hooks/usePersistedState'
 import { HAS_JETSON_STREAM } from '@/lib/config'
+import {
+  DEFAULT_CAMERA_PX,
+  clampCameraWidth,
+  isCameraWidth,
+  maxCameraWidth,
+} from '@/lib/splitPane'
 import { LiveMap } from '@/components/map/LiveMap'
 import { DetectionCallout } from '@/components/mission/DetectionCallout'
 import { LiveFeed } from '@/components/mission/LiveFeed'
+import type { LiveFeedDisplayMode } from '@/components/mission/LiveFeed'
+import { SplitHandle } from '@/components/mission/SplitHandle'
 import { DroneStatusPanel } from '@/components/mission/DroneStatusPanel'
 import { CoveragePanel } from '@/components/mission/CoveragePanel'
 
@@ -92,6 +101,85 @@ export function MissionControl() {
     [select],
   )
 
+  /*
+   * The map / camera split.
+   *
+   * The camera used to be a fixed clamp and the map took the rest, which meant the
+   * one ratio was decided by a CSS expression that could not see the map. That is
+   * wrong when the two views trade places in importance: reading a suspicious patch
+   * of ground wants a wide picture and a small map, and walking the aircraft between
+   * two pins wants the opposite. So the ratio is the operator's, and it persists
+   * because re-dragging it on every reload would be a chore rather than a control.
+   *
+   * `usePersistedState` is the right home for it — its documented scope is exactly
+   * "UI layout state only", and this is the width of a column.
+   */
+  const [cameraWidth, setCameraWidth] = usePersistedState(
+    'camera-width',
+    DEFAULT_CAMERA_PX,
+    isCameraWidth,
+  )
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const [rowWidth, setRowWidth] = useState(0)
+  const [dockWidth, setDockWidth] = useState(0)
+
+  /*
+   * Measure the row and the dock, rather than deriving them from the viewport.
+   *
+   * `maxCameraWidth` has to know what the map can actually spare, and the honest
+   * inputs are the two element widths either side of the divider. `window.innerWidth`
+   * would have to subtract a nav rail width that lives in another component and in
+   * CSS — a number that would drift out of step the first time the shell changes.
+   *
+   * `ResizeObserver` fires once on observe with the current size, so this settles on
+   * mount without a separate initial `getBoundingClientRect`.
+   */
+  useEffect(() => {
+    const row = rowRef.current
+    if (!row || typeof ResizeObserver === 'undefined') return
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const target = entry.target as HTMLElement
+        // `borderBoxSize` includes the dock's padding, which is what the flex row
+        // actually lays out; `contentRect` would under-report it by 16px.
+        const width = entry.borderBoxSize?.[0]?.inlineSize ?? target.offsetWidth
+        if (target === row) setRowWidth(width)
+        else setDockWidth(width)
+      }
+    })
+
+    observer.observe(row)
+    // The dock is optional in the tree only in principle — it is always rendered —
+    // but it is queried rather than held in a ref so the observer cannot be wired
+    // to a stale node if the panel list ever changes.
+    const dock = row.querySelector('aside')
+    if (dock) observer.observe(dock)
+
+    return () => observer.disconnect()
+  }, [])
+
+  const maxWidth = maxCameraWidth(rowWidth, dockWidth)
+  // Clamped on read, not just on write: the persisted value may predate a window
+  // resize, and a stale 700px column on a now-narrow row would push the map under
+  // its floor without the operator having touched anything.
+  const appliedCameraWidth = clampCameraWidth(cameraWidth, maxWidth)
+
+  /**
+   * Whether the feed is currently a column beside the map.
+   *
+   * Tracked because the divider only means something in `docked` mode: in `Pip` the
+   * feed floats and the map already owns the whole row, so a 6px handle would have
+   * nothing on its right that resizing affects.
+   */
+  const [feedMode, setFeedMode] = useState<LiveFeedDisplayMode>('docked')
+  const showDivider = HAS_JETSON_STREAM && feedMode === 'docked'
+
+  const onCameraWidthChange = useCallback(
+    (next: number) => setCameraWidth(next),
+    [setCameraWidth],
+  )
+
   // Escape closes the callout — the callout covers map, so an escape hatch matters.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -109,7 +197,7 @@ export function MissionControl() {
        * area, or fills the window — so this container is the one thing its
        * `absolute` variant can resolve against.
        */}
-      <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
+      <div ref={rowRef} className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
         {/*
          * The canvas.
          *
@@ -143,6 +231,24 @@ export function MissionControl() {
           </LiveMap>
         </div>
 
+        {/*
+         * The divider.
+         *
+         * A real flex sibling, not an overlay: it has to own its width for the
+         * drag to have a stable origin, and a handle sitting on top of the map's
+         * right edge would take the map's own pan gestures away by 6px.
+         *
+         * Rendered only when the feed is a column. In PiP the map already spans
+         * the row, so the handle would resize nothing.
+         */}
+        {showDivider && (
+          <SplitHandle
+            width={appliedCameraWidth}
+            maxWidth={maxWidth}
+            onChange={onCameraWidthChange}
+          />
+        )}
+
         {/**
          * The aircraft's own camera.
          *
@@ -166,11 +272,23 @@ export function MissionControl() {
          * sat empty exactly where the camera had been. One element that changes
          * its own sizing has nothing to leave behind.
          *
+         * `widthPx` is only the operator's dragged width. Passing it while the feed
+         * is in PiP or full view would be ignored by the feed's own sizing, but the
+         * divider is hidden then too, so the column and the handle can never
+         * disagree about how wide the right-hand side is.
+         *
          * Render only when a stream URL is configured. `LiveFeed` returns null
          * without one, which would leave an empty column eating a third of the
          * screen in the simulator demo.
          */}
-        {HAS_JETSON_STREAM && <LiveFeed docked detectorRunning={detectorRunning} />}
+        {HAS_JETSON_STREAM && (
+          <LiveFeed
+            docked
+            detectorRunning={detectorRunning}
+            widthPx={appliedCameraWidth}
+            onDisplayModeChange={setFeedMode}
+          />
+        )}
 
         {/* The dock. Fixed width beside the map, stacked below it on narrow screens. */}
         {/*
