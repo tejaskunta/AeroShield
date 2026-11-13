@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import type { Detection } from '@/types'
 import { fetchDetectionImage } from '@/lib/api'
 
@@ -39,7 +39,13 @@ import { fetchDetectionImage } from '@/lib/api'
  * - `string` — the object URL. Render it.
  */
 
-/** Bounded so a long mission cannot accumulate unbounded pinned memory. */
+/**
+ * Bounded so a long mission cannot accumulate unbounded pinned memory.
+ *
+ * This is a *soft* cap: it bounds entries that nobody is looking at, which is
+ * the leak that matters. It deliberately does not bound entries that are on
+ * screen — see `evict`.
+ */
 const MAX_CACHED = 120
 
 /**
@@ -49,6 +55,34 @@ const MAX_CACHED = 120
 const cache = new Map<string, string | null>()
 const inflight = new Map<string, Promise<string | null>>()
 const listeners = new Set<() => void>()
+
+/**
+ * How many mounted components are currently drawing each entry.
+ *
+ * This refcount is what makes eviction safe. A contact sheet draws a tile per
+ * detection, and a busy mission has hundreds of them (315 on `kmit-01`), so an
+ * insertion-order cap alone will reach into the middle of the visible grid and
+ * revoke a URL out from under an `<img>` that is still on screen. The tile then
+ * falls back to the placeholder, the next render sees `undefined`, asks again,
+ * and the next completion evicts it once more — which is exactly the
+ * flash-in/flash-out this map exists to prevent.
+ *
+ * So the invariant is: **never revoke a URL that a mounted reader holds.**
+ */
+const refs = new Map<string, number>()
+
+/** Mark an entry as being drawn by one more component. */
+function retain(k: string): void {
+  refs.set(k, (refs.get(k) ?? 0) + 1)
+}
+
+/** Drop one reader, then take the opportunity to trim. */
+function release(k: string): void {
+  const n = refs.get(k) ?? 0
+  if (n <= 1) refs.delete(k)
+  else refs.set(k, n - 1)
+  evict()
+}
 
 function keyOf(id: string, variant: 'frame' | 'gradcam'): string {
   return `${variant}:${id}`
@@ -64,12 +98,21 @@ function emit(): void {
  * A `Map` iterates in insertion order, so the first keys are the oldest — which
  * is the right thing to drop: the operator has moved on from them. Revoking is
  * not optional, it is the whole reason this bookkeeping exists.
+ *
+ * Entries with a live reader are skipped: revoking one of those blanks an image
+ * the operator can currently see. Because of that skip the cache may sit above
+ * `MAX_CACHED` — that is the correct trade, since the cap exists to bound
+ * *abandoned* memory, not to ration imagery that is on screen. Scrolling away
+ * releases the readers, and the next `release` trims the backlog in one pass.
+ *
+ * Deleting from a `Map` while iterating it is well-defined in JS, so this needs
+ * no copy of the key list.
  */
 function evict(): void {
-  while (cache.size > MAX_CACHED) {
-    const oldest = cache.keys().next()
-    if (oldest.done === true) return
-    const k = oldest.value
+  if (cache.size <= MAX_CACHED) return
+  for (const k of cache.keys()) {
+    if (cache.size <= MAX_CACHED) return
+    if ((refs.get(k) ?? 0) > 0) continue
     const url = cache.get(k)
     cache.delete(k)
     if (typeof url === 'string') URL.revokeObjectURL(url)
@@ -134,6 +177,14 @@ export function useDetectionImage(
   const real = detection.source === 'backend'
   const k = keyOf(id, variant)
 
+  // Hold this key against eviction for as long as it is being drawn. The fetch
+  // is retained from before its bytes land, so the arriving image cannot be
+  // evicted in the same turn it was cached.
+  useEffect(() => {
+    retain(k)
+    return () => release(k)
+  }, [k])
+
   // The third argument is the server-rendering snapshot; this app does not
   // server-render, but the contract requires it and returning the same value
   // keeps the two paths from disagreeing.
@@ -166,5 +217,6 @@ export function clearDetectionFrameCache(): void {
   }
   cache.clear()
   inflight.clear()
+  refs.clear()
   emit()
 }
