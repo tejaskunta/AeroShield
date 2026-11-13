@@ -13,6 +13,7 @@ import {
   type BackendTelemetryLatest,
 } from '@/lib/api'
 import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
+import { reviewOverrides } from '@/lib/reviewOverrides'
 import { simulator, type MissionSnapshot } from '@/lib/simulation'
 
 /**
@@ -157,7 +158,13 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       telemetry: realTelemetry.current ?? b.telemetry,
       progress: b.progress,
       streamState: realStreamState.current ?? b.streamState,
-      detections: real.length > 0 ? [...seeds, ...real] : b.detections,
+      // Review decisions are overlaid last, after the merge, because neither feed
+      // owns them: the simulator only knows its seeds, and the backend re-sends
+      // its rows with whatever review it had at write time. Applying them here
+      // means a decision survives every subsequent tick from either source.
+      detections: reviewOverrides.apply(
+        real.length > 0 ? [...seeds, ...real] : b.detections,
+      ),
       // Once the backend has said anything at all, its link status wins: the
       // simulator's own status is a constant that would otherwise mask a dead
       // socket forever.
