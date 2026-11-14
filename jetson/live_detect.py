@@ -229,6 +229,17 @@ def parse_args() -> argparse.Namespace:
     src.add_argument("--height", type=int, default=720, help="Requested capture height")
     src.add_argument("--max-frames", type=int, default=0,
                      help="Stop after N frames (0 = until Ctrl-C). Use this for scripted tests")
+    # A file source decodes as fast as the CPU allows, which on a laptop is 50-80x
+    # real time. That is fine for "does a frame reach the backend", and wrong for
+    # anything whose cadence matters: the telemetry beacon sends on a wall-clock
+    # interval, so a 647-frame clip consumed in half a second never lets it tick,
+    # and a dedupe window expressed in seconds cannot be exercised at all. Rate
+    # limiting a recording to its own frame rate is also what you want when
+    # replaying a real flight to see how the dashboard behaves in real time, so
+    # this is a general capability and not a rehearsal-only switch.
+    src.add_argument("--realtime", action="store_true",
+                     help="Pace a file source at its own frame rate instead of "
+                          "decoding flat out. Camera and still sources ignore it.")
 
     det = p.add_argument_group("detector")
     det.add_argument("--detector", default="mock", choices=["trt", "onnx", "ultralytics", "mock"],
@@ -309,6 +320,13 @@ def parse_args() -> argparse.Namespace:
     net.add_argument("--jpeg-quality", type=int, default=85)
     net.add_argument("--replay-spool", action="store_true",
                      help="Re-send detections spooled by an earlier run, then continue")
+    net.add_argument("--spool-dir", default=None,
+                     help="Where to queue records the backend could not take. "
+                          "Default: the spool next to uplink.py, which is the "
+                          "aircraft's real offline queue. Point this somewhere "
+                          "else for a bench run: a rehearsal that spools into "
+                          "the deployed queue leaves records that get replayed "
+                          "later as though they had been measured in flight.")
     net.add_argument("--telemetry-hz", type=float, default=1.0,
                      help="Position updates per second to the dashboard (0 = off). "
                           "Not tied to the camera rate: the dashboard cannot use "
@@ -477,6 +495,9 @@ def main() -> int:
             args.backend_url,
             api_key=args.api_key,
             send_images=not args.no_images,
+            # Only override when asked: uplink.py's own default is the aircraft's
+            # real queue, and passing None would make its os.makedirs fail.
+            **({"spool_dir": args.spool_dir} if args.spool_dir else {})
         )
 
     log = None
@@ -799,6 +820,23 @@ def main() -> int:
         # The serial loop runs only when NOT decoupled. Both paths share the
         # cleanup and summary below, and both produce records through
         # handle_detections(), so they cannot drift apart.
+        #
+        # `pace` is None unless --realtime was asked for on a file source. It is
+        # set up once, outside the loop, because reading the file's frame rate
+        # costs a decoder property lookup and doing it per frame would be a
+        # syscall per frame for a value that cannot change.
+        pace = None
+        if args.realtime and cap is not None:
+            native_fps = cap.get(cv2.CAP_PROP_FPS)
+            if not native_fps or native_fps <= 0.0 or native_fps > 240.0:
+                # A container with no usable rate (or a nonsense one) falls back
+                # to 30, the rate the aircraft's camera actually runs at. Refusing
+                # the run over a missing header field would be unhelpful; guessing
+                # absurdly high would silently defeat the flag.
+                native_fps = 30.0
+            pace = 1.0 / native_fps
+            print("[live] pacing at {0:.1f} FPS (--realtime)".format(native_fps))
+
         while not args.decoupled:
             t_cap = time.time()
             if cap is not None:
@@ -876,6 +914,22 @@ def main() -> int:
                 break
             if cap is None and not args.max_frames:
                 break        # single still image, one pass
+
+            # Sleep out the remainder of this frame's slot. Placed at the END of
+            # the body, after everything that must happen for this frame, so the
+            # pause never sits between reading a frame and using it.
+            #
+            # Absolute deadline rather than sleep(pace): work done per frame is
+            # subtracted from the wait, so the clip runs at its own rate instead
+            # of at (decode + processing + pace). A relative sleep would drift
+            # slower than the recording by exactly the per-frame cost and the
+            # beacon would tick at the wrong cadence - which defeats the point of
+            # asking for real time.
+            if pace is not None:
+                deadline = t_cap + pace
+                remaining = deadline - time.time()
+                if remaining > 0:
+                    time.sleep(remaining)
 
     except KeyboardInterrupt:
         if not args.quiet:

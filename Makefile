@@ -199,7 +199,7 @@ EXPORT_PY ?= /tmp/aero_export/bin/python
 # EXPORT_DEVICE=0 on a CUDA box.
 EXPORT_DEVICE ?= cpu
 
-.PHONY: deploy bench run stream api logs doctor test-local export-rect deps-drone tunnel go status probe-cuda watchdog-log stop-drone power livecheck devstream rehearse
+.PHONY: deploy bench run stream api logs doctor test-local export-rect deps-drone tunnel go status probe-cuda watchdog-log stop-drone power livecheck devstream rehearse rehearse-full
 
 tunnel:
 	@echo "opening reverse tunnel: drone:8000 -> laptop:127.0.0.1:8000"
@@ -553,3 +553,43 @@ rehearse:
 		--count $(REHEARSE_COUNT) \
 		$(if $(REHEARSE_READ_KEY),--read-key "$(REHEARSE_READ_KEY)") \
 		$(REHEARSE_KEEP) $(REHEARSE_EXTRA)
+
+# --- full rehearsal ---------------------------------------------------------
+# Layer 3: run the REAL detector on a laptop and audit what it produced.
+#
+# `make rehearse` proves the API. This proves the code that talks to it - the
+# capture loop, the detector interface, the box-hold dedupe, the geotag maths,
+# the JSONL flight record, the uplink and the telemetry beacon, all running
+# together. It launches jetson/live_detect.py as a subprocess against a clip
+# assembled from real captures, then checks the log, the saved frames, the spool
+# and the rows on the backend.
+#
+# The detector is `--detector mock`: it invents boxes on a schedule. So a pass is
+# evidence about the pipeline and NOT about the model. Accuracy, TensorRT, the
+# CSI camera, MAVLink GPS, the radio link, power and thermals all still need the
+# aircraft.
+#
+# Needs a separate interpreter with OpenCV, numpy and requests. Deliberately not
+# backend/.venv - the API's environment must not grow a video stack:
+#   py -3.11 -m venv .venv-rehearsal
+#   .venv-rehearsal/Scripts/python -m pip install opencv-python-headless numpy requests
+#
+#   make rehearse-full                        # 120 frames, ~4 s of wall clock
+#   make rehearse-full REHEARSE_FRAMES=600    # a longer clip
+#   make rehearse-full REHEARSE_KEEP=--keep   # leave the rows for the dashboard
+REHEARSE_FRAMES ?= 120
+REHEARSE_FPS ?= 30
+REHEARSE_FULL_PY ?= .venv-rehearsal/bin/python
+
+rehearse-full:
+	@echo "== full rehearsal: real detector, real backend, mock boxes =="
+	@echo "   mission '$(REHEARSE_MISSION)' - never the flight mission"
+	@echo "   $(REHEARSE_FRAMES) frames at $(REHEARSE_FPS) fps"
+	@echo ""
+	$(REHEARSE_FULL_PY) scripts/rehearse_full.py \
+		--backend-url "$(BACKEND_URL)" \
+		--mission-name "$(REHEARSE_MISSION)" \
+		--max-frames $(REHEARSE_FRAMES) \
+		--clip-fps $(REHEARSE_FPS) \
+		$(if $(REHEARSE_READ_KEY),--read-key "$(REHEARSE_READ_KEY)") \
+		$(REHEARSE_KEEP)

@@ -104,6 +104,7 @@ make logs                # tail logs/detections.jsonl on the aircraft
 make watchdog-log        # restart accounting
 make stop-drone          # stop the watchdog, then the detector
 make rehearse            # local end-to-end check, no aircraft needed
+make rehearse-full       # run the real detector locally, audit its output
 ```
 
 Variables (all overridable on the command line): `MISSION`, `CONF`, `IMGSZ`,
@@ -204,6 +205,71 @@ right mission, and appear on the map. That is the part a laptop can promise.
 | `upload frames` 413 | the frame exceeds `AEROSHIELD_MAX_IMAGE_MB` |
 | `auth read key` 401/403 | no read key, or one without `detections:read`; mint with `--preset dashboard` |
 | `cleanup` skipped | no admin key; rows stay, the count is reported |
+
+---
+
+## The full rehearsal: run the actual detector, on a laptop
+
+`make rehearse` starts at the HTTP boundary - it POSTs records the aircraft
+already produced. So it tells you the API works and says **nothing** about
+`jetson/live_detect.py`, because that file never runs.
+
+`make rehearse-full` runs it. The detector is launched as a subprocess exactly as
+`make go` launches it, against a clip assembled from real captures, and then the
+artefacts it left behind are audited.
+
+```sh
+# once - a separate interpreter; the API's env must not grow a video stack
+py -3.11 -m venv .venv-rehearsal
+.venv-rehearsal/Scripts/python -m pip install opencv-python-headless numpy requests
+
+make rehearse-full                          # 120 frames, ~4 s
+make rehearse-full REHEARSE_FRAMES=600      # a longer clip
+make rehearse-full REHEARSE_KEEP=--keep     # leave the rows to look at the map
+```
+
+It still needs the three keys from the section above.
+
+**`--detector mock` invents boxes on a schedule, because no weights exist on a
+laptop.** That is the whole caveat: a pass is evidence about the pipeline, never
+about the model.
+
+What runs: the capture loop, the detector interface, the box-hold dedupe, the
+geotag maths, the JSONL flight record, the uplink with its retry and spool
+behaviour, and the telemetry beacon - all together, in one process, against the
+real backend.
+
+| Check | The bug it catches |
+|---|---|
+| `detector run` | an argument the flight code rejects, or an import that only fails on a laptop |
+| `every row uploaded` | a row logged locally that never left the aircraft - the summary still looks fine |
+| `positions are plausible` | a geotag landing at null island or swapping lat/lon |
+| `error budget present` | `horizontal_error_m` dropped, so a find of unknown accuracy looks exact |
+| `captured_at ordered` | a clock that jumps backwards, which makes a spool replay unreadable |
+| `annotated frames decode` | a frame written but truncated |
+| `frames are not blank` | a flat rectangle saved as if it were an image |
+| `spool drained` | records left queued and silently replayed much later |
+| `every uploaded row is on the backend` | a record accepted with a 200 and then lost |
+| `no rows duplicated` | a double upload, doubling the pins on the map |
+| `aircraft spool untouched` | the bench run writing into the real offline queue |
+| `source corpus untouched` | a run consuming the captured corpus it was supposed to read |
+
+Matching is by `client_detection_id`, not by row count, because the rehearsal
+mission is reused and its total includes every earlier run. Comparing counts
+would fail on the second run of the day for a reason unrelated to the code.
+
+**`--realtime` matters and is not cosmetic.** Without it the 120-frame clip
+decodes in well under a second, faster than the beacon's send interval, so the
+telemetry worker never gets to send and reports `pos_sent=0 pos_dropped=119` -
+a true statement that looks like a bug. With pacing the clip runs at its own
+frame rate and the beacon behaves as it will in flight.
+
+### What a pass does not mean
+
+Nothing here is evidence about the model, its accuracy, TensorRT, the CSI camera,
+MAVLink GPS, the radio link, power or thermals. Those need the aircraft, and they
+are steps 1-7 above. The rehearsal proves the ship is wired; it cannot tell you
+whether the lookout can see.
 
 ---
 
