@@ -1,16 +1,22 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
 
 /**
  * Jetson live-feed origin for the dev proxy.
  *
- * Kept in step with the default in `src/lib/config.ts`. Override with
- * VITE_JETSON_STREAM_URL=http://<host>:<port>/stream when the Jetson moves — that
- * variable is read by the app; this one only exists so the proxy knows where to
- * forward, and is read at config time (before any Vite env inlining happens).
+ * ONE PLACE TO CHANGE IT. This used to be a second, separate setting: the app
+ * read `VITE_JETSON_DIRECT_ORIGIN` from `frontend/.env.local` while the proxy
+ * read `AEROSHIELD_JETSON_ORIGIN` from the shell. Changing the aircraft's
+ * address meant editing both, and forgetting the second one failed silently —
+ * the panel showed "No signal" while the value the operator had just corrected
+ * was sitting in `.env.local`, visibly right. The proxy now reads the same
+ * variable the app does, so a wrong address is wrong in one place.
+ *
+ * `AEROSHIELD_JETSON_ORIGIN` still wins if set, for a one-off run against a
+ * different board without touching a tracked-adjacent file.
  */
-const JETSON_ORIGIN = process.env.AEROSHIELD_JETSON_ORIGIN ?? 'http://10.11.101.241:8080'
+const DEFAULT_JETSON_ORIGIN = 'http://10.11.101.241:8080'
 
 /**
  * There used to be a build-time guard here that failed a production build without
@@ -27,7 +33,17 @@ const JETSON_ORIGIN = process.env.AEROSHIELD_JETSON_ORIGIN ?? 'http://10.11.101.
  * it reads as a guarantee.
  */
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  // Read the same .env files the app reads, so the proxy and the UI cannot
+  // disagree about where the aircraft is. `loadEnv` is called with '' (not 'VITE_')
+  // so AEROSHIELD_JETSON_ORIGIN in .env.local is honoured too.
+  const env = loadEnv(mode, __dirname, '')
+  const JETSON_ORIGIN =
+    process.env.AEROSHIELD_JETSON_ORIGIN ??
+    env.AEROSHIELD_JETSON_ORIGIN ??
+    env.VITE_JETSON_DIRECT_ORIGIN ??
+    DEFAULT_JETSON_ORIGIN
+
   return {
     plugins: [react()],
     resolve: {
