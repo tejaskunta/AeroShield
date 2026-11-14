@@ -583,7 +583,7 @@ function BasemapSwitcher({
           role="radio"
           aria-checked={value === b}
           onClick={() => onChange(b)}
-          className={`px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
+          className={`flex min-h-6 items-center px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
             value === b ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper-dim'
           }`}
         >
@@ -625,7 +625,7 @@ function FollowSwitcher({
           aria-checked={value === o.mode}
           onClick={() => onChange(o.mode)}
           title={o.title}
-          className={`px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
+          className={`flex min-h-6 items-center px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
             value === o.mode ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper-dim'
           }`}
         >

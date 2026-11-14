@@ -244,7 +244,8 @@ export function LiveFeed({
           className="flex items-center gap-1.5 border border-rule bg-ink-deep/92 px-2 py-1.5 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim backdrop-blur-sm hover:bg-ink-hover hover:text-paper"
           title="Show camera feed"
         >
-          <Radio size={11} />
+          {/* Decorative: the word "Camera" is the accessible name. */}
+          <Radio size={11} aria-hidden="true" />
           Camera
         </button>
       </div>
@@ -301,14 +302,26 @@ export function LiveFeed({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          {/*
+           * Icon-only, so it inherits its accessible name from `aria-label` and its
+           * icon is hidden from the accessibility tree — otherwise the button is
+           * announced twice.
+           *
+           * The glyph stays 11px, but the button is padded out to a 24x24 target.
+           * An 11px target is a 121 px² hit area on a control sitting next to two
+           * other controls; WCAG 2.2 `target-size` puts the floor at 24x24 CSS px and
+           * this console has no touch excuse to go smaller. Negative margin keeps the
+           * visual rhythm of the status strip unchanged — the extra area is invisible
+           * space around the glyph, not extra height in the header.
+           */}
           <button
             type="button"
             onClick={retry}
             aria-label="Reload feed"
             title="Reload feed"
-            className="text-paper-faint hover:text-paper"
+            className="-my-1 flex h-6 w-6 items-center justify-center text-paper-faint hover:text-paper"
           >
-            <RotateCw size={11} />
+            <RotateCw size={11} aria-hidden="true" />
           </button>
           {/*
            * Two labelled view buttons rather than one toggle icon. "Enlarge" and
@@ -349,9 +362,13 @@ export function LiveFeed({
             }}
             aria-label="Hide feed"
             title="Hide"
-            className="text-paper-faint hover:text-paper"
+            className="-my-1 flex h-6 w-6 items-center justify-center text-paper-faint hover:text-paper"
           >
-            {full ? <Minimize2 size={11} /> : <X size={11} />}
+            {full ? (
+              <Minimize2 size={11} aria-hidden="true" />
+            ) : (
+              <X size={11} aria-hidden="true" />
+            )}
           </button>
         </div>
       </div>
@@ -520,7 +537,7 @@ function ModeButton({
       aria-checked={active}
       onClick={onClick}
       title={title}
-      className={`px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
+      className={`flex min-h-6 items-center px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
         active ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper'
       }`}
     >
@@ -551,7 +568,7 @@ function FeedOffline({ onRetry }: { onRetry: () => void }) {
         <button
           type="button"
           onClick={onRetry}
-          className="border border-rule px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] text-paper hover:bg-ink-hover"
+          className="inline-flex min-h-6 items-center border border-rule px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] text-paper hover:bg-ink-hover"
         >
           Retry
         </button>
@@ -559,7 +576,7 @@ function FeedOffline({ onRetry }: { onRetry: () => void }) {
           href={JETSON_STREAM_PAGE_URL}
           target="_blank"
           rel="noreferrer"
-          className="border border-rule px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:bg-ink-hover hover:text-paper"
+          className="inline-flex min-h-6 items-center border border-rule px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:bg-ink-hover hover:text-paper"
         >
           Open direct ↗
         </a>
