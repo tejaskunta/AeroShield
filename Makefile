@@ -199,7 +199,7 @@ EXPORT_PY ?= /tmp/aero_export/bin/python
 # EXPORT_DEVICE=0 on a CUDA box.
 EXPORT_DEVICE ?= cpu
 
-.PHONY: deploy bench run stream api logs doctor test-local export-rect deps-drone tunnel go status probe-cuda watchdog-log stop-drone power livecheck
+.PHONY: deploy bench run stream api logs doctor test-local export-rect deps-drone tunnel go status probe-cuda watchdog-log stop-drone power livecheck devstream
 
 tunnel:
 	@echo "opening reverse tunnel: drone:8000 -> laptop:127.0.0.1:8000"
@@ -447,3 +447,41 @@ livecheck:
 		else \
 			echo "   FAIL - not a JPEG ($$sz bytes). Is 'make stream' running?"; \
 		fi
+
+# A stand-in for the aircraft's MJPEG feed, so the browser side of the camera
+# path is testable without a drone.
+#
+# The live feed has exactly one honest verification gap: the stream only exists
+# when the aircraft is powered, booted and serving. Everything downstream of it -
+# the <img>, the Vite dev proxy, the `/jetson` rewrite, reconnect after a drop,
+# the "no signal" state and its recovery - is therefore unverifiable until the
+# drone is on the bench, which is the worst possible moment to find a bug. This
+# closes that gap with something that speaks the same wire protocol.
+#
+# It is NOT the detector and it is NOT a simulation of flight. Its only claim is
+# that bytes of the right shape arrive from the right port.
+#
+# Two things have to be true before the browser will show it:
+#   1. AEROSHIELD_JETSON_ORIGIN must point here. vite.config.ts reads it ONCE at
+#      startup, so the dev server has to be restarted after setting it - changing
+#      it while Vite is running has no effect, and the failure looks like a
+#      broken proxy rather than a stale variable.
+#   2. VITE_JETSON_STREAM_URL=/jetson/stream must be in frontend/.env.local, or
+#      the feed is never mounted at all.
+#
+# DEVSTREAM_FRAMES, if set to a directory, replays real captures instead of the
+# generated pattern. The spool is the natural choice and is the better eyeball
+# test, being genuine payload output:
+#   make devstream DEVSTREAM_FRAMES=drone-data/aeroshield/jetson/spool
+DEVSTREAM_PORT ?= 8080
+DEVSTREAM_FRAMES ?=
+DEV_PY ?= python
+
+devstream:
+	@echo "== stand-in MJPEG feed on :$(DEVSTREAM_PORT) =="
+	@echo "   then restart the dev server with that origin, in another shell:"
+	@echo "     PowerShell:  \$$env:AEROSHIELD_JETSON_ORIGIN = 'http://127.0.0.1:$(DEVSTREAM_PORT)'"
+	@echo "     sh:          AEROSHIELD_JETSON_ORIGIN=http://127.0.0.1:$(DEVSTREAM_PORT) npm run dev --prefix frontend"
+	@echo "   requires VITE_JETSON_STREAM_URL=/jetson/stream in frontend/.env.local"
+	@echo "   ctrl-c to stop"
+	$(DEV_PY) scripts/dev_mjpeg.py --port $(DEVSTREAM_PORT) $(if $(DEVSTREAM_FRAMES),--frames-dir $(DEVSTREAM_FRAMES),)
