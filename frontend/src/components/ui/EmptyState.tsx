@@ -18,8 +18,8 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 bg-chart-grid px-6 py-12 text-center [background-size:16px_16px]">
-      <h3 className="font-display text-sm uppercase tracking-[0.1em] text-paper">{title}</h3>
-      <p className="max-w-sm text-xs leading-relaxed text-paper-dim">{detail}</p>
+      <h3 className="font-display text-title uppercase tracking-[0.1em] text-paper">{title}</h3>
+      <p className="max-w-sm text-compact leading-relaxed text-paper-dim">{detail}</p>
       {action && <div className="mt-2">{action}</div>}
     </div>
   )

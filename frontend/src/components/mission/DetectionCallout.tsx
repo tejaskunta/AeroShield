@@ -109,9 +109,10 @@ export function DetectionCallout({
             type="button"
             onClick={onClose}
             aria-label="Close detection"
-            className="text-paper-faint hover:text-paper"
+            title="Close"
+            className="-my-1 -mr-1 flex h-6 w-6 items-center justify-center text-paper-faint transition-colors hover:text-paper"
           >
-            <X size={13} />
+            <X size={13} aria-hidden="true" />
           </button>
         </header>
 
@@ -169,7 +170,7 @@ export function DetectionCallout({
             <button
               type="button"
               onClick={() => onOpenInCenter(detection.id)}
-              className="font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:text-paper"
+              className="font-display text-tiny uppercase tracking-[0.1em] text-paper-dim transition-colors hover:text-paper"
             >
               Open →
             </button>

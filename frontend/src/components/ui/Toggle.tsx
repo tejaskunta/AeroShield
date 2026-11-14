@@ -20,7 +20,7 @@ export function Toggle({
   swatch?: ReactNode
 }) {
   return (
-    <label className="flex cursor-pointer select-none items-center gap-2 py-0.5 text-small text-paper-dim hover:text-paper">
+    <label className="flex cursor-pointer select-none items-center gap-2 py-0.5 text-small text-paper-dim transition-colors hover:text-paper">
       <input
         type="checkbox"
         checked={checked}

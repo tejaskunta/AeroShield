@@ -62,7 +62,7 @@ export function LayerToggles({
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex min-h-6 w-full items-center gap-1.5 px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:text-paper"
+        className="flex min-h-6 w-full items-center gap-1.5 px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim transition-colors hover:text-paper"
       >
         <Layers size={12} strokeWidth={1.75} aria-hidden />
         Layers

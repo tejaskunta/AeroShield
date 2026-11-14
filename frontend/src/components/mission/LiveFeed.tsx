@@ -319,7 +319,7 @@ export function LiveFeed({
             onClick={retry}
             aria-label="Reload feed"
             title="Reload feed"
-            className="-my-1 flex h-6 w-6 items-center justify-center text-paper-faint hover:text-paper"
+            className="-my-1 flex h-6 w-6 items-center justify-center text-paper-faint transition-colors hover:text-paper"
           >
             <RotateCw size={11} aria-hidden="true" />
           </button>
@@ -362,7 +362,7 @@ export function LiveFeed({
             }}
             aria-label="Hide feed"
             title="Hide"
-            className="-my-1 flex h-6 w-6 items-center justify-center text-paper-faint hover:text-paper"
+            className="-my-1 flex h-6 w-6 items-center justify-center text-paper-faint transition-colors hover:text-paper"
           >
             {full ? (
               <Minimize2 size={11} aria-hidden="true" />

@@ -534,7 +534,7 @@ function ImageryAttribution({ basemap }: { basemap: Basemap }) {
             href="https://www.openstreetmap.org/copyright"
             target="_blank"
             rel="noreferrer"
-            className="pointer-events-auto underline hover:text-paper-dim"
+            className="pointer-events-auto underline transition-colors hover:text-paper-dim"
           >
             OpenStreetMap
           </a>{' '}
@@ -547,7 +547,7 @@ function ImageryAttribution({ basemap }: { basemap: Basemap }) {
             href="https://www.esri.com/"
             target="_blank"
             rel="noreferrer"
-            className="pointer-events-auto underline hover:text-paper-dim"
+            className="pointer-events-auto underline transition-colors hover:text-paper-dim"
           >
             Esri
           </a>

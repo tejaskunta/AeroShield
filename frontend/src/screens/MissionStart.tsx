@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowRight, CheckCircle2, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { checkHealth } from '@/lib/api'
+import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
 
 const readiness = [
     'Drone telemetry nominal',
@@ -44,18 +45,16 @@ export function MissionStart() {
                             <ShieldCheck className="h-5 w-5 text-paper" aria-hidden />
                         </div>
                         <div>
-                            <p className="font-display text-[10px] uppercase tracking-[0.2em] text-paper-dim">
-                                AeroShield
-                            </p>
-                            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-paper md:text-3xl">
+                            <p className="eyebrow text-paper-dim">AeroShield</p>
+                            <h1 className="mt-1 font-display text-title uppercase tracking-[0.12em] text-paper">
                                 Mission Console
                             </h1>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2 self-start border border-rule bg-ink px-2.5 py-1.5 md:self-auto">
-                        <span className="h-2 w-2 bg-emerald-400" aria-hidden />
-                        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-emerald-200">
+                    <div className="flex items-center gap-2 self-start border border-cleared/40 px-2 py-1 md:self-auto">
+                        <span className="h-1.5 w-1.5 bg-cleared" aria-hidden />
+                        <span className="font-mono text-tiny uppercase tracking-[0.12em] text-cleared">
                             Systems ready
                         </span>
                     </div>
@@ -66,42 +65,36 @@ export function MissionStart() {
                         <div className="border-b border-rule px-5 py-5 md:px-6">
                             <p className="eyebrow">Mission ID</p>
                             <div className="mt-3 flex flex-wrap items-center gap-3">
-                                <h2 className="text-xl font-semibold text-paper md:text-2xl">AS-204 / Sector 07</h2>
-                                <span className="border border-rule bg-ink px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-paper-dim">
-                                    Simulated
+                                <h2 className="font-display text-display uppercase tracking-[0.08em] text-paper">
+                                    {HAS_LIVE_MISSION ? MISSION_NAME : 'AS-204 / Sector 07'}
+                                </h2>
+                                <span className="border border-rule bg-ink px-2 py-1 font-mono text-tiny uppercase tracking-[0.12em] text-paper-dim">
+                                    {HAS_LIVE_MISSION ? 'Live' : 'Simulated'}
                                 </span>
                             </div>
                         </div>
 
                         <div className="grid gap-0 border-b border-rule sm:grid-cols-3">
                             <div className="border-r border-rule p-4 md:p-5">
-                                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-paper-dim">
-                                    Launch window
-                                </p>
-                                <p className="mt-2 text-lg font-semibold text-paper">14:22Z</p>
+                                <p className="eyebrow text-paper-dim">Launch window</p>
+                                <p className="mt-2 font-display tabular text-readout text-paper">14:22Z</p>
                             </div>
                             <div className="border-r border-rule p-4 md:p-5">
-                                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-paper-dim">
-                                    Area
-                                </p>
-                                <p className="mt-2 text-lg font-semibold text-paper">4.2 km²</p>
+                                <p className="eyebrow text-paper-dim">Area</p>
+                                <p className="mt-2 font-display tabular text-readout text-paper">4.2 km2</p>
                             </div>
                             <div className="p-4 md:p-5">
-                                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-paper-dim">
-                                    Drone
-                                </p>
-                                <p className="mt-2 text-lg font-semibold text-paper">Aero-12</p>
+                                <p className="eyebrow text-paper-dim">Drone</p>
+                                <p className="mt-2 font-display text-readout text-paper">Aero-12</p>
                             </div>
                         </div>
 
                         <div className="px-5 py-5 md:px-6">
                             <div className="mb-3 flex items-center justify-between gap-3">
-                                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-paper-dim">
-                                    Readiness status
-                                </p>
-                                <div className="flex items-center gap-2 text-emerald-300">
+                                <p className="eyebrow text-paper-dim">Readiness status</p>
+                                <div className="flex items-center gap-2 text-cleared">
                                     <CheckCircle2 size={14} aria-hidden />
-                                    <span className="font-mono text-[10px] uppercase tracking-[0.12em]">
+                                    <span className="font-mono text-tiny uppercase tracking-[0.12em]">
                                         Nominal
                                     </span>
                                 </div>
@@ -109,8 +102,8 @@ export function MissionStart() {
 
                             <ul className="space-y-2.5">
                                 {readiness.map((item) => (
-                                    <li key={item} className="flex items-center gap-2.5 text-sm text-paper-dim">
-                                        <CheckCircle2 size={13} className="text-emerald-300" aria-hidden />
+                                    <li key={item} className="flex items-center gap-2.5 text-compact text-paper-dim">
+                                        <CheckCircle2 size={13} className="shrink-0 text-cleared" aria-hidden />
                                         <span>{item}</span>
                                     </li>
                                 ))}
@@ -121,26 +114,31 @@ export function MissionStart() {
                     <aside className="flex flex-col justify-between p-5 md:p-6">
                         <div className="space-y-4">
                             <div>
-                                <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-paper-dim">
-                                    Launch status
-                                </p>
-                                <p className="mt-2 text-sm leading-6 text-paper-dim">
+                                <p className="eyebrow text-paper-dim">Launch status</p>
+                                <p className="mt-2 text-compact leading-6 text-paper-dim">
                                     Mission hardware, telemetry, and route planning have completed their pre-checks.
                                 </p>
                             </div>
 
                             <div className="border border-rule bg-ink p-3">
                                 <div className="flex items-center gap-2 text-paper-dim">
-                                    <span className="h-2 w-2 bg-emerald-400" aria-hidden />
-                                    <span className="font-mono text-[10px] uppercase tracking-[0.12em]">
+                                    <span className="h-1.5 w-1.5 bg-caution" aria-hidden />
+                                    <span className="font-mono text-tiny uppercase tracking-[0.12em]">
                                         Awaiting operator launch
                                     </span>
                                 </div>
                             </div>
                         </div>
 
+                        {/*
+                         * `text-hazard-lit`, not `text-hazard`. tailwind.config.ts
+                         * spells out why: the DEFAULT red is the alarm signal used as
+                         * a fill at 3:1, and it cannot also be 10px copy, which needs
+                         * 4.5:1. This line was the exact bug the `lit` token was
+                         * added to prevent.
+                         */}
                         {error && (
-                            <p className="mt-4 border border-hazard/40 bg-hazard/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-hazard">
+                            <p className="mt-4 border border-hazard/40 bg-hazard-soft px-3 py-2 font-mono text-tiny uppercase tracking-[0.12em] text-hazard-lit">
                                 {error}
                             </p>
                         )}
@@ -149,7 +147,7 @@ export function MissionStart() {
                             type="button"
                             onClick={handleStartMission}
                             disabled={isStarting}
-                            className="mt-6 w-full justify-center border-rule-bright bg-ink px-4 py-2.5 text-[11px] transition-colors hover:border-paper-dim hover:bg-ink-hover disabled:opacity-60"
+                            className="mt-6 w-full justify-center px-4 py-2.5 text-small"
                             icon={<ArrowRight size={14} aria-hidden />}
                         >
                             {isStarting ? 'Launching...' : 'Start Mission'}
