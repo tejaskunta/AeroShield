@@ -103,11 +103,107 @@ make probe-cuda          # which CUDA context strategy works on this board
 make logs                # tail logs/detections.jsonl on the aircraft
 make watchdog-log        # restart accounting
 make stop-drone          # stop the watchdog, then the detector
+make rehearse            # local end-to-end check, no aircraft needed
 ```
 
 Variables (all overridable on the command line): `MISSION`, `CONF`, `IMGSZ`,
 `ENGINE`, `GPS=sim|mavlink`, `STREAM_PORT`, `DEDUPE_M`, `BOX_HOLD`,
 `MAX_FRAMES`, `BACKEND_URL`.
+
+---
+
+## Local rehearsal, before you go anywhere near the aircraft
+
+`make rehearse` answers one question and refuses to answer the other:
+
+> **Does the drone-to-dashboard path work?** Yes or no, with a named `FAIL` row.
+> **Will the model perform?** Unknowable here. It never runs.
+
+```sh
+docker compose up -d db
+cd backend && ./.venv/Scripts/python -m alembic upgrade head && cd ..
+
+$env:AEROSHIELD_API_KEY   = '<drone key>'      # drone:ingest + missions:write
+$env:AEROSHIELD_ADMIN_KEY = '<admin key>'      # admin - only to delete afterwards
+$env:AEROSHIELD_READ_KEY  = '<read key>'       # detections:read - only to read back
+make rehearse
+```
+
+**Three keys, and that is the point, not an inconvenience.** The drone key can
+write but not read. That is deliberate: an aircraft that could enumerate and
+download the evidence it and its peers submitted is an aircraft whose compromise
+costs you the whole record. So the rehearsal publishes with the ingest key,
+proves that key *cannot* read back (an expected `403`, reported as a `PASS` row),
+and then reads back with a separate credential.
+
+Skip the read key and the second half of the run reports a wall of `403`s that
+look like broken endpoints. They are the authorization model working. Mint the
+missing one:
+
+```sh
+python backend/scripts/create_api_key.py --name rehearsal-read --preset dashboard
+```
+
+It replays real captured payload from `drone-data/aeroshield/jetson/spool/` -
+genuine output from the actual engine in flight, not synthetic records - into
+the real API, then **reads every artefact back** and asserts on it. Forty
+seconds, no aircraft, no camera, no engine, and nothing to install: stdlib only.
+
+Rows it checks, each one a bug it would catch:
+
+| Check | The bug it catches |
+|---|---|
+| `health /health` | a 200 whose `database` is not `ok` - the API up, the DB gone |
+| `auth drone key` | a key without `drone:ingest`; in flight that is a 403 the drone treats as FATAL and quarantines |
+| `drone key cannot read detections` | a key that can read back what it wrote - an over-privileged aircraft key |
+| `auth read key` | a read credential without `detections:read`, so nothing can be verified |
+| `ingest detections` | any record the live schema rejects - a 422 is how a real detection gets lost |
+| `ingest idempotency` | a replayed spool creating a second row and inflating the mine count |
+| `upload frames` | the image path half-wired; rows land but no frame ever does |
+| `image bytes intact` | a stub serving any file of roughly the right size |
+| `images are distinct` | one shared file returned for every detection |
+| `position round-trip` | a detection stored with the position it was found at thrown away |
+| `horizontal_error_m` | a geotag error budget dropped in transit, so a find looks exact when it was not |
+| `mission resolution` | rows filed under the wrong mission, so the dashboard shows nothing |
+| `telemetry /latest` | `found:false` or a stale frame where the map expects a live aircraft |
+| `source corpus untouched` | `replay_spool()` deleting the committed flight corpus |
+
+It uses the mission `rehearsal-local`, never `kmit-01`, so bench rows cannot be
+mistaken for measured data. It deletes what it created unless you pass
+`REHEARSE_KEEP=--keep` - and deleting needs an `admin` key on purpose, because a
+drone key must not be able to remove evidence.
+
+**It leaves its telemetry behind, and says so.** Detections can be deleted; a
+track cannot, because a track is the evidence of where the aircraft was and the
+operator who dislikes it must not be able to erase it. So the run ends by
+reporting how many frames remain under `rehearsal-local`. They are harmless -
+they belong to the rehearsal mission, not a flight - and the row prints the
+`psql` statement to drop them if you want the table clean.
+
+### What a pass does not mean
+
+It does not mean the model detects mines. `--detector mock` is not used here at
+all; no weights exist on a laptop and `best_512x288.engine` lives only on the
+aircraft. Nothing here loads TensorRT, opens the CSI camera, talks MAVLink, or
+tests power and thermal behaviour. Those are steps 1-7 above, on the hardware,
+and they stay that way.
+
+A pass means: if the drone were plugged in right now and it produced a valid
+detection, that detection would reach the database with its frame, under the
+right mission, and appear on the map. That is the part a laptop can promise.
+
+### If it fails
+
+| Symptom | Meaning |
+|---|---|
+| `health` FAIL, HTTP 0 | nothing is listening; start uvicorn |
+| `health` PASS, `database=unreachable` | `docker compose up -d db`, then migrate |
+| `auth drone key` 401 | wrong or revoked key - the message quotes the key name |
+| `auth drone key` missing scope | mint one: `--preset drone` |
+| `ingest detections` 422 | a real schema drift; the failing field is printed |
+| `upload frames` 413 | the frame exceeds `AEROSHIELD_MAX_IMAGE_MB` |
+| `auth read key` 401/403 | no read key, or one without `detections:read`; mint with `--preset dashboard` |
+| `cleanup` skipped | no admin key; rows stay, the count is reported |
 
 ---
 

@@ -199,7 +199,7 @@ EXPORT_PY ?= /tmp/aero_export/bin/python
 # EXPORT_DEVICE=0 on a CUDA box.
 EXPORT_DEVICE ?= cpu
 
-.PHONY: deploy bench run stream api logs doctor test-local export-rect deps-drone tunnel go status probe-cuda watchdog-log stop-drone power livecheck devstream
+.PHONY: deploy bench run stream api logs doctor test-local export-rect deps-drone tunnel go status probe-cuda watchdog-log stop-drone power livecheck devstream rehearse
 
 tunnel:
 	@echo "opening reverse tunnel: drone:8000 -> laptop:127.0.0.1:8000"
@@ -485,3 +485,71 @@ devstream:
 	@echo "   requires VITE_JETSON_STREAM_URL=/jetson/stream in frontend/.env.local"
 	@echo "   ctrl-c to stop"
 	$(DEV_PY) scripts/dev_mjpeg.py --port $(DEVSTREAM_PORT) $(if $(DEVSTREAM_FRAMES),--frames-dir $(DEVSTREAM_FRAMES),)
+
+# ---------------------------------------------------------------------------
+# Local rehearsal: drive the real backend with real captured payload, then
+# assert on what landed. This is the answer to "is it actually working and are
+# we ready for the drone?" for the half of that question a laptop can answer.
+#
+# WHAT IT PROVES: the API, the database behind it, the drone key's scopes, that
+# every replayed record validates against the live schema, that a replay is a
+# no-op instead of a duplicate, that frames reach storage BYTE-IDENTICALLY, that
+# mission resolution by name files them correctly, and that telemetry reports
+# live. It runs offline with no installs - stdlib only.
+#
+# WHAT IT DOES NOT PROVE: the model, the camera, the GPS, the radio link, or
+# power/thermal behaviour. Inference here is never run; `best_512x288.engine`
+# is on the aircraft and not on this machine.
+#
+# It reads from drone-data/aeroshield/jetson/spool and COPIES before replaying,
+# then asserts the source is unchanged, because jetson/uplink.py's
+# replay_spool() deletes each file it successfully sends.
+#
+# Three keys are needed and the split is deliberate, not something to work
+# around: ingest to write, detections:read to verify what landed, admin to delete
+# the rows afterwards. The API refuses to let the drone key read back what it
+# wrote, on purpose - an aircraft that can enumerate and download the evidence it
+# and its peers submitted is an aircraft whose compromise costs the whole record.
+# So the rehearsal proves that refusal (an expected 403, reported as a PASS row)
+# and then reads back with its own credential.
+#
+#   PowerShell:
+#     $env:AEROSHIELD_API_KEY   = '<drone key>'
+#     $env:AEROSHIELD_READ_KEY  = '<read key>'
+#     $env:AEROSHIELD_ADMIN_KEY = '<admin key>'
+#     make rehearse
+#
+#   then, in another shell, so the backend is up:
+#     docker compose up -d db
+#     cd backend; ./.venv/Scripts/python -m alembic upgrade head
+#     ./.venv/Scripts/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+#
+# No keys yet? All three come from backend/scripts/create_api_key.py - presets
+# drone, dashboard and admin respectively. Without the read key the run stops
+# after proving the drone key cannot read, and prints how to mint the missing
+# one. Without the admin key it still verifies everything and simply leaves the
+# rows behind, reporting how many.
+#
+#   make rehearse REHEARSE_COUNT=24          # a bigger batch
+#   make rehearse REHEARSE_KEEP=--keep       # keep the rows to look at the dashboard
+#   make rehearse REHEARSE_EXTRA=--dry-run   # validate the corpus, touch no network
+REHEARSE_COUNT ?= 8
+REHEARSE_MISSION ?= rehearsal-local
+REHEARSE_KEEP ?=
+REHEARSE_EXTRA ?=
+REHEARSE_PY ?= python
+# Empty by default so the script falls back to AEROSHIELD_READ_KEY in the
+# environment. Overriding it here is only needed for a one-off key.
+REHEARSE_READ_KEY ?=
+
+rehearse:
+	@echo "== local rehearsal: replaying $(REHEARSE_COUNT) real captures into $(BACKEND_URL) =="
+	@echo "   mission '$(REHEARSE_MISSION)' - never the flight mission"
+	@echo "   needs the API up and all three keys in the environment; see above"
+	@echo ""
+	$(REHEARSE_PY) scripts/rehearse_local.py \
+		--backend-url "$(BACKEND_URL)" \
+		--mission-name "$(REHEARSE_MISSION)" \
+		--count $(REHEARSE_COUNT) \
+		$(if $(REHEARSE_READ_KEY),--read-key "$(REHEARSE_READ_KEY)") \
+		$(REHEARSE_KEEP) $(REHEARSE_EXTRA)

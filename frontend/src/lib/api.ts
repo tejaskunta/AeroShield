@@ -723,6 +723,40 @@ export function isReachable(outcome: BackendOutcome<unknown>): boolean {
 }
 
 /**
+ * Classify a non-2xx response, distinguishing the backend's own error from the
+ * dev proxy failing to reach it.
+ *
+ * THE PROBLEM THIS SOLVES. With the backend stopped, Vite's proxy does not fail
+ * the fetch: it answers **500 with an empty body**. So `r.ok` is false, the
+ * outcome came out `failed`, and `failed` counts as *reachable* — which meant the
+ * status rail blamed the aircraft ("Aircraft silent") for a backend that was down.
+ * An operator reads that and walks to the drone while the fault is the laptop.
+ *
+ * The tell is the body. Every FastAPI error here is a JSON `{"detail": ...}`;
+ * a proxy-level failure has nothing to forward, so it arrives as an empty body
+ * (Vite sends `text/plain`, zero bytes). An empty body on an error status is
+ * therefore "nobody real answered", i.e. `unreachable`.
+ *
+ * This deliberately does not treat every 500 as unreachable: a backend that
+ * raises still counts as reachable, because a 500 is proof of life and the
+ * remedy is its logs rather than the network.
+ */
+async function classifyFailure(r: Response): Promise<BackendOutcome<never>> {
+  if (r.status === 502 || r.status === 503 || r.status === 504) {
+    return { outcome: 'unreachable' }
+  }
+  if (r.status === 500) {
+    try {
+      const body = await r.text()
+      if (body.trim().length === 0) return { outcome: 'unreachable' }
+    } catch {
+      return { outcome: 'unreachable' }
+    }
+  }
+  return { outcome: 'failed', status: r.status }
+}
+
+/**
  * The aircraft's latest known position, once it has been mapped into the UI's
  * vocabulary.
  */
@@ -812,7 +846,7 @@ export async function findMissionByName(name: string): Promise<BackendOutcome<nu
   if (!DASHBOARD_KEY || !name) return { outcome: 'disabled' }
   try {
     const r = await fetch(`${BASE}/missions`, { headers: authHeaders() })
-    if (!r.ok) return { outcome: 'failed', status: r.status }
+    if (!r.ok) return await classifyFailure(r)
     const page = (await r.json()) as BackendMissionPage
     const hit = page.items.find((m) => m.name === name)
     return hit ? { outcome: 'ok', value: hit.id } : { outcome: 'absent' }
@@ -927,7 +961,7 @@ export async function fetchTelemetryTrack(
     const r = await fetch(`${BASE}/missions/${missionId}/telemetry?limit=${limit}`, {
       headers: authHeaders(),
     })
-    if (!r.ok) return { outcome: 'failed', status: r.status }
+    if (!r.ok) return await classifyFailure(r)
     const body = (await r.json()) as BackendTelemetryTrack
     const points = (body.items ?? [])
       .map((t) => ({ lat: t.latitude, lon: t.longitude, at: t.captured_at }))
@@ -987,7 +1021,7 @@ export async function fetchLatestTelemetry(
     const r = await fetch(`${BASE}/missions/${missionId}/telemetry/latest`, {
       headers: authHeaders(),
     })
-    if (!r.ok) return { outcome: 'failed', status: r.status }
+    if (!r.ok) return await classifyFailure(r)
     const parsed = toLatestTelemetry((await r.json()) as BackendTelemetryLatest)
     // A 200 with `found: false` is the backend telling us the mission exists but
     // no frame has arrived. That is an answer, so it is `absent`, not a failure.

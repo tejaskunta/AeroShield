@@ -345,6 +345,39 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
     /** Set when a probe fails at the network level. Cleared by the next success. */
     let lastProbeUnreachable = false
 
+    /** When we last managed to read a frame. Null until the first one. */
+    let lastAt: number | null = null
+
+    /**
+     * What the stream indicator should say right now.
+     *
+     * Two independent facts decide it and they can disagree, so they are resolved
+     * in one place rather than at each call site: whether a frame has ever been
+     * read, and whether the last probe reached the backend at all.
+     *
+     * A cold load with the API down is the case that forced this out. Nothing has
+     * ever arrived, so the age check never fires, `realStreamState` stays null and
+     * `compose` falls through to the simulator's own state - which is the constant
+     * 'live'. The rail therefore read "Stream live" for a console that had never
+     * spoken to anything. The simulator's constant is a fixture for the keyless
+     * demo, not evidence, and it must not be allowed to answer this question.
+     */
+    const deriveStreamState = (): StreamState => {
+      if (lastAt !== null && Date.now() - lastAt <= STALE_AFTER_S * 1000) {
+        // Fresh: `apply` has already judged the frame itself.
+        return realStreamState.current ?? 'stalled'
+      }
+      // Nothing inside the freshness window. Which word is right depends on
+      // whether the backend is answering: "stalled" blames the aircraft and
+      // "unreachable" blames this machine, and picking the wrong one sends
+      // someone to the wrong end of the radio link.
+      if (lastProbeUnreachable) return 'unreachable'
+      // Heard from nothing at all yet, and the probes are getting through: we are
+      // still asking. Reporting 'stalled' here would accuse an aircraft on the
+      // bench of being silent when the console has only just been opened.
+      return lastAt === null ? 'connecting' : 'stalled'
+    }
+
     /** The transport currently carrying telemetry. */
     let transport: LinkStatus['transport'] = 'none'
 
@@ -389,8 +422,6 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       if (changed) publishLink()
     }
 
-    /** When we last managed to read a frame. Null until the first one. */
-    let lastAt: number | null = null
     /** Consecutive polls that produced nothing — a mission we should re-resolve. */
     let misses = 0
 
@@ -423,21 +454,30 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
      * staleness were inferred from transport failures, a live-looking marker would
      * sit on a dead aircraft's last position indefinitely - which is the single
      * most misleading thing this dashboard could do.
+     *
+     * The message is re-evaluated on every tick rather than only when a probe
+     * fails, so it can also recover by itself: if the backend comes back while the
+     * aircraft is still quiet, the wording moves from "unreachable" to "stalled"
+     * without anyone reloading the page.
      */
     const ageOutIfStale = (): void => {
-      if (lastAt === null) return
-      if (Date.now() - lastAt <= STALE_AFTER_S * 1000) return
       const b = base.current
-      if (b) {
-        // Which word is right depends on whether the backend itself is answering.
-        // "Stalled" blames the aircraft and "unreachable" blames this machine, and
-        // picking the wrong one sends someone to the wrong end of the radio link.
-        const state: StreamState = reachable ? 'stalled' : 'unreachable'
-        realStreamState.current = state
-        realLink.current = { source: 'backend', transport, socketAttempts, socketGaveUp, reachable }
-        // Use compose() so backend detections are merged, not dropped.
-        setSnapshot({ ...compose.current(b), streamState: state })
+      if (!b) return
+      // Runs even when `lastAt` is null, which is what lets a cold load that never
+      // heard anything admit the backend is unreachable instead of trusting the
+      // simulator's constant. See `deriveStreamState`.
+      const state = deriveStreamState()
+      if (state === realStreamState.current) return
+      realStreamState.current = state
+      realLink.current = {
+        source: realTelemetry.current ? 'backend' : 'simulator',
+        transport,
+        socketAttempts,
+        socketGaveUp,
+        reachable,
       }
+      // Use compose() so backend detections are merged, not dropped.
+      setSnapshot({ ...compose.current(b), streamState: state })
     }
 
     /**
