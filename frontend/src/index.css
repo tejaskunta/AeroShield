@@ -186,6 +186,40 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Tile seams.
+
+   Raster tile layers show a hairline gap between adjacent tiles because browsers
+   round each tile's position to a whole device pixel and the leftover fraction is
+   left unpainted. On a dark console the container behind it shows through, and at
+   zoom 22 where one 256 px source tile is drawn 2048 px wide that single-device-
+   pixel gap is magnified into a clearly visible grid of pale lines across the
+   imagery. It looks exactly like a broken coverage layer, which is why it has
+   been mistaken for one.
+
+   Two independent problems, and they need different cures.
+
+   The gaps: a 1 px `outline` in the container's own background colour is the
+   standard Leaflet remedy, because an outline is painted inside the tile's own
+   box and therefore covers the unpainted fraction rather than adding to the
+   layout. It must be the *container* colour and not a map colour, or the seams
+   become bright lines instead of disappearing.
+
+   The mush is not fixable here and should not be faked. Past zoom 19 Esri serves
+   no more detail for this site -- z20 and deeper come back as a uniform pale
+   placeholder tile, which is measured, not assumed -- so Leaflet scales the
+   deepest real tile up and every edge softens. No CSS recovers detail the source
+   does not contain, and `image-rendering: pixelated` makes it worse rather than
+   better: blocky interpolation over an aerial photograph reads as a broken
+   renderer. The browser's own smoothing is the better of the bad options, so the
+   default is left alone and the overshoot is prevented instead, in `useMapHooks`
+   (the fit is capped at the imagery's native depth).
+--------------------------------------------------------------------------- */
+.leaflet-tile {
+  /* Covers the sub-pixel gap between tiles. Container colour, not a map colour. */
+  outline: 1px solid var(--ink-deep);
+}
+
+/* ---------------------------------------------------------------------------
    Map glyphs.
 
    Pin and aircraft marks are `divIcon` hosts. Leaflet wraps whatever markup a

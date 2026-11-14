@@ -9,9 +9,8 @@ import { useMap } from './mapContext'
  * CoverageHatchLayer — the signature element.
  *
  * As the drone flies its grid, the imaged swath fills in with a fine 45° survey
- * hatch, and the boundary between covered and uncovered ground is drawn with
- * alternating red/white stake ticks — the IMAS marking convention (red on the hazard
- * side, white on the cleared side) rendered as a map layer.
+ * hatch, and the boundary between surveyed and unsurveyed ground is drawn as a thin
+ * hazard-red line — the edge of the ground that has been imaged.
  *
  * This is the one piece of the map that isn't showing a measurement. It answers a
  * question an operator genuinely has and no readout can express: *what have we
@@ -31,18 +30,26 @@ import { useMap } from './mapContext'
  * cell, so every cell is the same ground size and the hatch runs continuously across
  * cell boundaries — the swath reads as a single field rather than as a patchwork.
  *
- * ── The stake edge had to change technique, not just API ────────────────────────
+ * ── The frontier is a line, not the IMAS stake convention ───────────────────────
  *
- * On Maps the ticks were an icon sequence: a short perpendicular stroke repeated along
- * the path, which the API rotates along the line for you. Leaflet has no icon
- * sequences — it has `dashArray`, and a dash is a gap *along* the line, not a bar
- * *across* it. A dashed polyline would therefore give a dashed boundary, which is a
- * different convention and not the one this layer exists to draw.
+ * Earlier revisions drew the demining stake convention literally: short perpendicular
+ * strokes repeated every 0.25 m along the frontier, alternating red and white. That is
+ * the correct marking on a paper survey diagram, and it was wrong at this map's
+ * scale. A coverage cell is one metre — about 28 px at the working zoom — so 0.25 m
+ * spacing puts four strokes on an edge and each one is roughly three pixels long. A
+ * three-pixel perpendicular stroke is not a stake; it is a speck. Four specks per
+ * edge, on every frontier edge, produced a pale near-white haze that read as bright
+ * lines radiating out of the aircraft.
  *
- * So the ticks are real geometry: perpendicular segments generated at a fixed spacing
- * in metres, alternating red and white by index. Fixing the spacing in metres rather
- * than in pixels means the stakes stay put on the ground as the operator zooms, which
- * is the same reasoning as the hatch period.
+ * The decisive argument was not the appearance but the operator's reading of it: the
+ * markings were twice reported as a *rendering fault in the imagery* rather than as a
+ * marking. Cartography that reads as a bug has failed no matter how correct it is.
+ *
+ * So the frontier is one stroked `L.polyline` per uncovered side: a thin solid
+ * hazard-red line along the edge of surveyed ground. Fewer objects than the ticks by
+ * a factor of four, continuous rather than speckled, and unambiguous at any zoom. The
+ * red names the hazard side, which is the only part of the convention that carried
+ * any meaning at this resolution.
  */
 
 // ---------------------------------------------------------------------------
@@ -79,6 +86,11 @@ const HATCH_WIDTH = 1.4
  * thing that tiles across cell boundaries with no seam at all — which is precisely
  * why the texture around it had to be built so carefully.
  */
+// `CONSOLE_HEX.ruleBright` (`#3E5060` = rgb(62, 80, 96)) at 16 % alpha. Written as
+// a literal because `CONSOLE_HEX` deliberately carries opaque tokens only, and
+// inventing an alpha variant of every palette entry to serve one off-by-default
+// layer is a worse trade than this comment. If a second translucent colour is ever
+// needed, add a named alpha map to `consoleInk.ts` rather than another literal.
 const WASH = 'rgba(62, 80, 96, 0.16)'
 
 /**
@@ -129,26 +141,23 @@ function hatchTile(): string {
 }
 
 // ---------------------------------------------------------------------------
-// The stake edge
+// The frontier line
 // ---------------------------------------------------------------------------
 
+/** Hazard red, because the frontier is the hazard side of the boundary. */
+const FRONTIER_COLOR = HAZARD_HEX
+
 /**
- * Spacing between stake ticks, in metres.
+ * Thin and part-see-through.
  *
- * Ground-fixed, not pixel-fixed. At the working zoom one metre is roughly 56 px, so
- * 0.25 m puts a tick every 14 px — close to the 12 px the Maps version used, but now
- * arrived at by measuring the ground rather than the screen.
+ * Width is in screen pixels and does not scale with zoom, so this is chosen for the
+ * working zoom where the boundary is read. 1.5 px is a crisp line on a 1.75
+ * device-pixel-ratio display without becoming a barrier over the imagery; and at 55 %
+ * opacity the ground underneath still shows through, which is the point of drawing it
+ * on a map rather than beside one.
  */
-const TICK_SPACING_M = 0.25
-
-/** How far a tick reaches to either side of the boundary, in metres. */
-const TICK_HALF_M = 0.06
-
-/** Metres per degree of latitude. Mirrors `geo.ts` without the import. */
-const M_PER_DEG_LAT = 111320
-
-const TICKS_RED = HAZARD_HEX
-const TICKS_WHITE = CONSOLE_HEX.tickWhite
+const FRONTIER_WEIGHT = 1.5
+const FRONTIER_OPACITY = 0.55
 
 // ---------------------------------------------------------------------------
 
@@ -169,7 +178,7 @@ export function CoverageHatchLayer({
    * `GroundOverlay` for the cell just imaged, instead of a hundred.
    */
   const fillsRef = useRef(new Map<string, L.ImageOverlay>())
-  const edgesRef = useRef(new Map<string, L.LayerGroup>())
+  const edgesRef = useRef(new Map<string, L.Polyline>())
 
   /**
    * Cell geometry, memoised on the *content* of the coverage list.
@@ -256,7 +265,7 @@ export function CoverageHatchLayer({
     }
   }, [map])
 
-  // The stake edge, drawn only on frontier sides — also reconciled.
+  // The frontier line, drawn only on sides bordering unsurveyed ground — reconciled.
   useEffect(() => {
     const edges = edgesRef.current
     const wanted = new Set<string>()
@@ -272,17 +281,18 @@ export function CoverageHatchLayer({
         wanted.add(id)
         if (edges.has(id)) return
 
-        edges.set(id, stakeGroup(side.start, side.end).addTo(map))
+        const line = frontierLine(side.start, side.end)
+        if (line) edges.set(id, line.addTo(map))
       })
     })
 
     // Retire sides that are no longer frontier. This is the part that keeps the
-    // marking honest: without it, ticks staked earlier in the flight would remain
-    // drawn across ground that has since been surveyed, so the map would keep
+    // marking honest: without it, a boundary drawn earlier in the flight would
+    // remain across ground that has since been surveyed, so the map would keep
     // claiming an edge that no longer exists.
-    edges.forEach((group, id) => {
+    edges.forEach((line, id) => {
       if (!wanted.has(id)) {
-        group.remove()
+        line.remove()
         edges.delete(id)
       }
     })
@@ -292,70 +302,37 @@ export function CoverageHatchLayer({
 }
 
 /**
- * The alternating red/white stake ticks along one cell edge.
+ * The boundary line along one cell edge of surveyed ground.
  *
- * Built as one `LayerGroup` so a frontier side can be added and removed as a unit —
- * retiring it is then a single call rather than a bookkeeping pass over its ticks.
+ * One `L.polyline` rather than the old group of perpendicular ticks. A group is no
+ * longer needed because there is nothing to compose — and that also means retiring a
+ * frontier side is a `remove()` on a single layer instead of a walk over its ticks.
  *
- * The ticks are perpendicular segments offset from the edge, alternating colour by
- * index. This replaces the Maps icon-sequence technique; see the header for why a
- * `dashArray` could not stand in for it.
+ * There is no `pane` override. This is a boundary, so it belongs in the vector layer's
+ * own ordering above the hatch fills, which is where Leaflet puts it by default.
  */
-function stakeGroup(
+function frontierLine(
   start: { lat: number; lon: number },
   end: { lat: number; lon: number },
-): L.LayerGroup {
-  const group = L.layerGroup()
+): L.Polyline | null {
+  // A degenerate edge draws nothing, and Leaflet would happily create an empty path
+  // for it. Returning null lets the caller skip adding it at all.
+  if (start.lat === end.lat && start.lon === end.lon) return null
 
-  // Work in metres so the spacing is ground-fixed. A cell edge is ~1 m, so a flat
-  // approximation is exact for this purpose.
-  const dLat = end.lat - start.lat
-  const dLon = end.lon - start.lon
-  const lengthDeg = Math.hypot(dLat, dLon)
-  if (!Number.isFinite(lengthDeg) || lengthDeg === 0) return group
-
-  // Unit vector along the edge, in degrees, and its perpendicular.
-  const alongLat = dLat / lengthDeg
-  const alongLon = dLon / lengthDeg
-  const perpLat = -alongLon
-  const perpLon = alongLat
-
-  // One degree of longitude is shorter than one of latitude away from the equator,
-  // so the perpendicular has to be rescaled before it is used as a metre length or
-  // the ticks would lean. Derived from the cell's own latitude to keep it local.
-  const latRad = ((start.lat + end.lat) / 2) * (Math.PI / 180)
-  const lonScale = Math.max(1e-9, Math.cos(latRad))
-
-  const stepDeg = TICK_SPACING_M / M_PER_DEG_LAT
-  const count = Math.max(1, Math.round(lengthDeg / stepDeg))
-
-  for (let i = 0; i < count; i++) {
-    // Centred on the segment, so the ticks sit symmetric about the cell corner
-    // rather than piling up against one end of it.
-    const t = (i + 0.5) / count
-    const midLat = start.lat + dLat * t
-    const midLon = start.lon + dLon * t
-
-    const halfLat = perpLat * TICK_HALF_M
-    const halfLon = (perpLon * TICK_HALF_M) / lonScale
-
-    L.polyline(
-      [
-        [midLat - halfLat, midLon - halfLon],
-        [midLat + halfLat, midLon + halfLon],
-      ],
-      {
-        color: i % 2 === 0 ? TICKS_RED : TICKS_WHITE,
-        weight: 2.5,
-        opacity: 1,
-        interactive: false,
-        lineCap: 'butt',
-        pane: 'overlayPane',
-      },
-    ).addTo(group)
-  }
-
-  return group
+  return L.polyline(
+    [
+      [start.lat, start.lon],
+      [end.lat, end.lon],
+    ],
+    {
+      color: FRONTIER_COLOR,
+      weight: FRONTIER_WEIGHT,
+      opacity: FRONTIER_OPACITY,
+      interactive: false,
+      lineCap: 'round',
+      lineJoin: 'round',
+    },
+  )
 }
 
 /** True when this cell touches uncovered ground — i.e. it is on the survey frontier. */

@@ -198,6 +198,16 @@ export function useFollowDrone({
       // search means a few pixels can cost a whole level. The map chrome sits in
       // the corners and is allowed to overlap the block; what is being watched is
       // the aircraft in the middle.
+      //
+      // No `maxZoom`, and that is a considered choice rather than an omission. It is
+      // tempting to cap this at the imagery's native depth (19) so the framed view is
+      // made only of real pixels — there is no upscale above 19, by construction. But
+      // ten metres at zoom 19 is about seventy pixels in a 371 px pane, and the drone
+      // glyph is forty pixels across: the aircraft would fill more than half the block
+      // and its movement would be unreadable. The entire purpose of this view is to
+      // show a drone moving over a ten-metre block, so it takes the upscale and keeps
+      // the motion. The readout names both the live zoom and the imagery depth, so the
+      // trade is visible instead of silent.
       map.fitBounds(bounds, {
         padding: [FIT_PADDING_PX, FIT_PADDING_PX],
         animate: false,
