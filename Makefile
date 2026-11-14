@@ -579,6 +579,9 @@ rehearse:
 #   make rehearse-full REHEARSE_KEEP=--keep   # leave the rows for the dashboard
 REHEARSE_FRAMES ?= 120
 REHEARSE_FPS ?= 30
+# Unix layout. On Windows this is .venv-rehearsal/Scripts/python.exe - override
+# with REHEARSE_FULL_PY, or just run scripts/rehearse_full.py directly, which
+# picks the right one for the platform on its own.
 REHEARSE_FULL_PY ?= .venv-rehearsal/bin/python
 
 rehearse-full:
