@@ -25,20 +25,6 @@ interface ImportMetaEnv {
   readonly VITE_DASHBOARD_KEY?: string
 
   /**
-   * Google Maps JavaScript API key. Required for the dashboard map: the basemap is
-   * drawn with the Maps JS API. Public by construction (it is inlined into the
-   * browser bundle), so it must be referrer-restricted in Google Cloud.
-   *
-   * Absent, the map renders its own "map unavailable" state rather than failing
-   * silently — an operator must never be left guessing whether the map broke or
-   * the mission did.
-   */
-  readonly VITE_GOOGLE_MAPS_API_KEY?: string
-
-  /** Optional Google Cloud Map ID, for cloud-styled maps. */
-  readonly VITE_GOOGLE_MAPS_MAP_ID?: string
-
-  /**
    * Backend mission to follow for live telemetry, by call-sign. Must match the
    * drone's `--mission-name` (`make run MISSION=...`).
    *
@@ -46,16 +32,6 @@ interface ImportMetaEnv {
    * the zero-key classroom demo is unaffected by this variable's absence.
    */
   readonly VITE_MISSION_NAME?: string
-
-  /**
-   * Mapbox access token, used for imagery at zooms Google's built-in raster types
-   * will not reach. Public by construction, like the Google key — restrict it by URL
-   * in the Mapbox account rather than treating it as a secret.
-   *
-   * Absent, the imagery basemaps fall back to Google's own types and cap at zoom 20.
-   * See `RASTER_MAX_ZOOM` in `lib/config.ts`.
-   */
-  readonly VITE_MAPBOX_TOKEN?: string
 
   /**
    * Live MJPEG feed from the Jetson. Empty string disables the in-app feed;

@@ -18,10 +18,22 @@ import { Button } from '@/components/ui/Button'
  * return nothing and the fourth returned everything. A control that cannot change
  * the result is worse than no control: it implies the detector distinguishes
  * things it does not.
+ *
+ * Provenance is the one filter that follows from the opposite reasoning, so it is
+ * present but conditional. Once a live mission answers, the seeded block is gone
+ * (see `mergeDetections`) and every row is `backend`, so a source group would be
+ * the dead control described above. But the two can coexist for a moment -- a
+ * spool replay arriving beside seeds during a reconnect, or a build with
+ * `VITE_MISSION_NAME` unset -- and in exactly that moment a reviewer has no other
+ * way to tell real buried metal from an invented prop. So the group renders only
+ * when both provenances are actually present, which is the condition under which
+ * it can change the result.
  */
 export interface Filters {
   risk: Set<RiskLevel>
   review: Set<ReviewState>
+  /** Which side of the provenance line a row sits on. */
+  source: Set<Detection['source']>
   /** Hide anything under the review threshold -- off by default, deliberately. */
   hideBelowThreshold: boolean
   query: string
@@ -30,6 +42,7 @@ export interface Filters {
 export const NO_FILTERS: Filters = {
   risk: new Set<RiskLevel>(['hazard', 'caution', 'cleared']),
   review: new Set<ReviewState>(['unreviewed', 'confirmed', 'dismissed', 'flagged']),
+  source: new Set<Detection['source']>(['backend', 'simulated']),
   hideBelowThreshold: false,
   query: '',
 }
@@ -40,6 +53,7 @@ export function applyFilters(detections: Detection[], f: Filters): Detection[] {
   return detections.filter((d) => {
     if (!f.risk.has(riskOf(d))) return false
     if (!f.review.has(d.review.state)) return false
+    if (!f.source.has(d.source)) return false
     if (f.hideBelowThreshold && d.confidence < REVIEW_THRESHOLD) return false
     if (q && !`${d.id} ${d.gridCell} ${REVIEW_LABELS[d.review.state]}`.toLowerCase().includes(q)) {
       return false
@@ -52,6 +66,7 @@ export function isFiltered(f: Filters): boolean {
   return (
     f.risk.size < 3 ||
     f.review.size < 4 ||
+    f.source.size < 2 ||
     f.hideBelowThreshold ||
     f.query.trim() !== ''
   )
@@ -71,6 +86,11 @@ export function FilterRail({
 }) {
   const countRisk = (level: RiskLevel) => all.filter((d) => riskOf(d) === level).length
   const countReview = (s: ReviewState) => all.filter((d) => d.review.state === s).length
+  const countSource = (s: Detection['source']) => all.filter((d) => d.source === s).length
+
+  // Only worth offering when the answer genuinely differs per row. See the note
+  // on provenance in this file's header.
+  const mixedProvenance = countSource('simulated') > 0 && countSource('backend') > 0
 
   const toggleIn = <T,>(set: Set<T>, item: T): Set<T> => {
     const next = new Set(set)
@@ -118,6 +138,27 @@ export function FilterRail({
             />
           ))}
         </Group>
+
+        {mixedProvenance && (
+          <Group label="Provenance">
+            <Toggle
+              checked={value.source.has('backend')}
+              onChange={() => onChange({ ...value, source: toggleIn(value.source, 'backend') })}
+              label={`Flown · ${countSource('backend')}`}
+              swatch={<span className="h-2 w-2 shrink-0 bg-paper" aria-hidden />}
+            />
+            <Toggle
+              checked={value.source.has('simulated')}
+              onChange={() => onChange({ ...value, source: toggleIn(value.source, 'simulated') })}
+              label={`Simulated · ${countSource('simulated')}`}
+              swatch={<span className="h-2 w-2 shrink-0 bg-caution" aria-hidden />}
+            />
+            <p className="mt-1 text-tiny leading-snug text-paper-faint">
+              Simulated rows are invented demo fixtures. They are not ground truth and
+              must never be read as finds.
+            </p>
+          </Group>
+        )}
 
         <Group label="Confidence">
           <Toggle

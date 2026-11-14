@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { ReviewState } from '@/types'
+import type { WriteOutcome } from '@/lib/api'
 import { useMission } from '@/components/shell/missionContext'
 import { useDetections, countByReview } from '@/hooks/useDetections'
 import { FilterRail, NO_FILTERS, applyFilters, isFiltered, type Filters } from '@/components/detections/FilterRail'
@@ -26,8 +27,19 @@ export function DetectionCenter() {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const visible = useMemo(() => applyFilters(all, filters), [all, filters])
 
-  const { selected, selectedId, select, review } = useDetections(all)
-  const [persisted, setPersisted] = useState(true)
+  const { selected, selectedId, select, review, remove, removeMany, checked, toggleChecked, clearChecked } =
+    useDetections(all)
+
+  /**
+   * How the last write for the *currently selected* row went.
+   *
+   * Held with the id it describes rather than as a bare flag. The panel is what
+   * renders it, and `selectedId` changes without any write happening — walking the
+   * queue with J/K would otherwise show the previous row's verdict over this one's
+   * evidence.
+   */
+  const [write, setWrite] = useState<{ id: string; outcome: WriteOutcome } | null>(null)
+  const [deleteNote, setDeleteNote] = useState<string | null>(null)
 
   // Arriving from Mission Control's "Inspect" — focus that detection, then drop
   // the param so a refresh doesn't keep re-selecting it.
@@ -42,11 +54,41 @@ export function DetectionCenter() {
 
   const submitReview = useCallback(
     async (id: string, state: ReviewState, reason?: string) => {
-      const ok = await review(id, state, reason)
-      setPersisted(ok)
+      const outcome = await review(id, state, reason)
+      setWrite({ id, outcome })
     },
     [review],
   )
+
+  /**
+   * Delete one row from the panel's footer. Resolves to a message when refused, so
+   * the panel can keep its confirm open with the reason instead of closing as if
+   * the row were gone.
+   */
+  const deleteOne = useCallback(
+    async (id: string) => {
+      const result = await remove(id)
+      if (result.outcome === 'rejected') {
+        return result.message ?? 'The server refused the delete.'
+      }
+      setWrite(null)
+      return undefined
+    },
+    [remove],
+  )
+
+  /** Bulk delete over the ticked rows. Refusals are reported, not swallowed. */
+  const deleteChecked = useCallback(async (): Promise<string | undefined> => {
+    const result = await removeMany([...checked])
+    setDeleteNote(result.message ?? null)
+    if (!result.message) {
+      clearChecked()
+      return undefined
+    }
+    // Returned as well as stored, so the sheet can keep its confirm open on a
+    // refusal without having to read back through the parent's state.
+    return result.message
+  }, [checked, removeMany, clearChecked])
 
   /** Move the selection within the currently visible queue. */
   const step = useCallback(
@@ -144,6 +186,14 @@ export function DetectionCenter() {
           onSelect={select}
           onClearFilters={() => setFilters(NO_FILTERS)}
           filtered={isFiltered(filters)}
+          checked={checked}
+          onToggleChecked={toggleChecked}
+          onClearChecked={() => {
+            clearChecked()
+            setDeleteNote(null)
+          }}
+          onDeleteChecked={deleteChecked}
+          deleteNote={deleteNote}
         />
       </div>
 
@@ -152,7 +202,8 @@ export function DetectionCenter() {
           detection={selected}
           onReview={submitReview}
           onShowOnMap={(id) => navigate(`/?focus=${id}`)}
-          persisted={persisted}
+          outcome={write && write.id === selectedId ? write.outcome : null}
+          onDelete={deleteOne}
         />
       </div>
     </div>

@@ -1,3 +1,4 @@
+import type * as L from 'leaflet'
 import type { LatLng, MissionGrid } from '@/types'
 
 /**
@@ -27,6 +28,50 @@ export function distanceM(a: LatLng, b: LatLng): number {
   return Math.hypot(dLat, dLon)
 }
 
+/**
+ * Whether a coordinate can be drawn at all.
+ *
+ * This exists because every map library accepts nonsense silently and draws it in
+ * the one place that is always in range: `(0, 0)`, the Gulf of Guinea. A `null`
+ * latitude read out of an unparsed JSON payload, a `NaN` from a division by a NaN
+ * heading, an `undefined` field on a row written by an older schema - all of them
+ * arrive here as a number the arithmetic will happily propagate, and the operator's
+ * honest reading of a pin in the Atlantic is that the aircraft has crashed there.
+ *
+ * Full validity, not just the range check, because the range check is what `NaN`
+ * defeats: every comparison against `NaN` is false, so `lat >= -90 && lat <= 90`
+ * rejects it by accident while `lat < -90 || lat > 90` accepts it. Being explicit
+ * with `Number.isFinite` makes the rejection intentional and testable rather than a
+ * side effect of comparison semantics.
+ *
+ * `(0, 0)` itself is deliberately ALLOWED: it is a real place, a mission may
+ * legitimately be flown there, and refusing it would be a bug of its own. The test
+ * is whether the value is a usable number in range, not whether it is suspicious.
+ */
+export function validCoordinate(p: LatLng | null | undefined): p is LatLng {
+  if (!p) return false
+  return (
+    Number.isFinite(p.lat) &&
+    Number.isFinite(p.lon) &&
+    Math.abs(p.lat) <= 90 &&
+    Math.abs(p.lon) <= 180
+  )
+}
+
+/**
+ * Filter a track down to the points that can be drawn.
+ *
+ * A polyline is drawn between consecutive points, so ONE bad coordinate does not
+ * merely drop a vertex - it drags the line to `(0, 0)` and back, which draws a
+ * 6,000 km spike through the survey and a line that appears to leave the aircraft
+ * and return. Dropping the bad points is the only rendering that stays truthful:
+ * the gap is visible, and a visible gap is an accurate statement that we do not
+ * know where the aircraft was for that stretch.
+ */
+export function plottablePath(points: readonly LatLng[]): LatLng[] {
+  return points.filter(validCoordinate)
+}
+
 /** Initial bearing a → b, in compass degrees (0 = north, clockwise). */
 export function bearingDeg(a: LatLng, b: LatLng): number {
   const dLat = (b.lat - a.lat) * M_PER_DEG_LAT
@@ -49,7 +94,7 @@ export function lerpLatLng(a: LatLng, b: LatLng, t: number): LatLng {
 }
 
 /**
- * The Maps API takes `{lat, lng}` literals, and — unlike every other layer of this
+ * Leaflet takes `{lat, lng}` literals, and — unlike every other layer of this
  * stack — it spells longitude `lng` inside lat/lng objects, while our domain model,
  * the backend, and every GPS string on the wire spell it `lon`. This function is the
  * single crossing point between those two conventions.
@@ -58,19 +103,37 @@ export function lerpLatLng(a: LatLng, b: LatLng, t: number): LatLng {
  * domain type keeps matching the detection records it is built from (which use
  * `latitude`/`longitude`), and there is one obvious place to look when a marker
  * lands in the sea.
+ *
+ * It survived the move off the Google Maps API unchanged in shape: `L.LatLngLiteral`
+ * and `google.maps.LatLngLiteral` are both `{lat: number; lng: number}`, so every
+ * caller and the losslessness test that pins `lng === p.lon` kept working. That is
+ * the whole argument for having the crossing point in one function — the provider
+ * changed and the call sites did not.
  */
-export function toLatLngLiteral(p: LatLng): google.maps.LatLngLiteral {
+export function toLatLngLiteral(p: LatLng): L.LatLngLiteral {
   return { lat: p.lat, lng: p.lon }
 }
 
-/** Inverse of `toLatLngLiteral` — Maps API coordinates back into our domain type. */
-export function fromLatLngLiteral(p: google.maps.LatLngLiteral): LatLng {
+/** Inverse of `toLatLngLiteral` — Leaflet coordinates back into our domain type. */
+export function fromLatLngLiteral(p: L.LatLngLiteral): LatLng {
   return { lat: p.lat, lon: p.lng }
 }
 
-/** A lat/lng path as the Maps API wants it, for polylines and polygons. */
-export function toPath(points: LatLng[]): google.maps.LatLngLiteral[] {
+/** A lat/lng path as Leaflet wants it, for polylines and polygons. */
+export function toPath(points: LatLng[]): L.LatLngLiteral[] {
   return points.map(toLatLngLiteral)
+}
+
+/**
+ * A row-major `[lat, lng]` tuple array, for the Leaflet APIs that take tuples.
+ *
+ * Leaflet is inconsistent with itself here: `L.polyline` accepts objects, while
+ * `L.latLngBounds`, `L.map(center)` and `L.marker` are all documented with arrays.
+ * Both work in practice because Leaflet normalises through `L.latLng()`, but the
+ * tuple form avoids relying on that and is what the type definitions expect.
+ */
+export function toLatLngTuples(points: readonly LatLng[]): [number, number][] {
+  return points.map((p) => [p.lat, p.lon] as [number, number])
 }
 
 // ---------------------------------------------------------------------------

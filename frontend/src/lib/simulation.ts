@@ -342,15 +342,39 @@ export class MissionSimulator {
     this.listeners.forEach((l) => l(snap))
   }
 
-  // --- review mutations (local only — no backend to persist to yet) --------
+  // --- local mutations ----------------------------------------------------
 
-  /** Apply a review decision and re-emit. Mirrors a future PATCH endpoint. */
+  /**
+   * Apply a review decision and re-emit.
+   *
+   * Local only, and that is now a deliberate division of labour rather than a
+   * placeholder: this owns the *seeded* rows, which have no server copy, while
+   * `saveReview` in `lib/api.ts` handles persistence for real ones. The two run
+   * side by side; neither replaces the other. `reviewOverrides` is what carries a
+   * decision across a compose, because it covers both sources.
+   */
   reviewDetection(id: string, review: Detection['review']): void {
     const idx = this.detections.findIndex((d) => d.id === id)
     if (idx >= 0) {
       this.detections[idx] = { ...this.detections[idx]!, review }
       this.emit()
     }
+  }
+
+  /**
+   * Drop a row from the seeded list for the rest of the session.
+   *
+   * The operator deleted it, and a simulator that keeps re-emitting a row the
+   * operator removed would make delete look broken on exactly the demo dataset.
+   * No-op for an unknown or already-removed id, so a double-click is harmless.
+   *
+   * A backend row is not in this list at all and is handled by the tombstone in
+   * `reviewOverrides`, which is applied to every compose.
+   */
+  removeDetection(id: string): void {
+    const before = this.detections.length
+    this.detections = this.detections.filter((d) => d.id !== id)
+    if (this.detections.length !== before) this.emit()
   }
 }
 

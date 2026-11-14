@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import L from 'leaflet'
 import type { LatLng } from '@/types'
 import { CONSOLE_HEX } from '@/lib/consoleInk'
 import { useMap } from './mapContext'
@@ -16,8 +17,8 @@ import { useMap } from './mapContext'
  * *deviated* from the plan or the plan itself left a hole. Two visually distinct
  * lines are what makes that a glance rather than an investigation.
  *
- * Both are single `Polyline`s. A path of several hundred points is one object to the
- * Maps API, which is why neither needs point-level chunking.
+ * Both are single polylines. A path of several hundred points is one object to
+ * Leaflet, which is why neither needs point-level chunking.
  */
 
 /**
@@ -37,35 +38,38 @@ import { useMap } from './mapContext'
  * cheaper operation, since a track that grows to hundreds of points stays one object.
  */
 export function TrackLayer({ points }: { points: LatLng[] }) {
-  const { map, maps } = useMap()
-  const lineRef = useRef<google.maps.Polyline | null>(null)
+  const { map } = useMap()
+  const lineRef = useRef<L.Polyline | null>(null)
 
   // Create once per map, not once per point.
   useEffect(() => {
-    const line = new maps.Polyline({
-      map,
-      path: toPath(points),
-      strokeColor: CONSOLE_HEX.paper,
-      strokeWeight: 1.5,
-      strokeOpacity: 0.55,
-      clickable: false,
-      zIndex: 400,
-    })
+    const line = L.polyline(toPath(points), {
+      color: CONSOLE_HEX.paper,
+      weight: 1.5,
+      opacity: 0.55,
+      interactive: false,
+      // Above the coverage hatch, below the pins — see the note in
+      // `MissionGridLayer` about Leaflet drawing in insertion order.
+      pane: 'overlayPane',
+    }).addTo(map)
 
     lineRef.current = line
     return () => {
-      line.setMap(null)
+      line.remove()
       lineRef.current = null
     }
     // `points` is deliberately absent: it is a mutated array, so its identity never
     // changes and including it would express a dependency that does not exist. The
     // path is kept current by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, maps])
+  }, [map])
 
   // Extend as the aircraft flies.
   useEffect(() => {
-    lineRef.current?.setPath(toPath(points))
+    // `setLatLngs` is the direct replacement for `setPath`; it reuses the existing
+    // SVG path element rather than creating a new one, so a track growing to
+    // hundreds of points stays one object.
+    lineRef.current?.setLatLngs(toPath(points))
     // `points.length` stands in for the array's contents, which is all that can
     // change — see the note above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,9 +82,9 @@ export function TrackLayer({ points }: { points: LatLng[] }) {
  * A planned path — the survey pattern, or any other line that represents intent.
  *
  * Faint and dashed, so it sits under the flown track without ever being mistaken for
- * it. `dashArray` has no direct Maps equivalent, so the dashes are expressed as an
- * icon sequence with a transparent base stroke, which is the supported way to get a
- * dashed line that also works as a hit target.
+ * it. Leaflet has a real `dashArray`, so this is a stroke attribute rather than the
+ * Maps workaround of synthesising dashes from an icon sequence — which also means
+ * the dashes scale with the line weight instead of needing their own glyph.
  */
 export function IntentLine({
   points,
@@ -91,51 +95,40 @@ export function IntentLine({
   color: string
   dashed?: boolean
 }) {
-  const { map, maps } = useMap()
-
-  /**
-   * Dash glyph. Drawn as a horizontal stroke so Maps' icon placement, which orients
-   * each icon along the line's direction, lays them end to end as dashes.
-   */
-  const dash: google.maps.Symbol = {
-    path: 'M 0,0 L 3,0',
-    strokeColor: color,
-    strokeOpacity: 0.9,
-    strokeWeight: 1,
-    scale: 1,
-  }
+  const { map } = useMap()
 
   useEffect(() => {
-    const line = new maps.Polyline({
-      map,
-      path: toPath(points),
-      // With dashes, the base stroke carries the gaps; with solid intent, the base
-      // stroke *is* the line.
-      strokeColor: color,
-      strokeWeight: 1,
-      strokeOpacity: dashed ? 0 : 0.9,
-      clickable: false,
-      ...(dashed ? { icons: [{ icon: dash, offset: '0', repeat: '8px' }] } : {}),
-      zIndex: 410,
-    })
+    const line = L.polyline(toPath(points), {
+      color,
+      weight: 1,
+      opacity: 0.9,
+      // `dashArray` set means dashed; absent means solid. This replaces the Maps
+      // pair of "transparent base stroke plus dash icons" with one attribute.
+      ...(dashed ? { dashArray: '4 4' } : {}),
+      interactive: false,
+      pane: 'overlayPane',
+    }).addTo(map)
 
-    return () => line.setMap(null)
-    // `dash` is rebuilt each render but is structurally identical, so including it
-    // here would rebuild the line on every render for no visual change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, maps, points, color, dashed])
+    // Braced so the arrow returns nothing: `line.remove()` returns the layer, and an
+    // effect destructor that returns a value is a type error, not a cleanup.
+    return () => {
+      line.remove()
+    }
+  }, [map, points, color, dashed])
 
   return null
 }
 
 /**
- * Domain points to Maps positions.
+ * Domain points to Leaflet lat/lng tuples.
  *
- * The domain model uses `lon` (matching the backend's detection records); the Maps
- * API uses `lng`. Converting here keeps that single spelling difference from leaking
+ * The domain model uses `lon` (matching the backend's detection records); Leaflet
+ * uses `lng`. Converting here keeps that single spelling difference from leaking
  * into every layer — see the note in `geo.ts`, which is the only place that should
- * know about the clash.
+ * know about the clash. `toLatLngTuples` exists because Leaflet is internally
+ * inconsistent about whether it wants objects or arrays; polylines take either, but
+ * this keeps one spelling across every layer.
  */
-function toPath(points: LatLng[]): google.maps.LatLngLiteral[] {
-  return points.map((p) => ({ lat: p.lat, lng: p.lon }))
+function toPath(points: LatLng[]): L.LatLngTuple[] {
+  return points.map((p): L.LatLngTuple => [p.lat, p.lon])
 }

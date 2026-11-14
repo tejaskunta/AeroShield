@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import L from 'leaflet'
 import { M_PER_DEG_LAT, distanceM, mPerDegLon } from '@/lib/geo'
 import {
   FIT_PADDING_PX,
@@ -10,14 +11,37 @@ import type { LatLng } from '@/types'
 import { useMap } from './mapContext'
 
 /**
+ * Leaflet's bounds object for an extent, optionally widened to include a point.
+ *
+ * Replaces the Maps `new LatLngBounds()` + repeated `extend()` idiom. `L.latLngBounds`
+ * takes its two corners as a pair and normalises their order itself, which is worth
+ * knowing because the south-west/north-east naming of the extent fields is a
+ * convention of ours and not something the geometry enforces — a caller that swapped
+ * them used to produce an inverted box with no points in it, and would now simply
+ * work.
+ */
+function boundsOf(
+  extent: { south: number; west: number; north: number; east: number } | null,
+  position: LatLng | null,
+): L.LatLngBounds {
+  const corners: L.LatLngExpression[] = []
+  if (extent) {
+    corners.push([extent.south, extent.west], [extent.north, extent.east])
+  }
+  if (position) corners.push([position.lat, position.lon])
+  // A single point still yields a valid (degenerate) bounds, which `fitBounds`
+  // resolves to the map's maximum zoom rather than throwing. The Maps API needed a
+  // guard for that; here it is the documented behaviour.
+  return L.latLngBounds(corners)
+}
+
+/**
  * Track the map's zoom and report a marker scale factor.
  *
- * Vector markers (`google.maps.Symbol`) are drawn in screen space, so a glyph that
- * reads well at the working zoom is an unreadable speck two steps out and a giant
- * obstruction two steps in. Leaflet's PNG markers had the same problem, solved by
- * luck of the size chosen. Scaling the symbols with zoom keeps a pin's *apparent*
- * size roughly constant on the ground, which is what makes a hazard field legible
- * at any zoom.
+ * Vector markers are drawn in screen space, so a glyph that reads well at the
+ * working zoom is an unreadable speck two steps out and a giant obstruction two
+ * steps in. Scaling the glyphs with zoom keeps a pin's *apparent* size roughly
+ * constant on the ground, which is what makes a hazard field legible at any zoom.
  *
  * The range is narrow because the map's own range is narrow: this map lives between
  * zoom 18 and zoom 22, all of them metre-scale views of the same ten-metre block.
@@ -29,8 +53,10 @@ export function useZoomScale(): number {
   useEffect(() => {
     const update = () => setScale(scaleForZoom(map.getZoom() ?? REFERENCE_ZOOM))
     update()
-    const listener = map.addListener('zoom_changed', update)
-    return () => listener.remove()
+    map.on('zoomend', update)
+    return () => {
+      map.off('zoomend', update)
+    }
   }, [map])
 
   return scale
@@ -137,11 +163,11 @@ export function useFollowDrone({
     const onDrag = () => {
       userPanned.current = true
     }
-    const drag = map.addListener('dragstart', onDrag)
-    const zoom = map.addListener('zoom_changed', onDrag)
+    map.on('dragstart', onDrag)
+    map.on('zoomstart', onDrag)
     return () => {
-      drag.remove()
-      zoom.remove()
+      map.off('dragstart', onDrag)
+      map.off('zoomstart', onDrag)
     }
   }, [map])
 
@@ -152,12 +178,7 @@ export function useFollowDrone({
       // 'fit' is idempotent — recomputing it on every telemetry frame would be a
       // visible shimmy, so it only runs when the extent changes or the drone first
       // appears outside it.
-      const bounds = new google.maps.LatLngBounds()
-      if (extent) {
-        bounds.extend({ lat: extent.south, lng: extent.west })
-        bounds.extend({ lat: extent.north, lng: extent.east })
-      }
-      bounds.extend({ lat: position.lat, lng: position.lon })
+      const bounds = boundsOf(extent, position)
 
       const inside = !extent || isInside(extent, position)
       // Refit when the extent changes, when the drone leaves it, when the map
@@ -165,7 +186,7 @@ export function useFollowDrone({
       // view back. `fitBounds` decides its zoom from the viewport in pixels, so a
       // fit taken before layout settled is wrong for the life of the screen — the
       // effect is idempotent by design, so nothing would ever correct it.
-      const size = map.getDiv()
+      const size = map.getContainer()
       const sizeKey = `${size.clientWidth}x${size.clientHeight}`
       const shouldFit =
         forceRefit || !lastCentred.current || !inside || lastFitSize.current !== sizeKey
@@ -178,10 +199,8 @@ export function useFollowDrone({
       // the corners and is allowed to overlap the block; what is being watched is
       // the aircraft in the middle.
       map.fitBounds(bounds, {
-        top: FIT_PADDING_PX,
-        right: FIT_PADDING_PX,
-        bottom: FIT_PADDING_PX,
-        left: FIT_PADDING_PX,
+        padding: [FIT_PADDING_PX, FIT_PADDING_PX],
+        animate: false,
       })
 
       // The fit is deliberately *not* verified here against `zoomToFit`. It was, and
@@ -208,7 +227,7 @@ export function useFollowDrone({
     // otherwise leave the screen entirely.
     if (userPanned.current && isOnScreen(map, position)) return
 
-    map.panTo({ lat: position.lat, lng: position.lon })
+    map.panTo([position.lat, position.lon], { animate: false })
     lastCentred.current = position
     userPanned.current = false
   }, [map, mode, position, extent, recentreThresholdM, forceRefit])
@@ -257,13 +276,19 @@ export interface ViewMetrics {
    */
   affordableZoom: number
   /**
-   * The ceiling the current basemap can actually reach.
+   * How deep the current basemap's imagery actually goes — not the map's zoom limit.
    *
-   * Reported so the readout can name the real limit rather than the configured one.
-   * On raster imagery these differ by two levels, which is a factor of four in scale —
-   * far too large a gap for a diagnostic to paper over. See `RASTER_MAX_ZOOM`.
+   * Reported so the readout can name the real floor on detail rather than the
+   * console's own limit. On Esri World Imagery these differ by three levels (19
+   * against 22), which is a factor of eight in ground scale — far too large a gap
+   * for a diagnostic to paper over.
+   *
+   * Deliberately *not* called `maxZoom`, and not called `ceiling` either. Under those
+   * names this number was passed to Leaflet's map `maxZoom` as well as to the readout,
+   * which clamped the operator at 19 and switched the tile layers off above it. See
+   * `BASEMAP_NATIVE_DEPTH` in `LiveMap` and `ESRI_MAX_NATIVE_ZOOM` in `lib/config`.
    */
-  ceilingZoom: number
+  imageryDepth: number
   /**
    * Which axis is starving the fit.
    *
@@ -276,19 +301,20 @@ export interface ViewMetrics {
   binding: 'width' | 'height'
 }
 
-export function useViewMetrics(spanM: number, ceilingZoom: number = MAX_LIVE_MAP_ZOOM): ViewMetrics | null {
+export function useViewMetrics(spanM: number, imageryDepth: number = MAX_LIVE_MAP_ZOOM): ViewMetrics | null {
   const { map } = useMap()
   const [view, setView] = useState<ViewMetrics | null>(null)
 
   useEffect(() => {
     const measure = () => {
-      const div = map.getDiv()
+      const div = map.getContainer()
       const zoom = map.getZoom()
       const bounds = map.getBounds()
       if (zoom === undefined || !bounds) return
       const width = div.clientWidth
       const height = div.clientHeight
-      const lat = map.getCenter()?.lat() ?? 0
+      const center = map.getCenter()
+      const lat = center ? center.lat : 0
       const pxPerM = pixelsPerMetre(zoom, lat)
       const affordable = zoomToFit(spanM, width, height, FIT_PADDING_PX, lat)
 
@@ -300,8 +326,8 @@ export function useViewMetrics(spanM: number, ceilingZoom: number = MAX_LIVE_MAP
       const ne = bounds.getNorthEast()
       const sw = bounds.getSouthWest()
       const viewportSpanM = Math.max(
-        (ne.lat() - sw.lat()) * M_PER_DEG_LAT,
-        (ne.lng() - sw.lng()) * mPerDegLon(lat),
+        (ne.lat - sw.lat) * M_PER_DEG_LAT,
+        (ne.lng - sw.lng) * mPerDegLon(lat),
       )
 
       // Only on a real change. `bounds_changed` fires continuously — every frame of
@@ -313,7 +339,7 @@ export function useViewMetrics(spanM: number, ceilingZoom: number = MAX_LIVE_MAP
         prev.zoom === zoom &&
         prev.width === width &&
         prev.height === height &&
-        prev.ceilingZoom === ceilingZoom &&
+        prev.imageryDepth === imageryDepth &&
         prev.viewportSpanM === nearest(viewportSpanM)
           ? prev
           : {
@@ -328,7 +354,7 @@ export function useViewMetrics(spanM: number, ceilingZoom: number = MAX_LIVE_MAP
               spanPx: spanM * pxPerM,
               viewportSpanM: nearest(viewportSpanM),
               affordableZoom: affordable,
-              ceilingZoom,
+              imageryDepth,
               // `zoomToFit` spends whichever axis runs out first, so on a wide, short
               // pane the height is what limits it — the readout is asking "what is
               // stopping this pane from going further", and the answer is the smaller
@@ -339,18 +365,22 @@ export function useViewMetrics(spanM: number, ceilingZoom: number = MAX_LIVE_MAP
     }
 
     measure()
-    const listeners = [
-      map.addListener('zoom_changed', measure),
-      map.addListener('bounds_changed', measure),
-    ]
+    // `zoomend`/`moveend` rather than the Maps `*_changed` events: Leaflet fires
+    // `zoom`/`move` continuously during a gesture, and publishing metrics on every
+    // frame of a pan would re-render the map's parents several times a second to
+    // report the same numbers. The `end` variants fire once when the view settles,
+    // which is the granularity this instrument is read at.
+    map.on('zoomend', measure)
+    map.on('moveend', measure)
     const observer = new ResizeObserver(measure)
-    observer.observe(map.getDiv())
+    observer.observe(map.getContainer())
 
     return () => {
-      listeners.forEach((l) => l.remove())
+      map.off('zoomend', measure)
+      map.off('moveend', measure)
       observer.disconnect()
     }
-  }, [map, spanM, ceilingZoom])
+  }, [map, spanM, imageryDepth])
 
   return view
 }
@@ -386,11 +416,18 @@ export function useViewMetrics(spanM: number, ceilingZoom: number = MAX_LIVE_MAP
  * answer is a layout change, not a fourth fit.
  *
  * Returns whether the map is currently legible, so a caller can say so.
+ *
+ * Takes no ceiling. It used to: the basemap's imagery depth was threaded in so the
+ * guard could decline to re-fit a view that was already as deep as its tiles go. That
+ * was the wrong instrument for this question, and using it is what left the operator
+ * capped at 19 — the guard stopped correcting at the imagery's depth instead of the
+ * map's limit. The map answers this itself now, via `getMaxZoom` below. The imagery
+ * depth remains a real fact, reported by `useViewMetrics` for the readout; it is just
+ * not a bound on fitting.
  */
 export function useViewReadiness(
   position: LatLng | null,
   extent: { south: number; west: number; north: number; east: number } | null,
-  ceilingZoom: number = MAX_LIVE_MAP_ZOOM,
 ): boolean {
   const { map } = useMap()
   /**
@@ -473,39 +510,46 @@ export function useViewReadiness(
       const zoom = map.getZoom()
       if (zoom === undefined) return
 
-      const div = map.getDiv()
+      const div = map.getContainer()
       const sizeKey = `${div.clientWidth}x${div.clientHeight}`
       if (attemptSize.current !== sizeKey) {
         attemptSize.current = sizeKey
         attempts.current = 0
       }
 
-      const lat = map.getCenter()?.lat() ?? 0
+      const center = map.getCenter()
+      const lat = center ? center.lat : 0
       const legible = pixelsPerMetre(zoom, lat) >= MIN_LIVE_MAP_PX_PER_METRE
 
       /**
-       * Whether the fit already applied is the best this pane and this basemap can do.
+       * Whether the fit already applied is the best this pane can do.
        *
-       * This is the fix for the imagery basemaps, and it replaces a rule that could not
-       * work. The guard used to fire whenever the view was short of the bar, up to three
-       * times, on the theory that a fit might not have happened yet. On raster imagery
-       * that theory is false in a way that never resolves: the fit is issued, the map
-       * silently grants zoom 20 instead of the requested 22, the measurement is short,
-       * and so another identical fit is issued — three times, every time — until the
-       * budget runs out and the shortfall is reported as though the operator had caused
-       * it. A permanent red warning and a fitted view that is a quarter of the scale of
-       * the street canvas, for no reason the operator could act on.
+       * The guard used to fire whenever the view was short of the bar, up to three
+       * times, on the theory that a fit might not have happened yet. That theory is
+       * false in a way that never resolves when the map has already been driven as far
+       * as it will go: the fit is issued, the map grants its own maximum instead, the
+       * measurement is short, and another identical fit is issued — three times, every
+       * time — until the budget runs out and the shortfall is reported as though the
+       * operator had caused it. A permanent red warning, for no reason they could act
+       * on. So when the shortfall is the map's limit rather than an unfinished fit, the
+       * guard declines to spend an attempt. `setReady` above has already run, so the
+       * scale is still reported honestly; what stops is the pretence that a fourth fit
+       * would move anything.
        *
-       * So when the shortfall is a ceiling rather than an unfinished fit, the guard
-       * declines to spend an attempt. It still reports the scale honestly — `setReady`
-       * above has already run — because the operator may legitimately want to know that
-       * this basemap is coarser. What it stops is pretending a fourth fit would help.
+       * Asked of the map, not of a number threaded in. This test was previously given
+       * the basemap's *imagery depth* (Esri's native 19) and treated it as the map's
+       * limit, which is how the two got conflated in the first place. The consequence
+       * was concrete: a pane that could afford zoom 21 would stop being re-fitted the
+       * moment it reached 19, because 19 had been declared the end of the road. The
+       * question here is "can the map go further", and `getMaxZoom` is the only thing
+       * that actually knows. The imagery's depth is a different fact, reported by
+       * `useViewMetrics` for the readout and used nowhere else.
        *
-       * Attempts are reserved for the case they were written for: a fit that landed
-       * short of a ceiling it *could* have reached, which is the stale-viewport case
-       * and the one where re-fitting actually moves the map.
+       * Attempts are therefore reserved for the case they were written for: a fit that
+       * landed short of a zoom the map *could* have reached, which is the
+       * stale-viewport case and the one where re-fitting actually moves the map.
        */
-      const atCeiling = zoom >= ceilingZoom - 1e-6
+      const atCeiling = zoom >= (map.getMaxZoom() ?? Infinity) - 1e-6
 
       setReady(legible)
 
@@ -536,19 +580,12 @@ export function useViewReadiness(
       // would be identical — see `atCeiling` above.
       if (atCeiling) return
 
-      const bounds = new google.maps.LatLngBounds()
-      if (extent) {
-        bounds.extend({ lat: extent.south, lng: extent.west })
-        bounds.extend({ lat: extent.north, lng: extent.east })
-      }
-      bounds.extend({ lat: position.lat, lng: position.lon })
+      const bounds = boundsOf(extent, position)
 
       attempts.current += 1
       map.fitBounds(bounds, {
-        top: FIT_PADDING_PX,
-        right: FIT_PADDING_PX,
-        bottom: FIT_PADDING_PX,
-        left: FIT_PADDING_PX,
+        padding: [FIT_PADDING_PX, FIT_PADDING_PX],
+        animate: false,
       })
     }
 
@@ -562,27 +599,26 @@ export function useViewReadiness(
     const onUserGesture = () => {
       operatorTook.current = true
     }
-    const div = map.getDiv()
+    const div = map.getContainer()
     div.addEventListener('wheel', onUserGesture, { passive: true })
     div.addEventListener('touchstart', onUserGesture, { passive: true })
     div.addEventListener('pointerdown', onUserGesture, { passive: true })
 
     check()
-    const listeners = [
-      map.addListener('zoom_changed', check),
-      map.addListener('bounds_changed', check),
-    ]
+    map.on('zoomend', check)
+    map.on('moveend', check)
     const observer = new ResizeObserver(check)
     observer.observe(div)
 
     return () => {
-      listeners.forEach((l) => l.remove())
+      map.off('zoomend', check)
+      map.off('moveend', check)
       observer.disconnect()
       div.removeEventListener('wheel', onUserGesture)
       div.removeEventListener('touchstart', onUserGesture)
       div.removeEventListener('pointerdown', onUserGesture)
     }
-  }, [map, position, extent, ceilingZoom])
+  }, [map, position, extent])
 
   return ready
 }
@@ -596,50 +632,10 @@ function isInside(
 }
 
 /** Is a point within the map's current viewport, with a small margin? */
-function isOnScreen(map: google.maps.Map, p: LatLng): boolean {
+function isOnScreen(map: L.Map, p: LatLng): boolean {
   const bounds = map.getBounds()
   if (!bounds) return true
-  return bounds.contains({ lat: p.lat, lng: p.lon })
-}
-
-/**
- * An invisible `OverlayView` whose only purpose is to expose
- * `fromLatLngToContainerPixel`.
- *
- * This is the supported way to convert a ground position to a pixel offset inside
- * the map's own container. Doing it by hand from `getProjection()` and world
- * coordinates works for the common case but accumulates drift as the map is panned,
- * and breaks outright at fractional zoom — `OverlayView` is handed the map's actual
- * pixel projection, so it stays correct under any pan and any zoom.
- *
- * The subclass is built here, on first use, rather than declared with `class X
- * extends google.maps.OverlayView` at module scope. The Maps JavaScript API is
- * fetched asynchronously, so at the moment this module is evaluated `google` does
- * not exist yet — an `extends` clause evaluates its superclass expression during
- * module evaluation and would throw `google is not defined` before any component
- * ever renders. Deferring to first use also means the class is derived from the
- * same `google` namespace the live map came from. Cached so a pan does not
- * re-derive it.
- */
-let ProjectionProbeClass: (new () => google.maps.OverlayView) | null = null
-
-function projectionProbeClass(): new () => google.maps.OverlayView {
-  if (ProjectionProbeClass) return ProjectionProbeClass
-
-  ProjectionProbeClass = class extends google.maps.OverlayView {
-    onAdd(): void {
-      /* Nothing to attach — this overlay exists only for its projection. */
-    }
-
-    draw(): void {
-      /* Nothing to draw. */
-    }
-
-    onRemove(): void {
-      /* Nothing to detach. */
-    }
-  }
-  return ProjectionProbeClass
+  return bounds.contains([p.lat, p.lon])
 }
 
 /**
@@ -650,6 +646,13 @@ function projectionProbeClass(): new () => google.maps.OverlayView {
  * pixels. `revision` is the invalidation signal: the map has no "the view moved,
  * repaint your DOM" callback, so a consumer re-reads pixel positions whenever the
  * number changes.
+ *
+ * This used to need an invisible `OverlayView` subclass — the Maps API has no direct
+ * ground-to-container-pixel call, and it has to be derived from a live overlay
+ * because the `google` namespace does not exist at module evaluation. Leaflet has
+ * the call on the map itself (`latLngToContainerPoint`), which is the same projection
+ * the tile pane uses, so it stays correct under any pan, any zoom and fractional
+ * zoom without an intermediate object to keep alive.
  */
 export function useContainerProjection(): {
   /** Ground position -> pixel offset within the map container, or null if unprojectable. */
@@ -660,63 +663,55 @@ export function useContainerProjection(): {
   revision: number
 } {
   const { map } = useMap()
-  const probeRef = useRef<google.maps.OverlayView | null>(null)
   const [revision, setRevision] = useState(0)
   const [size, setSize] = useState({ x: 0, y: 0 })
 
   useEffect(() => {
-    const probe = new (projectionProbeClass())()
-    probeRef.current = probe
-    probe.setMap(map)
-
     const bump = () => setRevision((r) => r + 1)
-    const listeners = [
-      map.addListener('bounds_changed', bump),
-      map.addListener('zoom_changed', bump),
-      map.addListener('drag', bump),
-      map.addListener('resize', bump),
-    ]
+    // `move` and `zoom` — the continuous variants, not the `end` ones — because a
+    // DOM overlay has to track the ground *during* a pan, not snap into place when
+    // it finishes. This is the one hook that wants every frame.
+    map.on('move', bump)
+    map.on('zoom', bump)
+    map.on('resize', bump)
 
     const measure = () => {
-      const div = map.getDiv()
+      const div = map.getContainer()
       setSize({ x: div.clientWidth, y: div.clientHeight })
       bump()
     }
     measure()
 
     const observer = new ResizeObserver(measure)
-    observer.observe(map.getDiv())
+    observer.observe(map.getContainer())
 
     return () => {
-      listeners.forEach((l) => l.remove())
+      map.off('move', bump)
+      map.off('zoom', bump)
+      map.off('resize', bump)
       observer.disconnect()
-      probe.setMap(null)
-      probeRef.current = null
     }
   }, [map])
 
   return useMemo(
     () => ({
       toContainerPixel: (p: LatLng) => {
-        const projection = probeRef.current?.getProjection()
-        if (!projection) return null
-        const point = projection.fromLatLngToContainerPixel({
-          lat: p.lat,
-          lng: p.lon,
-        })
-        return point ? { x: point.x, y: point.y } : null
+        const point = map.latLngToContainerPoint([p.lat, p.lon])
+        return Number.isFinite(point.x) && Number.isFinite(point.y)
+          ? { x: point.x, y: point.y }
+          : null
       },
       size,
       revision,
     }),
-    [size, revision],
+    [map, size, revision],
   )
 }
 
 /**
  * Run `draw` at most once per animation frame, keyed off a `revision` counter.
  *
- * Panning fires `bounds_changed` many times per frame. An overlay that repositions
+ * Panning fires `move` many times per frame. An overlay that repositions
  * dozens of DOM nodes on each one does that work many times over to produce one
  * visible result. Coalescing to a frame is the difference between a smooth pan and
  * a visibly stuttering one.

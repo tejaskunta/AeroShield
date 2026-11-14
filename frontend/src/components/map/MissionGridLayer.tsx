@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import L from 'leaflet'
 import type { MissionGrid } from '@/types'
 import { gridBounds } from '@/lib/geo'
 import { CONSOLE_HEX } from '@/lib/consoleInk'
@@ -39,7 +40,7 @@ import { useMap } from './mapContext'
  * cell id. The map shows geometry; the console shows nomenclature.
  */
 export function MissionGridLayer({ grid }: { grid: MissionGrid }) {
-  const { map, maps } = useMap()
+  const { map } = useMap()
 
   /**
    * The grid's lines, in domain coordinates.
@@ -54,14 +55,14 @@ export function MissionGridLayer({ grid }: { grid: MissionGrid }) {
    */
   const lines = useMemo(() => {
     const [[south, west], [north, east]] = gridBounds(grid)
-    const out: google.maps.LatLngLiteral[][] = []
+    const out: L.LatLngTuple[][] = []
 
     // Row boundaries: `rows + 1` horizontal lines, south to north.
     for (let row = 0; row <= grid.rows; row++) {
       const lat = south + ((north - south) * row) / grid.rows
       out.push([
-        { lat, lng: west },
-        { lat, lng: east },
+        [lat, west],
+        [lat, east],
       ])
     }
 
@@ -69,8 +70,8 @@ export function MissionGridLayer({ grid }: { grid: MissionGrid }) {
     for (let col = 0; col <= grid.cols; col++) {
       const lng = west + ((east - west) * col) / grid.cols
       out.push([
-        { lat: south, lng },
-        { lat: north, lng },
+        [south, lng],
+        [north, lng],
       ])
     }
 
@@ -78,26 +79,27 @@ export function MissionGridLayer({ grid }: { grid: MissionGrid }) {
   }, [grid])
 
   useEffect(() => {
-    const polylines = lines.map(
-      (path) =>
-        new maps.Polyline({
-          map,
-          path,
-          strokeColor: CONSOLE_HEX.rule,
-          strokeWeight: 1,
-          strokeOpacity: 0.85,
-          // A reference grid should never intercept a click meant for a pin.
-          clickable: false,
-          // Above the coverage fill, below the pins: a cell boundary is a reading
-          // aid, and a detection marker must always win the z-order fight.
-          zIndex: 10,
-        }),
+    const polylines = lines.map((path) =>
+      L.polyline(path, {
+        stroke: true,
+        color: CONSOLE_HEX.rule,
+        weight: 1,
+        opacity: 0.85,
+        fill: false,
+        // A reference grid should never intercept a click meant for a pin.
+        interactive: false,
+        // Above the coverage fill, below the pins: a cell boundary is a reading
+        // aid, and a detection marker must always win the z-order fight. Leaflet
+        // draws polygons in a single pane in insertion order, so this is the
+        // ordering rather than a per-layer z-index.
+        pane: 'overlayPane',
+      }).addTo(map),
     )
 
     return () => {
-      polylines.forEach((line) => line.setMap(null))
+      polylines.forEach((line) => line.remove())
     }
-  }, [map, maps, lines])
+  }, [map, lines])
 
   return null
 }

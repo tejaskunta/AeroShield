@@ -11,7 +11,9 @@ import {
   gridCenter,
   mPerDegLon,
   offsetM,
+  plottablePath,
   toLatLngLiteral,
+  validCoordinate,
 } from './geo.ts'
 import { MISSION } from './mockData.ts'
 import { positionAtDistance, TOTAL_WALK_M } from './simulation.ts'
@@ -273,4 +275,71 @@ test('the aircraft never leaves the survey block', () => {
       `at ${d} m the aircraft was ${north} m north`,
     )
   }
+})
+
+/**
+ * The coordinate guard that stops a broken row becoming a pin in the Atlantic.
+ *
+ * These exist because `NaN` defeats the obvious range check. Every comparison against
+ * `NaN` is false, so `lat < -90 || lat > 90` lets it through and the marker renders at
+ * a position that is not on Earth. The tests pin the rejection as intentional rather
+ * than accidental, and pin the one value that looks wrong but is not.
+ */
+
+test('a usable coordinate passes', () => {
+  assert.equal(validCoordinate({ lat: ORIGIN.lat, lon: ORIGIN.lon }), true)
+  assert.equal(validCoordinate({ lat: -33.8688, lon: 151.2093 }), true)
+})
+
+test('the null island is a real place and passes', () => {
+  // `(0, 0)` is in the Gulf of Guinea. A mission could legitimately be flown there,
+  // and a guard that rejected it would be a bug of its own. The test is whether the
+  // numbers are usable, not whether the position looks suspicious.
+  assert.equal(validCoordinate({ lat: 0, lon: 0 }), true)
+})
+
+test('NaN is rejected, which the range check alone would not do', () => {
+  // The named reason this guard exists. `NaN >= -90 && NaN <= 90` is false, so a
+  // range-only check happens to reject it; `NaN < -90 || NaN > 90` is *also* false,
+  // so a range-only check written the other way would accept it. Being explicit with
+  // `Number.isFinite` makes the outcome independent of how the comparison is phrased.
+  assert.equal(validCoordinate({ lat: NaN, lon: ORIGIN.lon }), false)
+  assert.equal(validCoordinate({ lat: ORIGIN.lat, lon: NaN }), false)
+  assert.equal(validCoordinate({ lat: NaN, lon: NaN }), false)
+})
+
+test('infinities and out-of-range values are rejected', () => {
+  assert.equal(validCoordinate({ lat: Infinity, lon: 0 }), false)
+  assert.equal(validCoordinate({ lat: -Infinity, lon: 0 }), false)
+  assert.equal(validCoordinate({ lat: 90.0001, lon: 0 }), false)
+  assert.equal(validCoordinate({ lat: 0, lon: 180.0001 }), false)
+  assert.equal(validCoordinate({ lat: 0, lon: -181 }), false)
+})
+
+test('null and undefined are rejected rather than thrown on', () => {
+  // The API mapper runs `.filter(validCoordinate)` over a row whose fields may be
+  // absent on a record written by an older schema.
+  assert.equal(validCoordinate(null), false)
+  assert.equal(validCoordinate(undefined), false)
+})
+
+test('a bad vertex is dropped, not drawn through the origin', () => {
+  // The failure this prevents: a polyline is drawn between CONSECUTIVE points, so one
+  // bad coordinate does not merely lose a vertex — it drags the line to (0, 0) and
+  // back, which renders as a 6,000 km spike out of the survey and a return. Dropping
+  // it leaves a visible gap, and a visible gap is an accurate statement that we do not
+  // know where the aircraft was for that stretch.
+  const good = [
+    { lat: 17.3969, lon: 78.4907 },
+    { lat: 17.397, lon: 78.4908 },
+  ]
+  const withBad = [good[0]!, { lat: NaN, lon: NaN }, good[1]!]
+  const kept = plottablePath(withBad)
+  assert.equal(kept.length, 2)
+  assert.deepEqual(kept, good)
+})
+
+test('a path of nothing but bad points yields nothing to draw', () => {
+  assert.deepEqual(plottablePath([]), [])
+  assert.deepEqual(plottablePath([{ lat: NaN, lon: 0 }]), [])
 })

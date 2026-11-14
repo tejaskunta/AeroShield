@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useMission } from '@/components/shell/missionContext'
 import { MISSION } from '@/lib/mockData'
+import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
 import {
   confidenceHistogram,
   reviewProgress,
@@ -28,6 +29,12 @@ import { RiskHeatmap } from '@/components/analytics/RiskHeatmap'
  * how trustworthy it is, and the heatmap shows where it is. The caveat strip at the
  * bottom is part of the screen, not a disclaimer bolted on — every number here has
  * a real limit and stating them is what makes the rest usable.
+ *
+ * The provenance caveat is derived, not fixed. It used to read "every figure on
+ * this screen is derived from simulated detections", which was true of the keyless
+ * demo and became a false alarm the moment a mission was configured: it told an
+ * operator that measured results were invented. Which line is shown now follows the
+ * same signal the rest of the app uses — whether the API is answering at all.
  */
 export function Analytics() {
   const mission = useMission()
@@ -42,6 +49,16 @@ export function Analytics() {
   const gaps = useMemo(() => uncoveredWithDetections(detections, progress), [detections, progress])
   const byReview = countByReview(detections)
 
+  /*
+   * A live mission is one the API is answering for. A configured call-sign is not
+   * enough on its own — the name can be set with no key or no backend, and
+   * declaring the figures measured in that case would be the same lie in the
+   * opposite direction. The rows themselves are the test: any `backend` row means
+   * the aircraft's own pipeline produced at least part of this screen.
+   */
+  const flown = detections.some((d) => d.source === 'backend')
+  const simulatedRows = detections.length - detections.filter((d) => d.source === 'backend').length
+
   return (
     <div className="h-full overflow-y-auto">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-3 py-2">
@@ -49,7 +66,8 @@ export function Analytics() {
           Analytics
         </h1>
         <p className="font-mono text-small text-paper-dim">
-          {MISSION.name} · {formatDuration(progress?.elapsedS ?? 0)} elapsed
+          {HAS_LIVE_MISSION ? MISSION_NAME : MISSION.name} ·{' '}
+          {formatDuration(progress?.elapsedS ?? 0)} elapsed
         </p>
       </header>
 
@@ -142,12 +160,28 @@ export function Analytics() {
                 </span>
               </li>
             )}
-            <li className="flex gap-2 text-caution">
+            <li className={`flex gap-2 ${flown ? 'text-paper-dim' : 'text-caution'}`}>
               <span aria-hidden>·</span>
-              <span>
-                Every figure on this screen is derived from simulated detections. None of it
-                reflects a real survey.
-              </span>
+              {flown ? (
+                <span>
+                  The detections behind these figures came from the aircraft.{' '}
+                  {simulatedRows > 0 && (
+                    <>
+                      {simulatedRows} of the {detections.length} rows are invented demo
+                      fixtures and are counted in the totals above — filter them out in the
+                      Detection Center to see the flown result alone.{' '}
+                    </>
+                  )}
+                  Coverage and the survey grid are still the simulator's: the backend keeps
+                  no per-cell record, so those two describe the planned block, not ground the
+                  aircraft has imaged.
+                </span>
+              ) : (
+                <span>
+                  Every figure on this screen is derived from simulated detections. None of it
+                  reflects a real survey.
+                </span>
+              )}
             </li>
           </ul>
         </section>

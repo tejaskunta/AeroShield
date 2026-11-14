@@ -52,17 +52,62 @@ _STOPWORDS = frozenset(
 )
 
 
-def _stem(word: str) -> str:
-    """A crude but stable suffix stripper.
+_DERIVATIONAL = (
+    # (suffix, minimum characters that must remain once it is stripped)
+    ("ational", 5), ("iveness", 5), ("ements", 5), ("ement", 5),
+    ("ance", 4), ("ence", 4), ("ment", 4), ("ness", 4),
+    ("ing", 3), ("ers", 3), ("er", 3), ("ed", 3),
+    ("ion", 5), ("al", 4), ("ly", 4), ("or", 4), ("ity", 4),
+)
 
-    Not a real Porter stemmer — just enough that 'detected'/'detection',
-    'distances'/'distance' and 'clearance'/'clear' collide in the vector space.
-    Order matters: longest suffixes first.
+# Plurals ending in a sibilant take "-es"; stripping a bare "s" would leave a
+# trailing "e" (pass -> passe, hazard -> hazarde), which then never rejoins its
+# singular form.
+_SIBILANT = ("ses", "xes", "zes", "ches", "shes")
+
+
+def _stem(word: str) -> str:
+    """A crude but *consistent* suffix stripper.
+
+    Not a real Porter stemmer. The one property it must have is that related forms
+    of a word collapse onto the SAME stem, because a query and a passage can use
+    different forms and bag-of-words retrieval cannot see through that on its own.
+    That means two passes, inflections before derivations, and derivations applied
+    repeatedly:
+
+        detections -> detection -> detect
+        detector                  -> detect
+        distances  -> distance    -> dist
+
+    The original implementation stripped a single suffix in one pass with a fixed
+    3-character floor, which silently broke exactly that property:
+
+        distance  -> dist      but  distances -> distanc
+        detection -> detection      (a query for "detector" then matched nothing)
+
+    That is why the fourth suggested question in the UI ("What does the detector
+    actually detect?") scored zero against a corpus that plainly answers it.
     """
-    for suffix in ("ational", "iveness", "ements", "ance", "ence", "ment", "ness",
-                   "ing", "ies", "ers", "ed", "es", "al", "ly", "s"):
-        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-            return word[: -len(suffix)]
+    if len(word) <= 3:
+        return word
+
+    # Inflectional first, so the derivational pass sees one spelling.
+    if word.endswith("ies") and len(word) > 4:
+        word = word[:-3] + "y"
+    elif word.endswith(_SIBILANT):
+        word = word[:-2]
+    elif word.endswith("s") and not word.endswith("ss") and len(word) > 3:
+        word = word[:-1]
+
+    # Derivational, at most twice — enough for "detections" but miles from
+    # hyper-stemming, because every suffix must leave a real word behind.
+    for _ in range(2):
+        for suffix, keep in _DERIVATIONAL:
+            if word.endswith(suffix) and len(word) - len(suffix) >= keep:
+                word = word[: -len(suffix)]
+                break
+        else:
+            break
     return word
 
 

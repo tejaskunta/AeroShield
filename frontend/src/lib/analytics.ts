@@ -22,6 +22,50 @@ import { cellId, parseCellId } from './geo'
  */
 
 /**
+ * Greatest number of buckets the timeline will allocate.
+ *
+ * A survey flight on this aircraft is minutes long, so four hours of one-minute
+ * buckets is already far past anything real. The cap exists because the axis is
+ * derived from two clocks that can disagree - the drone's `captured_at` and the
+ * duration measured from its track - and a disagreement that is off by a factor
+ * would otherwise allocate a million-bar chart and hang the tab. Truncating is the
+ * honest failure: the chart shows what fits and the count on screen is still real.
+ */
+const MAX_BUCKETS = 240
+
+/**
+ * The instant the timeline's zero is measured from.
+ *
+ * This used to be the hard-coded fixture epoch, which was correct only while every
+ * detection in the list was a fixture. A real detection carries the drone's own
+ * `captured_at` - wall-clock time - so subtracting a 2026 fixture epoch from it
+ * produced an offset of hundreds of thousands of minutes, and `timeline` duly
+ * allocated that many one-minute buckets before drawing anything. Feeding the real
+ * track in was what surfaced it; the chart was not wrong about the data, it was
+ * wrong about where zero was.
+ *
+ * The mission's own duration is the honest anchor, because it is the only quantity
+ * here measured on the same clock as `elapsedS`: the aircraft's last frame minus
+ * the length of the flight is the moment it took off. With fixture data that lands
+ * within seconds of `MISSION_EPOCH`, so the simulated chart is unchanged; with live
+ * data it lands on the actual take-off. A detection older than that (one carried
+ * in from a previous flight) clamps into the first bucket rather than widening the
+ * axis.
+ *
+ * Falls back to the earliest detection when there is no duration to subtract, and
+ * to `MISSION_EPOCH` only when there is nothing to go on at all.
+ */
+function missionOriginMs(detections: Detection[], elapsedS: number): number {
+  const times = detections
+    .map((d) => Date.parse(d.capturedAt))
+    .filter((t) => Number.isFinite(t))
+  if (times.length === 0) return MISSION_EPOCH
+  const latest = Math.max(...times)
+  if (elapsedS > 0) return latest - elapsedS * 1000
+  return Math.min(...times)
+}
+
+/**
  * Detections bucketed along the mission timeline.
  *
  * The axis is minutes since mission start, not wall-clock time: an operator reads
@@ -38,19 +82,26 @@ export function timeline(
 ): TimeBucket[] {
   if (detections.length === 0) return []
 
-  const elapsedMin = (progress?.elapsedS ?? 0) / 60
+  const elapsedS = progress?.elapsedS ?? 0
+  const origin = missionOriginMs(detections, elapsedS)
+  const elapsedMin = Math.max(0, elapsedS / 60)
   const lastMin = Math.max(
     elapsedMin,
-    ...detections.map((d) => (Date.parse(d.capturedAt) - MISSION_EPOCH) / 60_000),
+    ...detections.map((d) => (Date.parse(d.capturedAt) - origin) / 60_000),
   )
-  const bucketCount = Math.max(1, Math.ceil(lastMin / bucketMinutes))
+  const bucketCount = Math.min(
+    MAX_BUCKETS,
+    Math.max(1, Math.ceil(lastMin / bucketMinutes) || 1),
+  )
 
   const buckets: TimeBucket[] = Array.from({ length: bucketCount }, (_, i) => ({
     minute: i * bucketMinutes,
     detections: 0,
     confirmed: 0,
     // Coverage is monotonic, so approximate its curve linearly to the current
-    // value. Marked as an approximation because the simulator does not log history.
+    // value. Marked as an approximation because neither source logs coverage
+    // history - and for a live flight the coverage figures are the simulator's,
+    // which is why `LiveMap` labels them rather than presenting them as measured.
     coveragePct: Math.min(
       progress?.coveragePct ?? 0,
       (((i + 1) * bucketMinutes) / Math.max(1, elapsedMin)) * (progress?.coveragePct ?? 0),
@@ -58,7 +109,8 @@ export function timeline(
   }))
 
   for (const d of detections) {
-    const min = (Date.parse(d.capturedAt) - MISSION_EPOCH) / 60_000
+    const min = (Date.parse(d.capturedAt) - origin) / 60_000
+    if (!Number.isFinite(min)) continue
     const idx = Math.min(bucketCount - 1, Math.max(0, Math.floor(min / bucketMinutes)))
     const bucket = buckets[idx]
     if (!bucket) continue

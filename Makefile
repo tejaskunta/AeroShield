@@ -199,7 +199,7 @@ EXPORT_PY ?= /tmp/aero_export/bin/python
 # EXPORT_DEVICE=0 on a CUDA box.
 EXPORT_DEVICE ?= cpu
 
-.PHONY: deploy bench run stream api logs doctor test-local export-rect deps-drone tunnel go status probe-cuda watchdog-log stop-drone
+.PHONY: deploy bench run stream api logs doctor test-local export-rect deps-drone tunnel go status probe-cuda watchdog-log stop-drone power livecheck
 
 tunnel:
 	@echo "opening reverse tunnel: drone:8000 -> laptop:127.0.0.1:8000"
@@ -379,3 +379,71 @@ stop-drone:
 	@ssh $(JETSON) 'touch $(JETSON_DIR)/logs/watchdog.stop; sleep 2; \
 		pgrep -f live_detect.py >/dev/null && echo "still running - stop file not honoured" \
 		|| echo "detector stopped"'
+
+# ---------------------------------------------------------------------------
+# Power: read the board's current draw and mode. CHANGES NOTHING.
+#
+# This exists because the 5V problem is the most common cause of a "crash"
+# that is not a crash (see docs/RUNBOOK.md and docs/DRONE-POWER-WIFI.md), and
+# because "is it the supply?" is answerable in ten seconds if you can see the
+# rail sag while inference runs. Run this in one terminal and `make stream` in
+# another, then watch VDD_IN.
+#
+# Deliberately read-only. `nvpmodel -m` is a decision about frame rate, and
+# AGENTS.md forbids changing power mode without explicit approval - so the
+# command to change it is printed, never run.
+power:
+	@echo "== nvpmodel (current mode) =="
+	@ssh $(JETSON) 'sudo nvpmodel -q --verbose 2>&1 | head -n 12' \
+		|| echo "   cannot read - needs sudo or the board is unreachable"
+	@echo ""
+	@echo "== online cores =="
+	@ssh $(JETSON) 'cat /sys/devices/system/cpu/cpu*/online 2>/dev/null | paste -sd, -'
+	@echo ""
+	@echo "== power/thermal, 5 samples at 1 Hz =="
+	@echo "   VDD_IN is total board draw in mW; watch it spike when the GPU warms up."
+	@ssh $(JETSON) 'timeout 5 tegrastats --interval 1000' 2>/dev/null \
+		| grep -o 'VDD_IN [0-9]*mW/[0-9]*mW\|GR3D_FREQ [0-9]*%\|tj@[0-9]*C' \
+		|| echo "   no tegrastats output (is the board reachable?)"
+	@echo ""
+	@echo "== brownout evidence since boot =="
+	@ssh $(JETSON) 'c=$$(dmesg 2>/dev/null | grep -ci "under-voltage\|OC ALARM\|vdd-usb-vbus.*disabl"); \
+		echo "   $$c under-voltage / over-current / USB-disable event(s)"; \
+		[ "$$c" = 0 ] || echo "   THIS IS THE 5V PROBLEM - use the barrel jack, supply > 4A"'
+	@echo ""
+	@echo "To lower the draw (requires approval - see AGENTS.md): sudo nvpmodel -m 1"
+
+# ---------------------------------------------------------------------------
+# Live feed: prove the MJPEG server answers with a real JPEG, in three steps.
+#
+# Each step rules out one layer, so a failure tells you WHICH layer is broken
+# instead of "the feed is down":
+#   1. is anything listening on the port at all?
+#   2. does it answer HTTP headers?  (`/stream` never completes on its own, so
+#      every request here is time-bounded or this target hangs forever)
+#   3. do the bytes actually decode as a JPEG?  A 400-byte file is a black or
+#      truncated frame; a real CSI frame is tens of kilobytes.
+#
+# Addressed by IP rather than by the ssh alias: this is what the browser does,
+# and DNS/host-alias problems are exactly what it would otherwise hide.
+JETSON_IP ?= 10.11.101.241
+livecheck:
+	@echo "== [1/3] is :$(STREAM_PORT) listening on the aircraft? =="
+	@ssh $(JETSON) 'ss -ltn 2>/dev/null | grep -q ":$(STREAM_PORT)" \
+		&& echo "   OK - listening" \
+		|| echo "   FAIL - nothing on $(STREAM_PORT). Start it with: make stream (not make run)"'
+	@echo "== [2/3] does the HTTP page answer? =="
+	@curl -sI --max-time 5 http://$(JETSON_IP):$(STREAM_PORT)/ >/dev/null \
+		&& echo "   OK - headers received" \
+		|| echo "   FAIL - no answer from http://$(JETSON_IP):$(STREAM_PORT)/ (wrong IP? use JETSON_IP=...)"
+	@echo "== [3/3] does one frame decode as JPEG? =="
+	@curl -s --max-time 5 http://$(JETSON_IP):$(STREAM_PORT)/stream -o /tmp/aeroshield_frame.jpg \
+		|| true; \
+		sz=$$(stat -c %s /tmp/aeroshield_frame.jpg 2>/dev/null || echo 0); \
+		hd=$$(head -c 3 /tmp/aeroshield_frame.jpg 2>/dev/null | od -An -tx1 | tr -d ' \n'); \
+		if [ "$$hd" = ffd8ff ]; then \
+			echo "   OK - $$sz byte JPEG"; \
+			[ "$$sz" -gt 2000 ] || echo "   WARNING - under 2 KB, probably a black frame (camera not publishing)"; \
+		else \
+			echo "   FAIL - not a JPEG ($$sz bytes). Is 'make stream' running?"; \
+		fi

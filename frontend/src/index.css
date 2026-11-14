@@ -2,9 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Leaflet's own stylesheet is imported in main.tsx (CSS @import must precede all
-   rules, so keeping it out of this file avoids a PostCSS ordering warning).
-   Our Leaflet overrides live at the bottom of this file. */
+/* Leaflet's own stylesheet is imported in main.tsx, before this one, because CSS
+   @import has to precede all rules and because its structural rules (pane
+   stacking, `.leaflet-container`) must land before our overrides rather than on
+   top of them.
+   Our Leaflet overrides live in the map section below. */
 
 /* ---------------------------------------------------------------------------
    Tokens are declared in tailwind.config.ts. They are mirrored here as CSS
@@ -94,73 +96,188 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Google Maps chrome.
+   Leaflet chrome.
 
-   The Maps API injects its own DOM controls, and every one of them ships with
-   Google's default styling — white plates, blue links, system fonts. They read
-   as "Google Maps" inside a console that is otherwise entirely hairlines and
-   monospace, so they are restyled here to disappear into the instrument rather
-   than sit on top of it.
+   Leaflet ships its own structural stylesheet (imported in main.tsx). That file
+   is deliberately minimal and mostly correct, so only three things are done
+   here: the container's background, the attribution control's type, and the
+   reset that makes a `divIcon` usable as a glyph host.
 
-   Attribution and the scale bar are deliberately NOT hidden: both are required
-   by the Maps terms and, more practically, the scale bar is the only thing on
-   screen that tells an operator how big a hazard actually is.
+   The scale bar is NOT hidden. It is the only thing on screen that tells an
+   operator how big a hazard actually is, and Leaflet renders it in a plate that
+   has to be restyled rather than left as Leaflet's default white.
+
+   Note what is absent compared with the Maps version this replaces: there is no
+   `.gm-style-mtc`, no `.gm-bundled-control`, and no `filter: saturate()` on any
+   control. Nothing here makes an attempt to overrule a vendor's injected control
+   DOM, because Leaflet's controls are ours to lay out — the map's own chrome is
+   React, in LiveMap, and it is styled with Tailwind like the rest of the console.
 --------------------------------------------------------------------------- */
 
-/* The map container itself. Maps writes inline styles onto its own children, so
-   only the frame is ours to set. */
+/* The map container. Leaflet writes inline styles onto its panes, so only the
+   frame's own background is ours to set — and it needs setting, because until
+   the first tile arrives the container is transparent and the console's dark
+   backdrop shows through as a white flash on some browsers. */
 .aeroshield-map {
   height: 100%;
   width: 100%;
   background: var(--ink-deep);
 }
 
+.leaflet-container {
+  background: var(--ink-deep);
+  /* Leaflet sets `outline: none` on focus, which strips the focus ring from a
+     keyboard-reachable region. Put a console-coloured one back. */
+  outline-color: var(--rule-bright);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 /* Attribution: required, but it does not need to shout. Dim it to the same
-   weight as the rest of the map's annotations. */
-.aeroshield-map .gm-style-cc,
-.aeroshield-map .gmnoscreen,
-.aeroshield-map .gmnoprint {
+   weight as the rest of the map's annotations. Esri and OSM both oblige the
+   credit; neither obliges it to be legible over imagery, so the console renders
+   its own readable credit in LiveMap and this is the machine-readable copy. */
+.leaflet-control-attribution {
+  background: rgba(14, 20, 26, 0.75) !important;
+  color: var(--paper-faint) !important;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
   font-size: 9px !important;
   letter-spacing: 0.04em;
+  padding: 0 4px !important;
 }
-.aeroshield-map .gm-style-cc a,
-.aeroshield-map .gm-style-cc span,
-.aeroshield-map .gmnoprint a,
-.aeroshield-map .gmnoprint span {
-  color: var(--paper-faint) !important;
-  opacity: 0.55;
-}
-.aeroshield-map .gm-style-cc a:hover,
-.aeroshield-map .gmnoprint a:hover {
-  opacity: 1;
-}
-
-/* Google's default control plates (zoom, layers, map type). We render our own
-   chrome, so anything Maps decides to add gets the system's treatment rather
-   than a white rounded box. */
-.aeroshield-map .gm-style-mtc,
-.aeroshield-map .gm-bundled-control,
-.aeroshield-map .gm-bundled-control-on-bottom {
-  filter: saturate(0.4) brightness(0.7);
-}
-
-/* The maps API paints its own "keyboard shortcuts" and "map data" links in a
-   rounded white panel; flatten it. */
-.aeroshield-map .gm-style-moc,
-.aeroshield-map .gm-style-pbc {
-  background: rgba(14, 20, 26, 0.9) !important;
-  border: 1px solid var(--rule) !important;
-  border-radius: 0 !important;
+.leaflet-control-attribution a {
   color: var(--paper-dim) !important;
+  opacity: 0.6;
+  text-decoration: none;
+}
+.leaflet-control-attribution a:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* Leaflet's own scale control, if it is ever enabled. Styled to match the
+   console's hairline instruments rather than Leaflet's white plate. */
+.leaflet-control-scale-line {
+  background: rgba(14, 20, 26, 0.8) !important;
+  border-color: var(--rule-bright) !important;
+  color: var(--paper-dim) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  font-size: 9px !important;
+  letter-spacing: 0.06em;
+  border-radius: 0 !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Basemap filters.
+
+   The street canvas is OpenStreetMap's standard raster, which is a bright,
+   saturated, high-contrast map designed to be scrolled — dropped next to hazard
+   reds and the console's ink it swallows them. Desaturating and dimming it pulls
+   it back to being a substrate.
+
+   It is a CSS filter on the tile layer's own container rather than a style
+   applied to the imagery, and that distinction is the whole reason this works:
+   `basemaps.ts` puts this class on the OSM layer only, so no amount of tuning
+   here can reach Esri's imagery. The Maps version of this console styled
+   `elementType: 'geometry'` expecting roads and got the ground instead; there is
+   no equivalent class of mistake available through a scoped class name.
+--------------------------------------------------------------------------- */
+.aeroshield-tiles-street {
+  filter: saturate(0.35) brightness(0.55) contrast(1.15);
+}
+
+/* ---------------------------------------------------------------------------
+   Map glyphs.
+
+   Pin and aircraft marks are `divIcon` hosts. Leaflet wraps whatever markup a
+   `divIcon` returns in a `div.leaflet-div-icon` that — by default — paints a
+   white box with a grey border. That is Leaflet's marker affordance for the
+   common case of a plain image with no styling, and it is exactly wrong here:
+   it would put a white square behind every hazard. Each icon sets its own
+   `className` (see `markerGlyphs.ts` and `DronePlatform.tsx`), which *replaces*
+   that default rather than extending it, so the white box never appears — but
+   the reset below is still needed, because Leaflet's positioning transform is
+   applied to the wrapper and any inherited background or border would be
+   stretched by it.
+--------------------------------------------------------------------------- */
+.aeroshield-pin-icon,
+.aeroshield-drone-icon {
+  background: transparent;
+  border: 0;
+  /* A pin must not intercept the click meant for the map underneath it; the SVG
+     inside does the hit-testing via the marker's own `click` event. */
+  pointer-events: auto;
+}
+
+/* The pin glyph fills its host box, so the same SVG serves every zoom scale. */
+.aeroshield-pin {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Touch target, expanded without touching the glyph or Leaflet's layout.
+   A pin is 20 px (26 selected), which is under the 44 px minimum for a reliable
+   tap. Growing `iconSize` to 44 would also grow the marker box Leaflet positions
+   and stacks, so the padding is added here instead: a transparent pseudo-element
+   that centres on the glyph and carries the pointer events. Because it is a
+   child of the marker element, the click still arrives at the marker, so the
+   existing handler needs no change. */
+.aeroshield-pin::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border-radius: 9999px;
+}
+
+/* Hover affordance: the mark has to read as pressable before it is pressed.
+   Scaled rather than recoloured so the risk colour, which carries meaning,
+   is untouched. */
+.aeroshield-pin-icon:hover .aeroshield-pin {
+  transform: scale(1.15);
+}
+.aeroshield-pin {
+  transition: transform 120ms ease-out;
+}
+
+.aeroshield-pin svg,
+.aeroshield-drone-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The glyphs are drawn in console ink over imagery, so a soft dark halo is what
+     keeps a paper-coloured diamond legible against a pale roof or a bright road. */
+  filter: drop-shadow(0 0 2px rgba(14, 20, 26, 0.9));
+}
+
+/* The selection ripple. Emitted only for the selected pin (see
+   `detectionGlyphHtml`), so an unselected map pays nothing for it and 14 pins do
+   not register 14 animations. */
+.aeroshield-pin__ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--paper);
+  opacity: 0;
+  animation: aeroshield-ripple 1.8s ease-out infinite;
+}
+
+@keyframes aeroshield-ripple {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
 }
 
 /* ---------------------------------------------------------------------------
    Map labels.
 
-   Marker labels are rendered by the Maps API into absolutely-positioned divs,
-   so the class name we set on the label is the only hook available. Used for
-   cell references and corridor waypoints.
+   Used for cell references and corridor waypoints, which are rendered as
+   `divIcon`-hosted text rather than as tiles.
 --------------------------------------------------------------------------- */
 .aeroshield-map-label {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;

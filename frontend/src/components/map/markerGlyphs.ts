@@ -1,3 +1,4 @@
+import L from 'leaflet'
 import type { Detection, RiskLevel } from '@/types'
 import { CONSOLE_HEX } from '@/lib/consoleInk'
 import { RISK_HEX } from '@/lib/risk'
@@ -5,14 +6,7 @@ import { RISK_HEX } from '@/lib/risk'
 /**
  * Marker glyphs.
  *
- * Leaflet markers could be arbitrary HTML, so the pin shapes here used to be
- * `divIcon` markup — a rotated `<span>`, a ring, a dot. The Maps API markers are
- * either a raster image or a vector `Symbol` built from a path, and of the two the
- * Symbol is the right choice: it is resolution-independent, it inherits the map's
- * own drawing, and its geometry is described in real numbers rather than in CSS
- * with a transform bolted on.
- *
- * The visual vocabulary is unchanged, because the vocabulary is the point:
+ * The visual vocabulary is the point, and it is unchanged:
  *
  *   confirmed  -> filled diamond    staked, verified hazard
  *   flagged    -> diamond w/ dot    needs a second look
@@ -23,12 +17,23 @@ import { RISK_HEX } from '@/lib/risk'
  * shape is what survives a colour-blind operator or a washed-out screen, which is
  * why "red means hazard" is never the only channel.
  *
- * The marker size tracks selection so the selected pin reads as selected at a
- * glance without a separate highlight.
+ * ── Why SVG in a `divIcon` rather than `L.circleMarker` ─────────────────────────
  *
- * The aircraft is deliberately *not* here. It is a raster PNG rather than a path, and
- * a raster `Marker` icon cannot be rotated — so the drone is a DOM `OverlayView` with
- * a CSS rotation instead. See `DroneOverlay.ts`.
+ * A `circleMarker` can only express circles, and half this vocabulary is not a
+ * circle: the diamond is the entire distinction between a confirmed hazard and a
+ * candidate. Faking a diamond with CSS on a `circleMarker` means it stops being one.
+ *
+ * HTML also buys back something the Maps port had to give up. Maps markers are either
+ * a raster image or a vector `Symbol` with no DOM to animate, so on that stack
+ * selection could only be signalled by a size bump and a z-order lift — legible, but a
+ * step down from the rippling ring it replaced. A `divIcon` is a real DOM node, so the
+ * ripple is a CSS animation again, and it costs one `<span>` rather than the whole
+ * overlay-per-detection the port note was resigned to.
+ *
+ * The one thing SVG-in-DOM does *not* get for free is the map's own zoom scaling:
+ * `divIcon` pixels are screen pixels, fixed regardless of zoom. That is why the
+ * caller passes `scale` from `useZoomScale` and the icon box is rebuilt when it
+ * changes, rather than the glyph being drawn in map units.
  */
 
 const STROKE = CONSOLE_HEX.inkDeep
@@ -37,120 +42,90 @@ const STROKE = CONSOLE_HEX.inkDeep
 const SIZE_SELECTED = 26
 const SIZE_NORMAL = 20
 
+/**
+ * The glyph's authored box, in SVG user units.
+ *
+ * Every glyph is authored inside the same 20x20 box centred on the origin and scaled
+ * as a unit, so the shapes stay in proportion to each other at any size. A `viewBox`
+ * of `-10 -10 20 20` puts (0,0) at the box's centre, which is what lets the anchor be
+ * the true centre rather than an offset that has to be kept in step with the paths.
+ */
+const BOX = 20
+const VIEW_BOX = `${-BOX / 2} ${-BOX / 2} ${BOX} ${BOX}`
+
+const DIAMOND = 'M 0,-7 L 7,0 L 0,7 L -7,0 Z'
+
 export function pinSize(selected: boolean): number {
   return selected ? SIZE_SELECTED : SIZE_NORMAL
 }
 
 /**
- * The Symbol for a detection pin.
+ * The glyph markup for a detection pin.
  *
- * `scale` is driven by the map's zoom (see `useZoomScale`) so symbols stay legible
- * while zoomed out and don't become oversized blobs while zoomed in. Symbol scale
- * is relative to `SIZE_NORMAL`, so the caller passes a plain multiplier.
+ * Kept separate from `detectionIcon` so it can be inspected — and so the shape
+ * decision can be tested without a map instance, which is what makes "a confirmed
+ * hazard is a diamond" a checkable claim rather than a thing someone has to look at.
  */
-export function detectionSymbol(
+export function detectionGlyphHtml(
   level: RiskLevel,
   reviewState: Detection['review']['state'],
   selected: boolean,
-  scale = 1,
-): google.maps.Symbol {
+): string {
   const hex = RISK_HEX[level]
-  const px = (pinSize(selected) / SIZE_NORMAL) * scale
-
-  // Every glyph is authored inside the same 20x20 box and scaled as a unit, so
-  // the shapes stay in proportion to each other at any zoom.
-  const base = { scale: px }
+  let inner: string
 
   // Cleared ground: a small solid dot. Deliberately quiet — ruled-out cells are
   // the majority of the map and must not compete with live hazards.
   if (level === 'cleared') {
-    return {
-      path: google.maps.SymbolPath.CIRCLE,
-      ...base,
-      fillColor: hex,
-      fillOpacity: 1,
-      strokeColor: STROKE,
-      strokeOpacity: 1,
-      strokeWeight: 1,
-      scale: 3.5 * px,
-    }
-  }
-
-  // Unverified candidate: a hollow ring — present, but unconfirmed.
-  if (reviewState !== 'confirmed' && reviewState !== 'flagged') {
-    return {
-      path: google.maps.SymbolPath.CIRCLE,
-      ...base,
-      fillColor: STROKE,
-      fillOpacity: 0.5,
-      strokeColor: hex,
-      strokeOpacity: 1,
-      strokeWeight: 2,
-      scale: 6 * px,
-    }
-  }
-
-  // A diamond is a square rotated 45°. Authored as an explicit path so the
-  // rotation is real geometry rather than a CSS transform the map cannot see —
-  // which is what lets the anchor and the tooltip sit on the actual centre.
-  const diamond = 'M 0,-7 L 7,0 L 0,7 L -7,0 Z'
-
-  if (reviewState === 'flagged') {
+    inner = `<circle r="3.5" fill="${hex}" stroke="${STROKE}" stroke-width="1" />`
+  } else if (reviewState !== 'confirmed' && reviewState !== 'flagged') {
+    // Unverified candidate: a hollow ring — present, but unconfirmed.
+    inner = `<circle r="6" fill="${STROKE}" fill-opacity="0.5" stroke="${hex}" stroke-width="2" />`
+  } else if (reviewState === 'flagged') {
     // Flagged keeps the diamond silhouette but fills only its centre, so it reads
     // as "hazard-shaped, needs a second look" rather than as a confirmed hazard.
-    return {
-      path: diamond,
-      ...base,
-      fillColor: STROKE,
-      fillOpacity: 1,
-      strokeColor: hex,
-      strokeOpacity: 1,
-      strokeWeight: 2,
-      scale: px,
-    }
+    inner = `<path d="${DIAMOND}" fill="${STROKE}" stroke="${hex}" stroke-width="2" />`
+  } else {
+    // Confirmed: a solid diamond.
+    inner = `<path d="${DIAMOND}" fill="${hex}" stroke="${STROKE}" stroke-width="1.5" />`
   }
 
-  // Confirmed: a solid diamond.
-  return {
-    path: diamond,
-    ...base,
-    fillColor: hex,
-    fillOpacity: 1,
-    strokeColor: STROKE,
-    strokeOpacity: 1,
-    strokeWeight: 1.5,
-    scale: px,
-  }
+  // The ripple is only emitted for the selected pin, so an unselected map pays
+  // nothing for it — no inert spans, no animation registered on 14 nodes.
+  const ripple = selected ? '<span class="aeroshield-pin__ripple"></span>' : ''
+
+  return (
+    `<div class="aeroshield-pin${selected ? ' is-selected' : ''}">` +
+    ripple +
+    `<svg viewBox="${VIEW_BOX}" width="100%" height="100%" ` +
+    `xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${inner}</svg>` +
+    `</div>`
+  )
 }
 
 /**
- * Endpoint glyph for the safe-route planner.
+ * The `divIcon` for a detection pin.
  *
- * Drawn as a ring with a dark core, matching the console's other "you put this
- * here" marks. Distinct from a detection pin because an endpoint is not evidence —
- * it is an intention.
+ * `scale` is driven by the map's zoom (see `useZoomScale`) so pins stay legible while
+ * zoomed out and do not become oversized blobs while zoomed in.
+ *
+ * `className` is replaced rather than extended: Leaflet's default `leaflet-div-icon`
+ * paints a white box with a border, which would put a white square behind every
+ * hazard. The anchor is the centre because the glyph is authored centred.
  */
-export function endpointSymbol(): google.maps.Symbol {
-  return {
-    path: google.maps.SymbolPath.CIRCLE,
-    scale: 5,
-    fillColor: CONSOLE_HEX.inkDeep,
-    fillOpacity: 1,
-    strokeColor: CONSOLE_HEX.paper,
-    strokeOpacity: 1,
-    strokeWeight: 2,
-  }
-}
+export function detectionIcon(
+  level: RiskLevel,
+  reviewState: Detection['review']['state'],
+  selected: boolean,
+  scale = 1,
+): L.DivIcon {
+  const size = pinSize(selected) * scale
+  const anchor = size / 2
 
-/** Numbered waypoint glyph for intermediate route nodes. */
-export function waypointSymbol(hex: string, scale = 1): google.maps.Symbol {
-  return {
-    path: google.maps.SymbolPath.CIRCLE,
-    scale: 3 * scale,
-    fillColor: hex,
-    fillOpacity: 1,
-    strokeColor: CONSOLE_HEX.inkDeep,
-    strokeOpacity: 1,
-    strokeWeight: 1.5,
-  }
+  return L.divIcon({
+    className: 'aeroshield-pin-icon',
+    html: detectionGlyphHtml(level, reviewState, selected),
+    iconSize: [size, size],
+    iconAnchor: [anchor, anchor],
+  })
 }

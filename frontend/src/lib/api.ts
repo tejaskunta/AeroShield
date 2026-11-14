@@ -9,6 +9,7 @@ import type {
 } from '@/types'
 import { COPILOT_CORPUS, REPORTS, UNGROUNDED_REPLY } from './mockData'
 import { canPersistReview, toIntId } from './detectionId'
+import { validCoordinate } from './geo'
 
 /**
  * The API seam.
@@ -19,18 +20,21 @@ import { canPersistReview, toIntId } from './detectionId'
  *   detectUpload    POST /api/detect            (dev-only inference, unchanged)
  *   checkHealth     GET  /health                (unchanged)
  *   saveReview      PATCH /api/detections/{id}/review
+ *   deleteDetection DELETE /api/detections/{id}  (needs an admin key)
  *   askCopilot      POST /api/copilot/query
  *   listReports     GET  /api/reports
  *   generateReport  POST /api/reports
  *   findMissionByName  GET /api/missions
  *   fetchLatestTelemetry GET /api/missions/{id}/telemetry/latest
+ *   fetchTelemetryTrack  GET /api/missions/{id}/telemetry
  *
  * Each wired call keeps its old fixture as a fallback: if the backend is
  * unreachable or rejects us (no key, a simulated id that has no server row),
  * the function resolves with the fixture behaviour instead of throwing, and the
- * caller's honesty flag (`persisted: false`, the fixture text, the fixture list)
- * tells the UI it is not looking at server state. The classroom demo runs with
- * zero keys and zero backend; a broken fallback would break that promise.
+ * caller's honesty flag (a `WriteOutcome` of `local` or `rejected`, the fixture
+ * text, the fixture list) tells the UI it is not looking at server state. The
+ * classroom demo runs with zero keys and zero backend; a broken fallback would
+ * break that promise.
  *
  * Auth: the wired routes need X-API-Key (backend/app/core/security.py). The
  * dashboard key is read + review scope, so it is safe in a browser build; the
@@ -136,13 +140,29 @@ interface BackendDetectionRead {
 }
 
 /**
+ * How a write went. Three outcomes, not two, because "nothing to write to" and
+ * "wrote and was refused" are different facts and the operator needs to see the
+ * difference.
+ *
+ * - `persisted` — the server accepted it. The audit trail now says so.
+ * - `local` — there is no server row for this detection (a simulator fixture, or
+ *   no key configured). The decision is real to this session and is *not* lost
+ *   when the view re-renders; it is lost on reload, which is the honest statement.
+ * - `rejected` — a request was made and failed. Nothing was recorded anywhere
+ *   except this tab. Something is broken and the operator must be told.
+ *
+ * The collapsed boolean this replaces reported `local` and `rejected` identically,
+ * which is why a panel could say "not persisted" about a decision that had in fact
+ * been written, and could equally say nothing alarming about a genuine failure.
+ */
+export type WriteOutcome = 'persisted' | 'local' | 'rejected'
+
+/**
  * REAL (fixture fallback) — `PATCH /api/detections/{id}/review`.
  *
  * reviewed_by/reviewed_at come back stamped by the server from the authenticated
  * principal, so the caller replaces its optimistic record with what the audit
- * trail actually says. A simulated id, a missing key, or a rejecting backend all
- * resolve { persisted: false } — the hook then keeps the in-memory decision and
- * marks it "not persisted", exactly as designed.
+ * trail actually says.
  *
  * `source` is required, and a non-backend row stops at `canPersistReview` before
  * any request is made. Without that guard the call is not merely pointless, it is
@@ -155,14 +175,14 @@ export async function saveReview(
   id: string,
   review: Detection['review'],
   source: Detection['source'],
-): Promise<{ persisted: boolean; record?: Detection['review'] }> {
+): Promise<{ outcome: WriteOutcome; record?: Detection['review']; status?: number }> {
   // A synthetic detection has no row to write to. Its review is real to the
   // operator and must keep working in memory; it just must not be persisted to
-  // somebody else's record.
-  if (!canPersistReview(id, source)) return { persisted: false }
+  // somebody else's record. That is `local`, not a failure.
+  if (!canPersistReview(id, source)) return { outcome: 'local' }
 
   const numericId = DASHBOARD_KEY ? toIntId(id) : null
-  if (numericId === null) return { persisted: false }
+  if (numericId === null) return { outcome: 'local' }
 
   try {
     const r = await fetch(`${BASE}/detections/${numericId}/review`, {
@@ -170,10 +190,10 @@ export async function saveReview(
       headers: authHeaders(true),
       body: JSON.stringify({ state: review.state, reason: review.reason ?? null }),
     })
-    if (!r.ok) return { persisted: false }
+    if (!r.ok) return { outcome: 'rejected', status: r.status }
     const body = (await r.json()) as BackendDetectionRead
     return {
-      persisted: true,
+      outcome: 'persisted',
       record: {
         state: body.review_state as Detection['review']['state'],
         reason: body.review_reason ?? undefined,
@@ -182,7 +202,56 @@ export async function saveReview(
       },
     }
   } catch {
-    return { persisted: false }
+    // A thrown fetch is a network failure, not a refusal: still `rejected`, with
+    // no status, because "the request never got an answer" is the fact.
+    return { outcome: 'rejected' }
+  }
+}
+
+/**
+ * REAL — `DELETE /api/detections/{id}`.
+ *
+ * Deleting a detection destroys evidence, so the backend gates it on
+ * `SCOPE_ADMIN` while the dashboard key is read + review only. That mismatch is
+ * **kept on purpose**: the console should not be able to erase a flight record
+ * with the key that ships in a browser bundle. A refused delete is therefore an
+ * ordinary, expected answer and is reported as one, with a message that says
+ * which key is needed — silence would leave the operator thinking the row is
+ * gone when the server still holds it.
+ *
+ * A simulated row has no server row, so deleting it is purely local and always
+ * succeeds. `canPersistReview` is reused as the provenance test: the condition is
+ * identical ("is this id safe to attribute to a real row?"), and a second,
+ * subtly different rule would be a bug waiting to happen.
+ */
+export async function deleteDetection(
+  id: string,
+  source: Detection['source'],
+): Promise<{ outcome: WriteOutcome; message?: string }> {
+  if (!canPersistReview(id, source)) return { outcome: 'local' }
+
+  const numericId = DASHBOARD_KEY ? toIntId(id) : null
+  if (numericId === null) return { outcome: 'local' }
+
+  try {
+    const r = await fetch(`${BASE}/detections/${numericId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    if (r.ok || r.status === 404) {
+      // 404 counts as success: the row is not there, which is what was asked for.
+      // Treating it as a failure would make a double-click look broken.
+      return { outcome: 'persisted' }
+    }
+    if (r.status === 401 || r.status === 403) {
+      return {
+        outcome: 'rejected',
+        message: 'Deleting evidence needs an admin key. The dashboard key is read-only.',
+      }
+    }
+    return { outcome: 'rejected', message: `The server refused the delete (${r.status}).` }
+  } catch {
+    return { outcome: 'rejected', message: 'Could not reach the server. The row is still there.' }
   }
 }
 
@@ -568,7 +637,21 @@ interface BackendTelemetryRead {
 }
 
 /**
- * `TelemetryLatest` in schemas/telemetry.py.
+ * `TelemetryTrack` in schemas/telemetry.py — `GET /api/missions/{id}/telemetry`.
+ *
+ * `items` arrives OLDEST FIRST, which is what a polyline wants. The backend does
+ * the ordering, so no caller has to reverse an array and get it wrong on a
+ * refresh where the array happened to already be ascending.
+ */
+interface BackendTelemetryTrack {
+  mission_id: number
+  mission_name: string | null
+  count: number
+  items: BackendTelemetryRead[]
+}
+
+/**
+ * `TelemetryLatest` in schemas/telemetry.py — `GET /api/missions/{id}/telemetry/latest`.
  *
  * Exported because the mission socket sends this same object inside its frames -
  * the hook that consumes the socket types its frames with this, and uses the same
@@ -788,8 +871,97 @@ export function missionSocketUrl(missionId: number): string | null {
 }
 
 /**
- * REAL (simulator fallback) — `GET /api/missions/{id}/telemetry/latest`.
+ * The flown path, as the UI draws it.
  *
+ * Separate from `LatestTelemetry` because it answers a different question. That
+ * one is "where is the aircraft now" and is thrown away on each tick; this one is
+ * "where has it been" and is the actual evidence of what was surveyed. A track of
+ * one point is not a track, so `points` keeps only frames with a usable position
+ * and `truncated` says whether the backend had to cut the list short.
+ */
+export interface TelemetryTrack {
+  missionId: number
+  missionName: string | null
+  /** Positions oldest first, ready for a polyline. Already validity-filtered. */
+  points: Array<{ lat: number; lon: number; at: string }>
+  /** Frames the backend actually returned (may be fewer than the mission has). */
+  count: number
+  /** True when the mission has flown more frames than the limit we asked for. */
+  truncated: boolean
+  /** First frame's time, for the analytics elapsed calculation. Null if empty. */
+  startedAt: string | null
+  /** Last frame's time. Null if empty. */
+  endedAt: string | null
+}
+
+/**
+ * REAL — `GET /api/missions/{id}/telemetry`, the flown track.
+ *
+ * This call is what makes the line on the map a record rather than a drawing.
+ * Without it the dashboard composes `progress` straight from the simulator and
+ * draws a synthetic walk over a synthetic block, while the marker - correctly -
+ * comes from the real GPS. The two disagree, and the disagreement is invisible
+ * because both are rendered in the same style at the same scale.
+ *
+ * Returns an OUTCOME for the same reason every other backend call does: "this
+ * mission has not flown" is `absent` and normal, while `unreachable` means the
+ * dashboard is broken and the aircraft may be flying perfectly.
+ *
+ * Rows with a non-finite or out-of-range coordinate are dropped here rather than
+ * at the renderer. A single bad vertex does not drop a point, it drags the whole
+ * polyline to the Gulf of Guinea and back (see `plottablePath`), so it has to be
+ * filtered before it reaches any geometry code.
+ *
+ * `limit` is bounded by the backend, not by us: the route clamps to
+ * `max_page_size * 10`. Asking for more is safe and returns the clamp, which is
+ * why `truncated` is computed from `count > points.length` rather than assumed.
+ */
+export async function fetchTelemetryTrack(
+  missionId: number,
+  limit = 600,
+): Promise<BackendOutcome<TelemetryTrack>> {
+  if (!DASHBOARD_KEY || !Number.isInteger(missionId) || missionId <= 0) {
+    return { outcome: 'disabled' }
+  }
+  try {
+    const r = await fetch(`${BASE}/missions/${missionId}/telemetry?limit=${limit}`, {
+      headers: authHeaders(),
+    })
+    if (!r.ok) return { outcome: 'failed', status: r.status }
+    const body = (await r.json()) as BackendTelemetryTrack
+    const points = (body.items ?? [])
+      .map((t) => ({ lat: t.latitude, lon: t.longitude, at: t.captured_at }))
+      .filter(validCoordinate)
+    // A mission exists but has not flown: the row is there and the answer is
+    // "no positions yet". That is `absent`, not `ok` with an empty track, so the
+    // caller keeps whatever it was drawing instead of blanking the map.
+    if (points.length === 0) return { outcome: 'absent' }
+    // The endpoints are read through `?? null` rather than index access, because
+    // `noUncheckedIndexedAccess` is right that the indexes could be out of range -
+    // even though the length check above makes that impossible. Returning an empty
+    // string for a timestamp we do not have would be worse than returning null.
+    const first = points[0]
+    const last = points[points.length - 1]
+    return {
+      outcome: 'ok',
+      value: {
+        missionId: body.mission_id,
+        missionName: body.mission_name ?? null,
+        points,
+        count: body.count ?? points.length,
+        truncated: (body.count ?? 0) > points.length,
+        startedAt: first?.at ?? null,
+        endedAt: last?.at ?? null,
+      },
+    }
+  } catch {
+    return { outcome: 'unreachable' }
+  }
+}
+
+/**
+ * REAL (simulator fallback) — `GET /api/missions/{id}/telemetry/latest`.
+ * *
  * This is the call that puts the real aircraft on the map. Never throws; the
  * caller keeps the simulator in every non-`ok` case, so a keyless classroom demo
  * looks exactly as it did before this function existed.

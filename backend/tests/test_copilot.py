@@ -67,6 +67,74 @@ class TestGroundedAnswers:
         scores = [c["relevance"] for c in body["citations"]]
         assert scores == sorted(scores, reverse=True)
 
+    async def test_inflected_query_forms_are_grounded(self, client, read_key):
+        """Every question the UI offers as a suggestion must actually be answerable.
+
+        The UI's four suggested queries are the worst case for a lexical retriever,
+        because they are written the way an operator speaks, not the way the corpus
+        is written — "detector" for a passage about "detection", "mine" for one
+        about "mines". Bag-of-words cannot see through that, so the stemmer has to.
+        A suggested question that comes back refused is a demo that fails on its own
+        prompt, so each of these is pinned here.
+        """
+        suggested = [
+            "What standoff distance for a suspected mine?",
+            "Can I trust a detection at 0.5 confidence?",
+            "How should I mark a confirmed hazard for the ground team?",
+            "What does the detector actually detect?",
+        ]
+        for question in suggested:
+            response = await client.post(
+                "/api/copilot/query", json={"question": question}, headers=auth(read_key)
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["grounded"] is True, "suggested query refused: %r" % question
+            assert body["citations"], "suggested query returned no citations: %r" % question
+
+    async def test_detector_wording_reaches_the_sensor_limits_passage(self, client, read_key):
+        """'detector' must find the passages that only ever say 'detection'."""
+        response = await client.post(
+            "/api/copilot/query",
+            json={"question": "What does the detector actually detect?"},
+            headers=auth(read_key),
+        )
+        body = response.json()
+        assert body["grounded"] is True
+        cited_ids = {c["id"] for c in body["citations"]}
+        assert cited_ids & {"imas-09-10-4-3", "ops-6-3-reporting"}
+
+
+class TestStemmerConsistency:
+    """The scorer is only as good as its tokeniser, and this tokeniser is custom."""
+
+    def test_related_word_forms_share_a_stem(self):
+        """Inflected and derived forms must collapse together.
+
+        Regression guard: the first stemmer stripped one suffix in a single pass
+        with a fixed 3-character floor, so `distance` -> `dist` while
+        `distances` -> `distanc`, and `detector` never met `detection` at all.
+        """
+        from app.services.copilot_rag import _stem
+
+        groups = [
+            ["detect", "detector", "detectors", "detection", "detections", "detected"],
+            ["distance", "distances"],
+            ["mark", "marking", "markings", "marker", "markers"],
+            ["mine", "mines"],
+            ["report", "reports", "reporting"],
+        ]
+        for group in groups:
+            stems = {_stem(word) for word in group}
+            assert len(stems) == 1, "%r stemmed inconsistently: %r" % (group, stems)
+
+    def test_stemmer_leaves_short_words_alone(self):
+        """Short words must not be reduced to debris."""
+        from app.services.copilot_rag import _stem
+
+        for word in ["ais", "at", "end", "land", "map", "soil"]:
+            assert _stem(word) == word
+
 
 class TestUngroundedRefusals:
     async def test_off_topic_question_refuses(self, client, read_key):

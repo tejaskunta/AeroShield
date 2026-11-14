@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import L from 'leaflet'
 import type { MissionGrid } from '@/types'
 import { cellBounds, cellId, parseCellId } from '@/lib/geo'
 import { CONSOLE_HEX, HAZARD_HEX } from '@/lib/consoleInk'
@@ -17,26 +18,31 @@ import { useMap } from './mapContext'
  * actually looked at?* Coverage is the discipline of demining — every square metre is
  * accounted for — so it gets the map's most distinctive treatment.
  *
- * ── Why this port is not mechanical ──────────────────────────────────────────────
+ * ── The fill stays a rasterised tile, and that is deliberate ─────────────────────
  *
- * Leaflet let the hatch be a real SVG `<pattern>` referenced as a `fill` URL. Maps has
- * no pattern fill at all: a shape can be a solid colour, and that is the whole of it.
- * So the hatch is rebuilt out of the primitives Maps does have:
+ * Leaflet *can* fill a shape with an SVG `<pattern>`, and the original Leaflet layer
+ * did. The 45° hatch then had a period of 7 CSS px, so its apparent density changed
+ * with every zoom step — the texture was a screen artefact rather than a statement
+ * about the ground, and it disagreed with the coverage figure in the readout.
  *
- *   fill   one `GroundOverlay` per covered cell, carrying a tile that is generated
- *          once on a canvas and cached as a data URL. Every cell is the same ground
- *          size, so stretching the same tile into each one makes the hatch continuous
- *          across cell boundaries and the swath reads as a single field rather than as
- *          a patchwork.
- *   edge   `Polyline` icons along the frontier sides. An icon sequence with a small
- *          perpendicular tick, repeated every 12 px and offset by 6 px for the second
- *          sequence, gives alternating red and white — the stake marking — using the
- *          same technique Google's own dashed-line sample uses.
+ * The tile here has its period fixed in the tile's own *ground* dimensions, which is
+ * what a survey hatch should be: the texture means the same thing at every zoom and
+ * matches what the readout is counting. `L.imageOverlay` stretches one tile into each
+ * cell, so every cell is the same ground size and the hatch runs continuously across
+ * cell boundaries — the swath reads as a single field rather than as a patchwork.
  *
- * The ground-fixed hatch period deserves a note: Leaflet's hatch was 7 CSS px, so its
- * apparent density changed with zoom. Here the period is fixed in *metres*, which is
- * what a survey hatch should be — the texture then means the same thing at every zoom
- * and matches what the coverage figure in the readout is counting.
+ * ── The stake edge had to change technique, not just API ────────────────────────
+ *
+ * On Maps the ticks were an icon sequence: a short perpendicular stroke repeated along
+ * the path, which the API rotates along the line for you. Leaflet has no icon
+ * sequences — it has `dashArray`, and a dash is a gap *along* the line, not a bar
+ * *across* it. A dashed polyline would therefore give a dashed boundary, which is a
+ * different convention and not the one this layer exists to draw.
+ *
+ * So the ticks are real geometry: perpendicular segments generated at a fixed spacing
+ * in metres, alternating red and white by index. Fixing the spacing in metres rather
+ * than in pixels means the stakes stay put on the ground as the operator zooms, which
+ * is the same reasoning as the hatch period.
  */
 
 // ---------------------------------------------------------------------------
@@ -126,22 +132,20 @@ function hatchTile(): string {
 // The stake edge
 // ---------------------------------------------------------------------------
 
-/** Tick length in px, measured across the line. */
-const TICK = 6
-/** Red tick, then a white tick half a period later — the IMAS alternation. */
-const TICK_PERIOD = 12
+/**
+ * Spacing between stake ticks, in metres.
+ *
+ * Ground-fixed, not pixel-fixed. At the working zoom one metre is roughly 56 px, so
+ * 0.25 m puts a tick every 14 px — close to the 12 px the Maps version used, but now
+ * arrived at by measuring the ground rather than the screen.
+ */
+const TICK_SPACING_M = 0.25
 
-function tickIcon(hex: string): google.maps.Symbol {
-  return {
-    // A short stroke perpendicular to the path. Maps orients icons along the line,
-    // so this needs no rotation arithmetic.
-    path: 'M 0,-1 0,1',
-    strokeColor: hex,
-    strokeOpacity: 1,
-    strokeWeight: 2.5,
-    scale: TICK,
-  }
-}
+/** How far a tick reaches to either side of the boundary, in metres. */
+const TICK_HALF_M = 0.06
+
+/** Metres per degree of latitude. Mirrors `geo.ts` without the import. */
+const M_PER_DEG_LAT = 111320
 
 const TICKS_RED = HAZARD_HEX
 const TICKS_WHITE = CONSOLE_HEX.tickWhite
@@ -155,7 +159,7 @@ export function CoverageHatchLayer({
   grid: MissionGrid
   coveredCells: string[]
 }) {
-  const { map, maps } = useMap()
+  const { map } = useMap()
 
   /**
    * Live overlays, keyed by the thing they represent rather than by array position.
@@ -164,8 +168,8 @@ export function CoverageHatchLayer({
    * almost every cell is one we already drew. Diffing by key means a tick costs one
    * `GroundOverlay` for the cell just imaged, instead of a hundred.
    */
-  const fillsRef = useRef(new Map<string, google.maps.GroundOverlay>())
-  const edgesRef = useRef(new Map<string, google.maps.Polyline>())
+  const fillsRef = useRef(new Map<string, L.ImageOverlay>())
+  const edgesRef = useRef(new Map<string, L.LayerGroup>())
 
   /**
    * Cell geometry, memoised on the *content* of the coverage list.
@@ -206,7 +210,7 @@ export function CoverageHatchLayer({
 
     if (!tile) {
       // No 2D context: degrade to "coverage not shown" rather than throwing.
-      fills.forEach((f) => f.setMap(null))
+      fills.forEach((f) => f.remove())
       fills.clear()
       return
     }
@@ -217,34 +221,37 @@ export function CoverageHatchLayer({
     // mission reset would otherwise leave stale hatch painted on the ground.
     fills.forEach((overlay, id) => {
       if (!wanted.has(id)) {
-        overlay.setMap(null)
+        overlay.remove()
         fills.delete(id)
       }
     })
 
     cells.forEach((cell) => {
       if (fills.has(cell.id)) return
+      const bounds = L.latLngBounds(
+        [cell.bounds.south, cell.bounds.west],
+        [cell.bounds.north, cell.bounds.east],
+      )
       fills.set(
         cell.id,
-        new maps.GroundOverlay(tile, cell.bounds, {
-          map,
+        L.imageOverlay(tile, bounds, {
           // The tile is already drawn at final opacity; letting the overlay apply a
           // second one would make a single cell lighter than a run of them.
           opacity: 1,
-          clickable: false,
-        }),
+          interactive: false,
+        }).addTo(map),
       )
     })
-  }, [map, maps, cells])
+  }, [map, cells])
 
   // Tear down only on unmount or a map swap — not on every coverage change.
   useEffect(() => {
     const fills = fillsRef.current
     const edges = edgesRef.current
     return () => {
-      fills.forEach((f) => f.setMap(null))
+      fills.forEach((f) => f.remove())
       fills.clear()
-      edges.forEach((e) => e.setMap(null))
+      edges.forEach((e) => e.remove())
       edges.clear()
     }
   }, [map])
@@ -265,26 +272,7 @@ export function CoverageHatchLayer({
         wanted.add(id)
         if (edges.has(id)) return
 
-        edges.set(
-          id,
-          new maps.Polyline({
-            map,
-            path: side.path,
-            clickable: false,
-            // The ticks are the whole mark; a solid spine underneath them would
-            // read as a wall rather than as a marked boundary.
-            strokeOpacity: 0,
-            icons: [
-              { icon: tickIcon(TICKS_RED), offset: '0', repeat: `${TICK_PERIOD}px` },
-              {
-                icon: tickIcon(TICKS_WHITE),
-                offset: `${TICK_PERIOD / 2}px`,
-                repeat: `${TICK_PERIOD}px`,
-              },
-            ],
-            zIndex: 30,
-          }),
-        )
+        edges.set(id, stakeGroup(side.start, side.end).addTo(map))
       })
     })
 
@@ -292,15 +280,82 @@ export function CoverageHatchLayer({
     // marking honest: without it, ticks staked earlier in the flight would remain
     // drawn across ground that has since been surveyed, so the map would keep
     // claiming an edge that no longer exists.
-    edges.forEach((line, id) => {
+    edges.forEach((group, id) => {
       if (!wanted.has(id)) {
-        line.setMap(null)
+        group.remove()
         edges.delete(id)
       }
     })
-  }, [map, maps, cells, covered, grid])
+  }, [map, cells, covered, grid])
 
   return null
+}
+
+/**
+ * The alternating red/white stake ticks along one cell edge.
+ *
+ * Built as one `LayerGroup` so a frontier side can be added and removed as a unit —
+ * retiring it is then a single call rather than a bookkeeping pass over its ticks.
+ *
+ * The ticks are perpendicular segments offset from the edge, alternating colour by
+ * index. This replaces the Maps icon-sequence technique; see the header for why a
+ * `dashArray` could not stand in for it.
+ */
+function stakeGroup(
+  start: { lat: number; lon: number },
+  end: { lat: number; lon: number },
+): L.LayerGroup {
+  const group = L.layerGroup()
+
+  // Work in metres so the spacing is ground-fixed. A cell edge is ~1 m, so a flat
+  // approximation is exact for this purpose.
+  const dLat = end.lat - start.lat
+  const dLon = end.lon - start.lon
+  const lengthDeg = Math.hypot(dLat, dLon)
+  if (!Number.isFinite(lengthDeg) || lengthDeg === 0) return group
+
+  // Unit vector along the edge, in degrees, and its perpendicular.
+  const alongLat = dLat / lengthDeg
+  const alongLon = dLon / lengthDeg
+  const perpLat = -alongLon
+  const perpLon = alongLat
+
+  // One degree of longitude is shorter than one of latitude away from the equator,
+  // so the perpendicular has to be rescaled before it is used as a metre length or
+  // the ticks would lean. Derived from the cell's own latitude to keep it local.
+  const latRad = ((start.lat + end.lat) / 2) * (Math.PI / 180)
+  const lonScale = Math.max(1e-9, Math.cos(latRad))
+
+  const stepDeg = TICK_SPACING_M / M_PER_DEG_LAT
+  const count = Math.max(1, Math.round(lengthDeg / stepDeg))
+
+  for (let i = 0; i < count; i++) {
+    // Centred on the segment, so the ticks sit symmetric about the cell corner
+    // rather than piling up against one end of it.
+    const t = (i + 0.5) / count
+    const midLat = start.lat + dLat * t
+    const midLon = start.lon + dLon * t
+
+    const halfLat = perpLat * TICK_HALF_M
+    const halfLon = (perpLon * TICK_HALF_M) / lonScale
+
+    L.polyline(
+      [
+        [midLat - halfLat, midLon - halfLon],
+        [midLat + halfLat, midLon + halfLon],
+      ],
+      {
+        color: i % 2 === 0 ? TICKS_RED : TICKS_WHITE,
+        weight: 2.5,
+        opacity: 1,
+        interactive: false,
+        lineCap: 'butt',
+        pane: 'overlayPane',
+      },
+    ).addTo(group)
+  }
+
+  return group
 }
 
 /** True when this cell touches uncovered ground — i.e. it is on the survey frontier. */
@@ -325,23 +380,28 @@ function frontierSides(
   col: number,
   row: number,
   grid: MissionGrid,
-): { side: string; path: google.maps.LatLngLiteral[] }[] {
+): {
+  side: string
+  start: { lat: number; lon: number }
+  end: { lat: number; lon: number }
+}[] {
   const [[south, west], [north, east]] = cellBounds(grid, col, row)
-  const sw = { lat: south, lng: west }
-  const se = { lat: south, lng: east }
-  const ne = { lat: north, lng: east }
-  const nw = { lat: north, lng: west }
+  const sw = { lat: south, lon: west }
+  const se = { lat: south, lon: east }
+  const ne = { lat: north, lon: east }
+  const nw = { lat: north, lon: west }
 
   const candidates: {
     side: string
     col: number
     row: number
-    path: google.maps.LatLngLiteral[]
+    start: { lat: number; lon: number }
+    end: { lat: number; lon: number }
   }[] = [
-    { side: 'w', col: col - 1, row, path: [nw, sw] },
-    { side: 'e', col: col + 1, row, path: [se, ne] },
-    { side: 's', col, row: row - 1, path: [sw, se] },
-    { side: 'n', col, row: row + 1, path: [ne, nw] },
+    { side: 'w', col: col - 1, row, start: nw, end: sw },
+    { side: 'e', col: col + 1, row, start: se, end: ne },
+    { side: 's', col, row: row - 1, start: sw, end: se },
+    { side: 'n', col, row: row + 1, start: ne, end: nw },
   ]
 
   return candidates
@@ -349,5 +409,5 @@ function frontierSides(
       if (c < 0 || r < 0 || c >= grid.cols || r >= grid.rows) return false
       return !covered.has(cellId(c, r))
     })
-    .map(({ side, path }) => ({ side, path }))
+    .map(({ side, start, end }) => ({ side, start, end }))
 }

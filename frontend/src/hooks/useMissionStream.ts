@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Detection, LinkStatus, StreamState, Telemetry } from '@/types'
 import {
   fetchLatestTelemetry,
+  fetchTelemetryTrack,
   findMissionByName,
   isReachable,
   listDetections,
@@ -13,9 +14,11 @@ import {
   type BackendTelemetryLatest,
 } from '@/lib/api'
 import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
+import { plottablePath } from '@/lib/geo'
 import { mergeDetections } from '@/lib/mergeDetections'
 import { reviewOverrides } from '@/lib/reviewOverrides'
 import { simulator, type MissionSnapshot } from '@/lib/simulation'
+import type { LatLng } from '@/types'
 
 /**
  * How often to ask the backend where the aircraft is, in milliseconds.
@@ -44,6 +47,57 @@ const STALE_AFTER_S = 5
  */
 const SOCKET_RETRY_MS = 2000
 const SOCKET_MAX_ATTEMPTS = 5
+
+/**
+ * How often to re-read the flown track, in milliseconds.
+ *
+ * The track only grows, and it is drawn from history rather than from the live
+ * frame, so re-reading it at the beacon rate would be ten times the traffic for a
+ * polyline nobody can see move. Ten seconds keeps a growing tail on screen while
+ * staying well inside the ingest budget.
+ *
+ * It is a REFRESH, not a subscription: the live frame already carries the newest
+ * position, and it is appended to the track locally (see `appendToTrack`) so the
+ * line does not lag a poll interval behind the marker. This exists to pick up
+ * history this browser never saw - a dashboard opened mid-flight, or frames that
+ * arrived while the tab was asleep.
+ */
+const TRACK_REFRESH_MS = 10_000
+
+/** How many track frames to ask for. Ten minutes at 1 Hz; the backend clamps it. */
+const TRACK_LIMIT = 600
+
+/**
+ * The first and last timestamps of the observed track.
+ *
+ * Kept beside the points rather than inside them because the polyline only ever
+ * reads `lat`/`lon`, and threading a third field through every map layer to reach
+ * one label would be a lot of surface for one number.
+ */
+interface TrackSpan {
+  startedAt: string | null
+  endedAt: string | null
+}
+
+/**
+ * Flight duration implied by the observed track, in seconds.
+ *
+ * Returns 0 rather than null when the span is unusable, because every consumer
+ * already treats 0 as "nothing to show" and a nullable here would push the same
+ * `?? 0` into the analytics screen.
+ *
+ * The arithmetic is on the DRONE's timestamps (`captured_at`), not arrival times.
+ * Arrival time is when the laptop heard about a frame, which during a spool replay
+ * is all at once; the drone's own clock is the one the flight happened on, and
+ * `telemetry.py` stores it for exactly this reason.
+ */
+function deriveElapsed(span: TrackSpan): number {
+  if (!span.startedAt || !span.endedAt) return 0
+  const start = Date.parse(span.startedAt)
+  const end = Date.parse(span.endedAt)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0
+  return Math.round((end - start) / 1000)
+}
 
 /** A frame from `/api/ws/missions/{id}`. See `backend/app/services/broadcast.py`. */
 interface SocketFrame {
@@ -82,12 +136,23 @@ interface SocketFrame {
  * connected but silent is exactly the "radio link is down" case, and it would
  * otherwise keep a stale marker looking live forever.
  *
- * WHAT IS REAL AND WHAT IS NOT, PER FIELD. Telemetry and detections are swapped.
- * Coverage, the flown track, and the review workflow stay simulated, because the
- * backend cannot yet answer for them: the drone uploads finds and positions but no
- * coverage grid. So a screenshot of this dashboard mid-flight shows a real
- * aircraft at a real coordinate, carrying real finds — over a synthetic block. The
- * per-detection `source` field says which is which, and the map draws it.
+ * WHAT IS REAL AND WHAT IS NOT, PER FIELD. Telemetry, detections, and the flown
+ * track are real when a live mission is configured. Coverage and the review
+ * workflow's seed rows stay simulated, because the backend cannot answer for them:
+ * the drone uploads finds and positions but no coverage grid. So a screenshot of
+ * this dashboard mid-flight shows a real aircraft at a real coordinate, carrying
+ * real finds, along the path it actually flew - over a synthetic block.
+ * The per-detection `source` field says which is which, and the map draws it.
+ *
+ * THE TRACK IS EVIDENCE, NOT DECORATION. `progress.track` is the one field whose
+ * whole value is that it is a record of what happened, so it is the field that must
+ * never be invented when a real one is available. It is seeded from
+ * `GET .../telemetry` (history, oldest first) and extended locally as live frames
+ * arrive, so the line is behind the marker by at most one frame instead of by one
+ * poll. When the backend cannot answer - keyless demo, no mission yet - the
+ * simulator's `progress.track` is used unchanged and the map is exactly what it was
+ * before this existed. The choice is per-snapshot, not per-field, so the dashboard
+ * never draws a synthetic line and a real marker at the same time.
  *
  * DETECTIONS ARE ADDED, NOT SUBSTITUTED. The simulator keeps releasing its seeded
  * block; the backend's rows are merged in alongside them and de-duplicated by id.
@@ -129,6 +194,54 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
   const realDetections = useRef<Detection[]>([])
 
   /**
+   * The flown track, as observed. Empty until the backend answers.
+   *
+   * Held in a ref for the same reason as the fields above: the simulator re-emits
+   * twice a second and must not be able to reset it. An empty array is the honest
+   * "nothing observed yet" value and is what makes the fallback to the simulator's
+   * track safe - see `compose`.
+   */
+  const realTrack = useRef<LatLng[]>([])
+
+  /** The observed track's first and last timestamps, for elapsed-time derivation. */
+  const realTrackMeta = useRef<TrackSpan>({ startedAt: null, endedAt: null })
+
+  /**
+   * Append one live position to the observed track.
+   *
+   * Called on every live frame so the polyline ends at the marker rather than at
+   * the last history refresh. Points are not de-duplicated: a stationary aircraft
+   * reports the same position repeatedly and a repeated vertex is harmless in a
+   * polyline, while the dedupe test ("has it moved more than X metres?") would be a
+   * second, subtly different thinning rule competing with the backend's.
+   *
+   * The track is not capped here. The backend bounds what it returns and this only
+   * ever adds the frames that arrived since, which is at most the length of the
+   * session; a six-minute flight at 1 Hz is a 360-vertex polyline.
+   */
+  const appendToTrack = useRef((p: LatLng, at: string | null): void => {
+    if (!plottablePath([p]).length) return
+    realTrack.current = [...realTrack.current, p]
+    if (!at) return
+    // A live frame is normally the newest point, so it moves the end of the span.
+    // The start is set by history - but if this browser saw the first frame of the
+    // flight itself, that frame IS the start, and leaving it null would date the
+    // whole mission to whenever the history call happened to return.
+    //
+    // The end only ever moves FORWARD. A spool replay uploads old positions after
+    // newer ones, so the arrival order is not the flight order; taking the last
+    // arrival would shorten the flight every time a backlog drained and could make
+    // `endedAt < startedAt`, which `deriveElapsed` would read as zero.
+    const span = realTrackMeta.current
+    const end = span.endedAt
+    const advanced = end === null || Date.parse(at) > Date.parse(end)
+    realTrackMeta.current = {
+      startedAt: span.startedAt ?? at,
+      endedAt: advanced ? at : end,
+    }
+  })
+
+  /**
    * Overlay what is real onto one simulator frame.
    *
    * One function rather than four call sites doing their own spread, because every
@@ -148,9 +261,28 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
    * reconnect replay) and is filtered by id there.
    */
   const compose = useRef((b: MissionSnapshot): MissionSnapshot => {
+    // Which track to draw is decided ONCE, here, and the answer applies to the
+    // whole snapshot.
+    //
+    // The rule is "a real track, once there is one, replaces the simulated one
+    // entirely" - not "append the real points to the simulated ones". Mixing them
+    // would draw a synthetic walk from the survey origin joined to the aircraft's
+    // actual position by a straight line across however far apart they are, and
+    // that line is a flight path the aircraft never flew. A one-way swap also means
+    // the moment the first frame is observed the map stops drawing fiction, which
+    // is the property that matters: a partial track is honest, a blended one is not.
+    //
+    // `coveredCells` and the detections count stay from the simulator even while
+    // the track is real, because the backend has no answer for them. `elapsedS` is
+    // the exception: it is derivable from the track itself (last frame time minus
+    // first), and leaving it on the simulator clock would date a real flight to the
+    // fixture epoch - which is the bug that made the analytics timeline show a
+    // six-minute mission for a forty-second walk. See `deriveElapsed`.
+    const track = realTrack.current.length > 0 ? realTrack.current : b.progress.track
+    const elapsedS = realTrack.current.length > 1 ? deriveElapsed(realTrackMeta.current) : b.progress.elapsedS
     return {
       telemetry: realTelemetry.current ?? b.telemetry,
-      progress: b.progress,
+      progress: { ...b.progress, track, elapsedS },
       streamState: realStreamState.current ?? b.streamState,
       // Review decisions are overlaid last, after the merge, because neither feed
       // owns them: the simulator only knows its seeds, and the backend re-sends
@@ -194,6 +326,7 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
     let socketRetry: ReturnType<typeof setTimeout> | undefined
     let pollTimer: ReturnType<typeof setTimeout> | undefined
     let watchdog: ReturnType<typeof setInterval> | undefined
+    let trackTimer: ReturnType<typeof setInterval> | undefined
 
     let socketAttempts = 0
     /** Set once reconnect attempts are exhausted; polling takes over for good. */
@@ -268,6 +401,9 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       lastAt = Date.now()
       realTelemetry.current = telemetry
       realStreamState.current = live ? 'live' : 'stalled'
+      // The newest observed position joins the observed track here rather than in
+      // the history refresh, so the line and the marker end at the same place.
+      appendToTrack.current(telemetry.position, telemetry.timestamp)
       const link: LinkStatus = {
         source: 'backend',
         transport,
@@ -356,9 +492,62 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       if (result.outcome === 'ok') {
         missionId = result.value
         void loadDetections(missionId)
+        void loadTrack(missionId)
         return missionId
       }
       return null
+    }
+
+    /**
+     * Load the flown track, then keep it fresh.
+     *
+     * Runs once when the mission resolves and again on a timer, because the track
+     * is history rather than a live value: a browser opened mid-flight has none of
+     * it, and a tab that was backgrounded missed everything that arrived while the
+     * timer was throttled.
+     *
+     * Deliberately does NOT touch the link status. The track is a convenience drawn
+     * from rows that already exist; if this one call fails the aircraft is not
+     * necessarily silent and reporting it as such would send the operator after the
+     * wrong thing. `fetchLatestTelemetry` owns that verdict.
+     */
+    const loadTrack = async (id: number): Promise<void> => {
+      const result = await fetchTelemetryTrack(id, TRACK_LIMIT)
+      if (cancelled || result.outcome !== 'ok') return
+      // The history is authoritative for everything it covers, so it REPLACES the
+      // local accumulation instead of being appended to it. Appending would double
+      // every point that arrived both live and in history.
+      realTrack.current = plottablePath(result.value.points)
+      realTrackMeta.current = {
+        startedAt: result.value.startedAt,
+        endedAt: result.value.endedAt,
+      }
+      const b = base.current
+      if (b) setSnapshot(compose.current(b))
+    }
+
+    /**
+     * Seed the track immediately on mount, without waiting for the first timer tick.
+     *
+     * The timer alone would leave a dashboard opened mid-flight with an empty map
+     * for ten seconds while the socket was already drawing a live marker - the
+     * exact moment someone opens it, because nothing is happening yet.
+     */
+    const loadTrackForCurrentMission = async (): Promise<void> => {
+      const id = await resolveMission()
+      if (cancelled || id === null) return
+      await loadTrack(id)
+    }
+
+    /** Poll the track on its own slow cadence, for the life of this subscription. */
+    const startTrackRefresh = (): void => {
+      const tick = async (): Promise<void> => {
+        if (cancelled) return
+        const id = await resolveMission()
+        if (cancelled || id === null) return
+        await loadTrack(id)
+      }
+      trackTimer = setInterval(() => void tick(), TRACK_REFRESH_MS)
     }
 
     // --- transport (b): polling -----------------------------------------
@@ -540,6 +729,12 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
     // promptly; it costs nothing because it reads no network.
     watchdog = setInterval(ageOutIfStale, POLL_MS)
 
+    // Both transports benefit from the track, and neither owns it, so it is
+    // started once for the subscription rather than per transport. It is also the
+    // only path that fills in history this browser did not witness.
+    void loadTrackForCurrentMission()
+    startTrackRefresh()
+
     void openSocket()
 
     return () => {
@@ -547,6 +742,7 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       stopPolling()
       if (socketRetry !== undefined) clearTimeout(socketRetry)
       if (watchdog !== undefined) clearInterval(watchdog)
+      if (trackTimer !== undefined) clearInterval(trackTimer)
       if (socket) {
         // Detach first: closing fires `onclose`, and the recovery path there must
         // not schedule a reconnect for a hook that is unmounting.

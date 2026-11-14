@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
+import L from 'leaflet'
 import type { Detection } from '@/types'
 import { RISK_HEX, riskOf } from '@/lib/risk'
-import { detectionSymbol } from './markerGlyphs'
+import { detectionIcon } from './markerGlyphs'
 import { useMap } from './mapContext'
 import { useZoomScale } from './useMapHooks'
 
@@ -18,17 +19,14 @@ import { useZoomScale } from './useMapHooks'
  *
  * ── Port note ────────────────────────────────────────────────────────────────────
  *
- * Leaflet markers were `divIcon` HTML, so the pin shape was CSS and the selected
- * pin's ripple was a CSS animation. Maps markers are either a raster image or a
- * vector `Symbol`, and a Symbol is the better fit here: the geometry is real, so it
- * scales cleanly and anchors on the true centre rather than wherever the box model
- * landed.
+ * On Google Maps these were vector `Symbol`s, because a Maps marker is either a
+ * raster image or a symbol and there is no DOM to speak of — so the pin geometry had
+ * to be real path data, and selection had no way to ripple: it was signalled by a
+ * size bump and a z-order lift, which read clearly but was a step down.
  *
- * What the port genuinely loses is the ripple. A Maps marker has no DOM to animate,
- * so selection is now signalled by a size bump (`pinSize`) and a z-order lift. It
- * reads clearly but is a step down from a rippling ring. Restoring it means a DOM
- * overlay per detection — a real cost for one transient effect, so it is noted rather
- * than quietly dropped.
+ * Back on Leaflet the glyph is SVG inside a `divIcon`, which is a real DOM node. The
+ * ripple is a CSS animation again and costs one `<span>` on the selected pin only.
+ * See `markerGlyphs.ts`.
  */
 export function DetectionPins({
   detections,
@@ -39,7 +37,7 @@ export function DetectionPins({
   selectedId: string | null
   onSelect: (id: string | null) => void
 }) {
-  const { map, maps } = useMap()
+  const { map } = useMap()
   const scale = useZoomScale()
 
   // Keeps the click handler current without re-creating every marker on each render.
@@ -71,8 +69,8 @@ export function DetectionPins({
     .join('|')
 
   useEffect(() => {
-    const markers: google.maps.Marker[] = []
-    const rings: google.maps.Circle[] = []
+    const markers: L.Marker[] = []
+    const rings: L.Circle[] = []
 
     detections.forEach((d) => {
       const level = riskOf(d)
@@ -82,31 +80,38 @@ export function DetectionPins({
       // "there is a hazard here" and "there is a hazard within this area".
       if (level !== 'cleared') {
         rings.push(
-          new maps.Circle({
-            map,
-            center: { lat: d.position.lat, lng: d.position.lon },
+          L.circle([d.position.lat, d.position.lon], {
             radius: d.positionErrorM,
-            strokeColor: RISK_HEX[level],
-            strokeWeight: 1,
-            strokeOpacity: selected ? 0.7 : 0.3,
+            color: RISK_HEX[level],
+            weight: 1,
+            opacity: selected ? 0.7 : 0.3,
             fillColor: RISK_HEX[level],
             fillOpacity: selected ? 0.12 : 0.05,
-            clickable: false,
-            zIndex: 100,
-          }),
+            interactive: false,
+            // Under the pins: the ring is context, the pin is the thing.
+            pane: 'overlayPane',
+          }).addTo(map),
         )
       }
 
-      const marker = new maps.Marker({
-        map,
-        position: { lat: d.position.lat, lng: d.position.lon },
-        icon: detectionSymbol(level, d.review.state, selected, scale),
-        zIndex: selected ? 800 : level === 'hazard' ? 600 : 400,
+      const marker = L.marker([d.position.lat, d.position.lon], {
+        icon: detectionIcon(level, d.review.state, selected, scale),
+        // Leaflet uses `zIndexOffset` to break ties within the marker pane. The
+        // three tiers are kept from the Maps version so the stacking intent
+        // survives the port: the selected pin is never buried, a live hazard
+        // outranks cleared ground, and everything outranks the track.
+        zIndexOffset: selected ? 800 : level === 'hazard' ? 600 : 400,
         title: `${d.id} · ${level} · cell ${d.gridCell}`,
-        clickable: true,
-      })
+        // Keyboard-reachable, because an operator reviewing a hazard field should
+        // not be forced onto a mouse. Leaflet sets `tabindex` from `keyboard`.
+        keyboard: true,
+        alt: `${d.id}, ${level} hazard, cell ${d.gridCell}`,
+      }).addTo(map)
 
-      marker.addListener('click', () => {
+      // `on` rather than `addEventListener`: Leaflet's own listener registry is
+      // what `marker.remove()` unwinds, so nothing is left attached to a marker the
+      // map has outlived.
+      marker.on('click', () => {
         selectRef.current(selectedRef.current === d.id ? null : d.id)
       })
 
@@ -114,21 +119,15 @@ export function DetectionPins({
     })
 
     return () => {
-      // `clearInstanceListeners` matters here: the map outlives these markers, so
-      // listeners left attached to a discarded marker keep it (and its closure over
-      // the detections array) alive for the life of the page.
-      markers.forEach((m) => {
-        google.maps.event.clearInstanceListeners(m)
-        m.setMap(null)
-      })
-      rings.forEach((r) => r.setMap(null))
+      markers.forEach((m) => m.remove())
+      rings.forEach((r) => r.remove())
     }
     // Rebuilding is still deliberate — a pin's entire appearance derives from its
     // selection, so patching in place would mean re-deriving the same arguments.
     // What changed is *when*: on the signature rather than on array identity, so a
     // telemetry tick no longer counts as a change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, maps, signature, selectedId, scale])
+  }, [map, signature, selectedId, scale])
 
   return null
 }

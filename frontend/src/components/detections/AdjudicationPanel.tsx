@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Check, ExternalLink, Flag, X } from 'lucide-react'
+import { Check, ExternalLink, Flag, Trash2, X } from 'lucide-react'
 import type { Detection, ReviewState } from '@/types'
 import { CLASS_LABELS } from '@/types'
+import type { WriteOutcome } from '@/lib/api'
 import { RISK_LABELS, riskOf } from '@/lib/risk'
 import { formatLatLng, formatLatLngDM, formatZulu } from '@/lib/geo'
 import { Badge } from '@/components/ui/Badge'
@@ -17,21 +18,43 @@ import { GradCamWipe } from './GradCamWipe'
  * a dismissal removes a hazard from the map and from the safe-path planner's
  * obstacle set, so it has to be auditable. Confirming does not require one; the
  * evidence is the frame, and confirming is the conservative direction.
+ *
+ * THE ACKNOWLEDGEMENT FOOTER. What this panel says about whether a decision was
+ * recorded has to be true, because the operator's next action depends on it — a
+ * reviewer told "not saved" re-does the work, and one told "saved" when it was not
+ * leaves a verdict that nobody can audit. Three cases, three different sentences:
+ *
+ *   persisted  the server took it, so the audit trail and the screen agree;
+ *   local      a fixture or the keyless demo — real to this session, gone on
+ *              reload, and stated as exactly that;
+ *   rejected   a request was made and refused. Something is wrong and it says so.
+ *
+ * The previous text collapsed the last two into one and asserted, wrongly, that no
+ * review endpoint existed.
  */
 export function AdjudicationPanel({
   detection,
   onReview,
   onShowOnMap,
-  persisted,
+  outcome,
+  onDelete,
 }: {
   detection: Detection | null
   onReview: (id: string, state: ReviewState, reason?: string) => void
   onShowOnMap: (id: string) => void
-  /** Whether the last write reached a server. False today, the stub says so. */
-  persisted: boolean
+  /**
+   * How the last write for the *selected* row went, or null if none was attempted
+   * since it was selected. Keyed to the row rather than left as a bare flag: an
+   * outcome from a different detection would be a claim about the wrong evidence.
+   */
+  outcome: WriteOutcome | null
+  /** Resolves to a message when the delete was refused, so the panel can say why. */
+  onDelete: (id: string) => Promise<string | undefined>
 }) {
   const [pendingAction, setPendingAction] = useState<'dismissed' | 'flagged' | null>(null)
   const [reason, setReason] = useState('')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   if (!detection) {
     return (
@@ -132,12 +155,7 @@ export function AdjudicationPanel({
               {detection.review.reviewedBy} ·{' '}
               {detection.review.reviewedAt ? formatZulu(detection.review.reviewedAt) : '--'}
             </p>
-            {!persisted && (
-              <p className="mt-1.5 border-l-2 border-caution pl-2 font-mono text-tiny leading-snug text-caution">
-                Held in this session only. There is no review endpoint yet, so this
-                decision is lost on reload.
-              </p>
-            )}
+            <WriteNotice outcome={outcome} source={detection.source} />
           </div>
         )}
 
@@ -194,39 +212,150 @@ export function AdjudicationPanel({
 
       {/* Actions pinned to the bottom, always reachable in a long scroll. */}
       <footer className="shrink-0 border-t border-rule p-2">
-        <div className="flex gap-1.5">
-          <Button
-            onClick={() => onReview(detection.id, 'confirmed')}
-            icon={<Check size={12} aria-hidden />}
-            className="flex-1"
-          >
-            Confirm
-          </Button>
-          <Button
-            onClick={() => {
-              setPendingAction('flagged')
-              setReason('')
-            }}
-            icon={<Flag size={12} aria-hidden />}
-          >
-            Flag
-          </Button>
-          <Button
-            variant="danger"
-            onClick={() => {
-              setPendingAction('dismissed')
-              setReason('')
-            }}
-            icon={<X size={12} aria-hidden />}
-          >
-            Dismiss
-          </Button>
-        </div>
-        <p className="mt-1.5 font-mono text-tiny uppercase tracking-[0.1em] text-paper-faint">
-          C confirm · X dismiss · F flag · J/K move
-        </p>
+        {confirmingDelete ? (
+          /*
+           * A confirm step, because this is the one irreversible action here. The
+           * wording states what is being destroyed and where it goes, and the
+           * second button is the safe one so a stray Enter does not delete.
+           */
+          <div className="border border-hazard/60 bg-hazard/10 p-2">
+            <p className="font-display text-tiny uppercase tracking-[0.1em] text-hazard-lit">
+              Delete {detection.id}?
+            </p>
+            <p className="mt-1 text-tiny leading-snug text-paper-dim">
+              {detection.source === 'backend'
+                ? 'This removes the row and its stored image from the server. It cannot be undone.'
+                : 'This row is simulated and exists only on screen. Removing it cannot be undone either.'}
+            </p>
+            {deleteError && (
+              <p className="mt-1.5 border-l-2 border-caution pl-2 font-mono text-tiny leading-snug text-caution">
+                {deleteError}
+              </p>
+            )}
+            <div className="mt-1.5 flex gap-1.5">
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  setConfirmingDelete(false)
+                  setDeleteError(null)
+                }}
+                className="flex-1"
+              >
+                Keep it
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  void onDelete(detection.id).then((message) => {
+                    // Undefined means it went through, which unmounts this panel.
+                    // A message means the server refused and the row is still
+                    // there, so the confirm stays open with the reason shown.
+                    if (message) setDeleteError(message)
+                    else {
+                      setConfirmingDelete(false)
+                      setDeleteError(null)
+                    }
+                  })
+                }}
+                className="flex-1"
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-1.5">
+              <Button
+                onClick={() => onReview(detection.id, 'confirmed')}
+                icon={<Check size={12} aria-hidden />}
+                className="flex-1"
+              >
+                Confirm
+              </Button>
+              <Button
+                onClick={() => {
+                  setPendingAction('flagged')
+                  setReason('')
+                }}
+                icon={<Flag size={12} aria-hidden />}
+              >
+                Flag
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setPendingAction('dismissed')
+                  setReason('')
+                }}
+                icon={<X size={12} aria-hidden />}
+              >
+                Dismiss
+              </Button>
+              {/* Delete is separated by a gap and has no icon label competing
+                  with the verdict buttons: it is a different kind of action. */}
+              <span className="w-px shrink-0 self-stretch bg-rule" aria-hidden />
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  setConfirmingDelete(true)
+                  setDeleteError(null)
+                }}
+                icon={<Trash2 size={12} aria-hidden />}
+                aria-label={`Delete ${detection.id}`}
+                title="Delete this detection"
+              />
+            </div>
+            <p className="mt-1.5 font-mono text-tiny uppercase tracking-[0.1em] text-paper-faint">
+              C confirm · X dismiss · F flag · J/K move
+            </p>
+          </>
+        )}
       </footer>
     </div>
+  )
+}
+
+/**
+ * What to say about the last write. One component so the three cases cannot drift
+ * apart across the two places a review is reported.
+ *
+ * `outcome === null` prints nothing: no write has been attempted since this row was
+ * selected, so there is nothing to report and inventing a status would be the same
+ * mistake the old copy made.
+ */
+function WriteNotice({
+  outcome,
+  source,
+}: {
+  outcome: WriteOutcome | null
+  source: Detection['source']
+}) {
+  if (outcome === null) return null
+
+  if (outcome === 'rejected') {
+    return (
+      <p className="mt-1.5 border-l-2 border-hazard pl-2 font-mono text-tiny leading-snug text-hazard-lit">
+        The server refused this decision, so only this screen has it. Retry, or check
+        that the API key is valid.
+      </p>
+    )
+  }
+
+  if (outcome === 'local') {
+    return (
+      <p className="mt-1.5 border-l-2 border-caution pl-2 font-mono text-tiny leading-snug text-caution">
+        {source === 'simulated'
+          ? 'Simulated row: there is no server record to update, so this decision lives in this session and resets on reload.'
+          : 'No API key configured, so this decision lives in this session and resets on reload.'}
+      </p>
+    )
+  }
+
+  return (
+    <p className="mt-1.5 border-l-2 border-rule-bright pl-2 font-mono text-tiny leading-snug text-paper-faint">
+      Saved to the server. The audit trail records this decision.
+    </p>
   )
 }
 

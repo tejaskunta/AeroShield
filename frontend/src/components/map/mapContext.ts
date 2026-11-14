@@ -1,18 +1,27 @@
 import { createContext, useContext } from 'react'
+import type { Map as LeafletMap } from 'leaflet'
 
 /**
  * The map instance, shared with every overlay that needs to project coordinates.
  *
- * Leaflet supplied this implicitly through `react-leaflet`'s context. The Maps API
- * has no such notion, so the console owns one explicitly: `MapRoot` creates the map
- * and publishes it here, and overlays read it rather than each building their own.
+ * `react-leaflet` ships its own context for this, and components that are children of
+ * a `MapContainer` can use `useMap()` from that library directly. This context exists
+ * for the components here that are *not* declarative children of the container — the
+ * overlays draw imperatively through the Leaflet API rather than through
+ * `react-leaflet`'s children API, because they own reconciliation themselves (see
+ * `DetectionPins`, whose whole point is that a telemetry tick must not rebuild its
+ * markers). Those components still need the instance, so `MapRoot` publishes it here.
+ *
  * One map, one projection, one source of truth for pan/zoom events.
+ *
+ * Note there is no second field for the library namespace any more. The Google Maps
+ * version carried `maps: typeof google.maps` so overlays could construct their own
+ * objects without reaching for a global; Leaflet is a plain module import, so there is
+ * nothing to pass down.
  */
 export interface MapContextValue {
   /** The live map instance. Never recreated for the life of the screen. */
-  map: google.maps.Map
-  /** The API namespace, so overlays construct their own objects without a global. */
-  maps: typeof google.maps
+  map: LeafletMap
 }
 
 export const MapContext = createContext<MapContextValue | null>(null)

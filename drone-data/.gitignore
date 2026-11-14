@@ -1,0 +1,28 @@
+# --- drone snapshot: runtime artifacts never belong in git -------------------
+#
+# This directory is a point-in-time dump of the drone's `~/aeroshield/` *data*
+# dir, pulled over SSH (see `_meta/MANIFEST.md`). Most of it is a legitimate
+# archive: the flight record, the offline spool, and the code as it actually ran.
+#
+# It was committed wholesale, and `~/aeroshield/` is the data dir, which by
+# design holds three things that must not be versioned. The repo is public. The
+# rules below keep them out from here on.
+#
+# Note that ignoring a path does not remove it if it is already tracked — the
+# committed copies were taken out of the index with `git rm --cached` at the same
+# time. They stay on disk and on the drone. Their *history* still contains the
+# key, which is why the key was rotated rather than merely untracked.
+
+# The credential itself. `.env.example` documents the shape and stays tracked.
+.env*
+!.env.example
+
+# The append-only flight record (AGENTS.md). Real survey data — 2234 detections
+# from a flown mission. Reproduce it by flying, not by cloning.
+logs/
+
+# The offline queue of detections captured while the radio link was down:
+# ~2000 frames, ~37 MB. AGENTS.md forbids rsyncing this *to* the aircraft because
+# replaying it would look like measured flight data. Same reason it does not
+# belong in a public repo.
+spool/

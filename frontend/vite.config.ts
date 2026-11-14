@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
 
@@ -13,49 +13,21 @@ import path from 'node:path'
 const JETSON_ORIGIN = process.env.AEROSHIELD_JETSON_ORIGIN ?? 'http://10.11.101.241:8080'
 
 /**
- * Fail a production build that has no imagery token.
+ * There used to be a build-time guard here that failed a production build without
+ * `VITE_MAPBOX_TOKEN`. It is gone with the token.
  *
- * This is a guard against a specific, already-observed failure: `VITE_MAPBOX_TOKEN`
- * lives in the gitignored `frontend/.env.local`, so a fresh clone or a second laptop
- * silently falls back to Google's raster imagery, which caps at zoom 20 instead of 22
- * — 7.0 px/m against 28.1 px/m. Two people on the same commit saw maps differing by a
- * factor of four in ground scale and had no way to tell that was the cause.
+ * It existed because the imagery was a licensed raster behind a gitignored secret,
+ * so a fresh clone silently served a coarser map — Google's built-in types capped at
+ * zoom 20 against Mapbox's 22, a factor of four in ground scale — and two people on
+ * the same commit described different maps with nothing on screen to explain why.
  *
- * Left as a hard failure rather than a warning because a warning is exactly what the
- * runtime fallback already effectively was, and it went unnoticed. `npm run dev` is
- * deliberately exempt so the console can still be run and demoed with no keys at all.
- *
- * Set AEROSHIELD_ALLOW_KEYLESS_BUILD=1 for a keyless demo build, or pass
- * VITE_MAPBOX_TOKEN directly in the environment.
+ * Esri World Imagery needs no key, so there is no longer a configuration state in
+ * which the map is quietly worse. Removing the guard rather than leaving it as a
+ * no-op is deliberate: a check that can never fail is worse than no check, because
+ * it reads as a guarantee.
  */
-function assertImageryToken(mode: string, root: string) {
-  if (mode !== 'production') return
-  if (process.env.AEROSHIELD_ALLOW_KEYLESS_BUILD === '1') return
 
-  const env = loadEnv(mode, root, 'VITE_')
-  const token = (process.env.VITE_MAPBOX_TOKEN ?? env.VITE_MAPBOX_TOKEN ?? '').trim()
-  if (token) return
-
-  throw new Error(
-    [
-      'VITE_MAPBOX_TOKEN is not set, so this build would serve degraded imagery.',
-      '',
-      'The imagery basemaps would fall back to Google and cap at zoom 20 (7.0 px/m)',
-      'instead of zoom 22 (28.1 px/m) — a quarter of the ground scale, with nothing',
-      'in the UI to say so. The token lives in the gitignored frontend/.env.local,',
-      'which is why a fresh clone hits this.',
-      '',
-      'Fix one of:',
-      '  - add VITE_MAPBOX_TOKEN=<token> to frontend/.env.local (see .env.example)',
-      '  - export VITE_MAPBOX_TOKEN=<token> in the build environment',
-      '  - for a keyless demo build: AEROSHIELD_ALLOW_KEYLESS_BUILD=1 npm run build',
-    ].join('\n'),
-  )
-}
-
-export default defineConfig(({ mode }) => {
-  assertImageryToken(mode, __dirname)
-
+export default defineConfig(() => {
   return {
     plugins: [react()],
     resolve: {

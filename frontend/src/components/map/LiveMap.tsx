@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Detection, LatLng, MissionProgress, Telemetry } from '@/types'
 import { MISSION } from '@/lib/mockData'
-import { MAX_LIVE_MAP_ZOOM, MIN_LIVE_MAP_PX_PER_METRE, RASTER_MAX_ZOOM, HAS_MAPBOX_TOKEN } from '@/lib/config'
+import { MAX_LIVE_MAP_ZOOM, ESRI_MAX_NATIVE_ZOOM, MIN_LIVE_MAP_PX_PER_METRE } from '@/lib/config'
 import { isBelowAffordableZoom } from '@/lib/scale'
 import { gridBounds, gridCenter, M_PER_DEG_LAT, mPerDegLon } from '@/lib/geo'
+import { BASEMAP_LABELS, type Basemap } from './basemaps'
 import { MapRoot } from './MapRoot'
 import { MissionGridLayer } from './MissionGridLayer'
 import { CoverageHatchLayer } from './CoverageHatchLayer'
@@ -25,11 +26,14 @@ import {
 /**
  * LiveMap — the canvas everything else docks to.
  *
- * Basemaps are a `mapTypeId` now rather than a tile-URL swap: `hybrid` is imagery
- * with place labels, `roadmap` is the dark street canvas, `satellite` is imagery
- * alone. Imagery is the default because it is what the drone actually sees; the
- * street canvas is the fallback for when imagery is unavailable or too busy to read
- * hazard colour against.
+ * Basemaps are raster tile layers now, in three flavours: `hybrid` is Esri World
+ * Imagery with their boundaries-and-places reference layer over it, `roadmap` is the
+ * OpenStreetMap street canvas, `satellite` is Esri imagery alone. Imagery is the
+ * default because it is what the drone actually sees; the street canvas is the
+ * fallback for when imagery is unavailable or too busy to read hazard colour against.
+ *
+ * The basemap type and its labels live in `basemaps.ts`, alongside the tile-URL
+ * construction, and are re-exported here so the two cannot drift.
  *
  * ── The scale of this map is metres ──────────────────────────────────────────────
  *
@@ -58,60 +62,81 @@ import {
  * All three are passive about manual input. None of them fights the mouse, which is
  * the failure mode that makes automatic map-following infuriating.
  */
-export type Basemap = 'satellite' | 'hybrid' | 'roadmap'
-
-const BASEMAP_LABELS: Record<Basemap, string> = {
-  satellite: 'Satellite',
-  hybrid: 'Hybrid',
-  roadmap: 'Street',
-}
+export type { Basemap }
 
 /**
- * The highest zoom each basemap will actually reach.
+ * How deep each basemap's imagery actually goes — where the tiles stop being *real*.
  *
- * `roadmap` has no raster layer and honours the configured ceiling. Google's two
- * imagery types do not: they settle at 20 however they are asked — see
- * `RASTER_MAX_ZOOM` in `lib/config` for the measurements. The gap is a factor of
- * four in ground scale, so it is not a detail that can be left to a comment: it
- * decides the fit, the warning and the readout, and all three were wrong while this
- * was one number.
+ * This is not the zoom limit, and treating it as one cost the operator every level
+ * from 19 to 22. The two questions are separate and Leaflet asks them separately:
  *
- * With a Mapbox token configured the imagery is served by Mapbox instead, which does
- * reach 22, so the entry stops being a limit and becomes the true maximum. Keying the
- * ceiling on the *provider* rather than only on the basemap is the point: the number
- * is a property of who is rendering the tiles, and hard-coding 20 there would cap the
- * working configuration at the broken one's limit.
+ *   - How far may the operator zoom?    -> the map's `maxZoom`      -> 22, always
+ *   - Where do the tiles stop being real? -> the layer's `maxNativeZoom` -> this
+ *
+ * Past the native depth Leaflet scales the deepest tile up. The ground stays
+ * geographically correct and merely softens, so the operator keeps a usable view of
+ * the survey block instead of losing the map at the exact moment they zoomed in to
+ * read it. That upscaling is `maxNativeZoom`, which `basemaps.ts` sets from
+ * `NATIVE_TILE_ZOOM`; nothing here needs to arrange it.
+ *
+ * Esri World Imagery is native to 19 over most of the world. It does not *error* past
+ * that — it absently serves blank or placeholder tiles — which is why the number is
+ * worth recording even though it no longer gates the map: it is what the readout
+ * names, and what the live imagery test pins.
+ *
+ * The old version of this table fed 19 into the map's `maxZoom` for `satellite` and
+ * `hybrid`. A tile layer whose `maxZoom` sits below the map's current zoom is not
+ * merely soft in Leaflet, it is switched off entirely (`GridLayer._setView`), so the
+ * imagery did not degrade past 19 — it disappeared, and the console reported zoom 19
+ * as the ceiling. Also removed by that conflation: the guard's `atCeiling` test read
+ * 19 as "this pane has given all it has" and stopped re-fitting while a perfectly
+ * reachable 22 sat two levels away.
+ *
+ * Street is different only in that OpenStreetMap serves native tiles all the way to
+ * the configured limit, so its native depth and its zoom limit coincide. Recording it
+ * as a value rather than special-casing it keeps the readout the same shape on every
+ * basemap.
  */
-const BASEMAP_CEILINGS: Record<Basemap, number> = {
-  satellite: HAS_MAPBOX_TOKEN ? MAX_LIVE_MAP_ZOOM : RASTER_MAX_ZOOM,
-  hybrid: HAS_MAPBOX_TOKEN ? MAX_LIVE_MAP_ZOOM : RASTER_MAX_ZOOM,
+const BASEMAP_NATIVE_DEPTH: Record<Basemap, number> = {
+  satellite: ESRI_MAX_NATIVE_ZOOM,
+  hybrid: ESRI_MAX_NATIVE_ZOOM,
   roadmap: MAX_LIVE_MAP_ZOOM,
 }
 
 /**
- * A metre of ground, in pixels, at the reference zoom.
+ * How far the operator may zoom, on every basemap.
  *
- * Google's imagery over Hyderabad is native to about zoom 21 — roughly 7 cm per
- * pixel at this latitude. Zoom 22 is the practical ceiling: one step of upsampling,
- * still readable. Past that it is interpolation, which would look like a broken map
- * rather than a closer one. Declared in `lib/config` because the readiness check has
- * to know about the ceiling too — see `MAX_LIVE_MAP_ZOOM`.
+ * One number for all three, because the limit is the console's and not the imagery's.
+ * The imagery's limit is `BASEMAP_NATIVE_DEPTH` above, enforced by `maxNativeZoom`.
+ *
+ * `MAX_LIVE_MAP_ZOOM` is 22 — a single level of upscaling past Esri's native 19 over
+ * this block, which is soft but still readable at the ~28 px/m the ten-metre span
+ * needs. Two levels of interpolation would look like a broken map rather than a
+ * closer one, so 22 is where the console stops. That is a judgement about legibility,
+ * not about what the tiles contain, which is precisely why it no longer varies by
+ * basemap.
  */
 const MAX_ZOOM = MAX_LIVE_MAP_ZOOM
 
 /**
  * The view the block is designed for.
  *
- * At this latitude zoom 22 is about 28 px per metre of ground, so the ten-metre
- * block covers roughly 280 px and each one-metre cell is a legible square rather
- * than a smudge. That is the whole point: the aircraft only ever travels metres, and
- * a scale that renders a metre as seven pixels makes a real flight look like a jitter.
+ * At this latitude zoom 20 is about 56 px per metre of ground, so the ten-metre
+ * block covers roughly 560 px: still comfortably filling a viewport, and one level
+ * past Esri's native 19, which is the closest a view can sit to the imagery without
+ * visibly interpolating it.
+ *
+ * It used to be 22 to make a metre a larger square, but that traded honesty for
+ * apparent scale. Twenty-two is four levels past `BASEMAP_NATIVE_DEPTH`, so every
+ * frame opened on upscaled imagery — four times magnified, blurry, and reading as a
+ * bad map rather than a close one. The block is legible at 20, and an operator who
+ * still wants 22 can zoom in; `MAX_ZOOM` is unchanged so that stays possible.
  *
  * `fit` takes over from here once telemetry arrives, but the first frame is already
  * at the mission's scale — arriving at a regional view and then snapping in reads as
  * a bug even when it is intentional.
  */
-const INITIAL_ZOOM = 22
+const INITIAL_ZOOM = 20
 
 /**
  * And the floor.
@@ -178,7 +203,19 @@ export function LiveMap({
    *  live feed reach `useMap()`. */
   children?: ReactNode
 }) {
-  const [basemap, setBasemap] = useState<Basemap>('hybrid')
+  /*
+   * Imagery only, with no reference layer on top.
+   *
+   * The default used to be `hybrid`, which stacks Esri's
+   * `World_Boundaries_and_Places` labels and administrative boundaries over the
+   * photograph at 0.9 opacity. Over a ten-metre block that layer contributes
+   * nothing but clutter — no place name is legible at this scale, and the boundary
+   * strokes read as stray pale lines across the ground the operator is inspecting,
+   * which is exactly the one thing this view exists to show clearly.
+   *
+   * `hybrid` is still one click away for anyone who wants the context.
+   */
+  const [basemap, setBasemap] = useState<Basemap>('satellite')
   const [layers, setLayers] = useState<LayerState>(DEFAULT_LAYERS)
   const [follow, setFollow] = useState<FollowMode>('fit')
   /**
@@ -195,8 +232,20 @@ export function LiveMap({
 
   const center = useMemo(() => gridCenter(MISSION.grid), [])
 
-  /** What the current basemap can actually reach — see `BASEMAP_CEILINGS`. */
-  const ceiling = BASEMAP_CEILINGS[basemap]
+  /**
+   * What the current basemap's imagery actually contains — see `BASEMAP_NATIVE_DEPTH`.
+   *
+   * This is *not* handed to `MapRoot` any more. It used to be, as a `ceilingZoom` prop
+   * that clamped the map's maximum zoom, which is how zoom 19 became a wall. The map's
+   * limit is `MAX_ZOOM` and no longer varies by basemap.
+   *
+   * It is still the right number for the two places that ask how deep the *imagery*
+   * goes rather than how far the *map* may go: the readiness guard, which declines to
+   * re-fit a pane that is already as good as its basemap allows, and the scale readout,
+   * which names the real limit beside the configured one. Those are honest questions
+   * about the picture; the clamp was not.
+   */
+  const imageryDepth = BASEMAP_NATIVE_DEPTH[basemap]
 
   /**
    * The area that must stay visible. Covers the grid *and* the flown track, because
@@ -234,7 +283,6 @@ export function LiveMap({
         zoom={INITIAL_ZOOM}
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
-        ceilingZoom={ceiling}
         mapTypeId={basemap}
         // Panning is bounded to the mission area, but it must never bound *zoom*.
         //
@@ -289,7 +337,7 @@ export function LiveMap({
           spanM={VIEW_SPAN_M}
           position={telemetry?.position ?? null}
           extent={extent}
-          ceilingZoom={ceiling}
+          imageryDepth={imageryDepth}
           onView={setView}
           onLegible={setLegible}
         />
@@ -316,12 +364,8 @@ export function LiveMap({
         </div>
         {import.meta.env.DEV && view && <ScaleReadout view={view} />}
         {!legible && <ScaleWarning />}
-        {/* Which provider is serving this imagery, and at what ceiling. Exactly one
-            of these renders: the credit when Mapbox has the token, and an explicit
-            notice when the imagery key is absent — because that fallback is silent
-            otherwise, and it costs three quarters of the ground scale. */}
+        {/* Which provider is serving this imagery. */}
         <ImageryAttribution basemap={basemap} />
-        <ImageryUnconfigured basemap={basemap} />
       </div>
     </div>
   )
@@ -362,16 +406,16 @@ function ViewReporter({
   extent,
   onView,
   onLegible,
-  ceilingZoom,
+  imageryDepth,
 }: {
   spanM: number
   position: LatLng | null
   extent: { south: number; west: number; north: number; east: number }
-  ceilingZoom: number
+  imageryDepth: number
   onView: (v: ViewMetrics | null) => void
   onLegible: (b: boolean) => void
 }) {
-  const view = useViewMetrics(spanM, ceilingZoom)
+  const view = useViewMetrics(spanM, imageryDepth)
   // Holds the map to a legible ground scale, and it is *not* yet known to work.
   // It was thought to be the fix on the strength of one run with it removed, which
   // settled at zoom 20; turning it back on and measuring again reproduced zoom 20
@@ -379,13 +423,20 @@ function ViewReporter({
   // depending on timing. What that non-determinism means is still unresolved, and
   // the readout beside the map is what is being used to find out.
   //
-  // Resolved: the non-determinism was two different faults wearing one symptom. A fit
-  // taken before layout settled really did leave zoom 20 sometimes, which is what the
-  // attempt budget and its resize renewal address. And on the imagery basemaps zoom 20
-  // was not a fault at all — it is the ceiling those map types enforce, so "20 or 22"
-  // was really "raster or street". The guard now judges against the ceiling it can
-  // reach, which is why `ceilingZoom` is threaded in here.
-  const legible = useViewReadiness(position, extent, ceilingZoom)
+  // Resolved, and the resolution is worth keeping because the earlier note here
+  // attributed the whole of it to timing. There were two faults. A fit taken before
+  // layout settled really did leave zoom 20 sometimes, which the attempt budget and
+  // its resize renewal address. The other was that 20 and 22 were never the same
+  // number: the map's limit was being taken from the basemap's *imagery depth*, so on
+  // satellite and hybrid the limit *was* 19 while the reachable zoom *was* 22. "20 or
+  // 22" read as non-determinism but was two different ceilings, and the map spent its
+  // life below the one it could have had. Both numbers are real; only the clamp was
+  // wrong. See `BASEMAP_NATIVE_DEPTH`.
+  //
+  // Note the guard takes no ceiling at all now. It asks the map, which is the only
+  // thing that knows how far the map may go — the imagery depth was the wrong number
+  // for that question and reading it here is what held the view down.
+  const legible = useViewReadiness(position, extent)
 
   useEffect(() => {
     onView(view)
@@ -411,18 +462,21 @@ function ScaleReadout({ view }: { view: ViewMetrics }) {
   // Below what the pane can afford, *and* below the ceiling that caps the search.
   //
   // The second half is not redundant. On a tall pane the pure arithmetic affords
-  // zoom 23 for a ten-metre span, while the map is held at 22 by the imagery itself,
+  // zoom 23 for a ten-metre span, while the map is held at 22 by the console itself,
   // so a bare `affordableZoom > zoom` lights the readout amber at the one moment
   // everything is working — an instrument that cries wolf is worse than no
   // instrument, because it teaches the reader to ignore it. `isBelowAffordableZoom`
   // clamps to what is actually reachable, so amber reports a real shortfall.
   //
-  // `view.ceilingZoom` rather than the configured maximum, because on raster imagery
-  // the reachable ceiling is 20 and the configured one is 22. Passing the higher one
-  // here reported a permanent shortfall on a view that was exactly as good as that
-  // basemap gets.
-  const short = isBelowAffordableZoom(view.zoom, view.affordableZoom, view.ceilingZoom)
-  const capped = view.affordableZoom > view.ceilingZoom
+  // `view.imageryDepth` is the *imagery's* depth, not the map's limit, and the
+  // distinction is why this readout survived a bug that the map itself did not. On
+  // raster imagery the picture runs out at 19 while the map may still be driven to
+  // 22 by upscaling those 19s — so the same number was simultaneously the honest
+  // answer here and a wrong answer at the clamp. `capped` names the real limit,
+  // which is a thing the operator is entitled to know; it does not, and must not,
+  // stop them going past it.
+  const short = isBelowAffordableZoom(view.zoom, view.affordableZoom, view.imageryDepth)
+  const capped = view.affordableZoom > view.imageryDepth
   return (
     <div
       className={`pointer-events-none absolute bottom-6 left-2 border bg-ink-deep/90 px-2 py-1 font-mono text-tiny backdrop-blur-sm ${
@@ -432,7 +486,7 @@ function ScaleReadout({ view }: { view: ViewMetrics }) {
       zoom {view.zoom} · {view.width}x{view.height} · {view.binding}-bound ·{' '}
       {view.pixelsPerMetre.toFixed(1)} px/m · block {Math.round(view.spanPx)} px ·{' '}
       holds {view.viewportSpanM} m · affords z{view.affordableZoom}
-      {capped ? ` (capped z${view.ceilingZoom})` : ''}
+      {capped ? ` (capped z${view.imageryDepth})` : ''}
     </div>
   )
 }
@@ -455,73 +509,51 @@ function ScaleWarning() {
 }
 
 /**
- * Imagery credit, shown only when Mapbox is actually serving the tiles.
+ * Imagery credit, keyed on the basemap rather than on a build-time token.
  *
- * Required, not decorative: Mapbox's terms oblige anything drawing their raster tiles
- * to credit both Mapbox and OpenStreetMap, and the obligation is on the page rather
- * than on the tile. It is conditional on the same token that decides the imagery
- * source, so a deployment with no Mapbox token — which is showing Google's own
- * imagery, credited by Google's own attribution control — does not claim a
- * contribution Mapbox did not make.
+ * Required, not decorative. Esri's terms oblige anything drawing their World Imagery
+ * to credit Esri and its data providers; OpenStreetMap's oblige attribution for the
+ * street canvas. The obligation is on the page as well as the tile, which is why this
+ * is rendered explicitly rather than left to Leaflet's attribution control alone —
+ * that control is small, dimmed and easy to miss, and on a projected screen it may as
+ * well not exist.
  *
- * Street is excluded for the same reason: that basemap stays on Google, so crediting
- * Mapbox there would be untrue.
+ * The `ImageryUnconfigured` notice this replaces is gone with the token that gated it.
+ * It existed because the deep-zoom imagery was a build-time secret, so a fresh clone
+ * silently served a coarser map. Esri's tiles need no key, so there is no longer a
+ * configuration state in which the imagery is quietly worse — the failure mode it
+ * reported cannot occur.
  */
 function ImageryAttribution({ basemap }: { basemap: Basemap }) {
-  if (!HAS_MAPBOX_TOKEN || basemap === 'roadmap') return null
   return (
     <div className="pointer-events-none absolute bottom-2 left-2 font-mono text-tiny text-paper-faint">
-      Imagery ©{' '}
-      <a
-        href="https://www.mapbox.com/about/maps/"
-        target="_blank"
-        rel="noreferrer"
-        className="pointer-events-auto underline hover:text-paper-dim"
-      >
-        Mapbox
-      </a>{' '}
-      ©{' '}
-      <a
-        href="https://www.openstreetmap.org/copyright"
-        target="_blank"
-        rel="noreferrer"
-        className="pointer-events-auto underline hover:text-paper-dim"
-      >
-        OpenStreetMap
-      </a>
-    </div>
-  )
-}
-
-/**
- * Says in the interface that the deep-zoom imagery is not loaded, and why.
- *
- * This exists because the fallback was **silent**, and silent is the wrong shape for
- * this failure. With no `VITE_MAPBOX_TOKEN` set, `mapboxTypeIdFor` returns `null`,
- * `BASEMAP_CEILINGS` drops to `RASTER_MAX_ZOOM`, and the map quietly serves Google's
- * built-in imagery capped at zoom 20 — 7.0 px/m where the configured map gives 28.1,
- * a quarter of the scale. Nothing says so. The basemap buttons are unchanged, no
- * error appears, and the only visible difference is that the map looks coarser and
- * will not zoom as far.
- *
- * That is not hypothetical: the token is supplied through `frontend/.env.local`, which
- * is gitignored, so a fresh clone or a second machine is guaranteed to start without
- * one. The result is two people looking at the same commit and describing different
- * maps — one seeing 512x512 `@2x` tiles at zoom 22, the other a soft zoom-20 raster
- * that reads as "Google's own map", because at that point it *is* Google's own map.
- *
- * Stated as a configuration notice rather than an error, because nothing is broken:
- * the console is working exactly as designed for a deployment with no imagery key.
- * Where it sits is deliberate too — the bottom-left corner is the attribution slot,
- * and the question "which provider is serving these tiles" is what both elements
- * answer, so exactly one of them renders.
- */
-function ImageryUnconfigured({ basemap }: { basemap: Basemap }) {
-  if (HAS_MAPBOX_TOKEN || basemap === 'roadmap') return null
-  return (
-    <div className="pointer-events-none absolute bottom-2 left-2 border border-caution/60 bg-ink-deep/90 px-2 py-1 font-mono text-tiny text-paper-dim backdrop-blur-sm">
-      Imagery: Google, capped at z{RASTER_MAX_ZOOM}. Set VITE_MAPBOX_TOKEN in
-      frontend/.env.local for the deep-zoom imagery
+      {basemap === 'roadmap' ? (
+        <>
+          ©{' '}
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noreferrer"
+            className="pointer-events-auto underline hover:text-paper-dim"
+          >
+            OpenStreetMap
+          </a>{' '}
+          contributors
+        </>
+      ) : (
+        <>
+          Imagery ©{' '}
+          <a
+            href="https://www.esri.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="pointer-events-auto underline hover:text-paper-dim"
+          >
+            Esri
+          </a>
+          , Maxar, Earthstar Geographics
+        </>
+      )}
     </div>
   )
 }

@@ -7,11 +7,10 @@
  * seventy pixels and the aircraft's entire flight is a smudge. At zoom 22 a metre is
  * twenty-eight pixels and the same block is legible.
  *
- * A zoom level on its own says nothing useful about that — it is Google's tiling
- * index, not a physical quantity. Metres per pixel is the physical quantity, and it
- * is a closed-form function of the zoom and the latitude, so both the layout code
- * and the tests can talk in the same units and disagree in English rather than in
- * pixels.
+ * A zoom level on its own says nothing useful about that — it is a tiling index, not
+ * a physical quantity. Metres per pixel is the physical quantity, and it is a
+ * closed-form function of the zoom and the latitude, so both the layout code and the
+ * tests can talk in the same units and disagree in English rather than in pixels.
  *
  * ── The formula ──────────────────────────────────────────────────────────────────
  *
@@ -24,10 +23,10 @@
  *     m/px = 156543.03392 · cos(φ) / 2^zoom
  *
  * The constant is `2πR / 256` with R = 6378137 m, the WGS-84 equatorial radius that
- * Web Mercator (EPSG:3857) is defined on. That is the sphere Google's projection
- * actually uses, which is why this agrees with the imagery rather than merely being
- * correct in principle. The survey origin sits at 17.4° N, where `cos φ ≈ 0.954`, so
- * a metre is about 5 % narrower on screen than it would be at the equator.
+ * Web Mercator (EPSG:3857) is defined on. That is the sphere the projection actually
+ * uses, which is why this agrees with the imagery rather than merely being correct in
+ * principle. The survey origin sits at 17.4° N, where `cos φ ≈ 0.954`, so a metre is
+ * about 5 % narrower on screen than it would be at the equator.
  */
 
 /** Web Mercator's sphere. Not the mean radius — the projection is defined on this one. */
@@ -77,15 +76,15 @@ export function spanToPixels(spanM: number, zoom: number, latDeg: number): numbe
  *     height does. That is exactly the shape a `flex-1` column in a row layout
  *     tends to produce, and exactly why the zoom refused to move.
  *
- *  2. **It returns an integer**, because Google picks a whole zoom level and
+ *  2. **It returns an integer**, because a map picks a whole zoom level and
  *     fractional zoom is off by default. So the result is a floor, and the *usable*
  *     area is usually noticeably smaller than the pane: a span needing 1.9× the
  *     current zoom costs a whole level. Padding is therefore not a gentle nudge —
  *     eight pixels of it can cost an entire zoom step, which doubles the ground
  *     scrolled off the edge.
  *
- * `paddingPx` is taken off both dimensions, matching the four-sided padding Google
- * requires. A viewport already smaller than the padding has no room, so the result
+ * `paddingPx` is taken off both dimensions, matching the four-sided padding a map
+ * applies. A viewport already smaller than the padding has no room, so the result
  * floors at zero rather than going negative.
  */
 export function zoomToFit(
@@ -113,16 +112,22 @@ export function zoomToFit(
  * Whether a view has fallen short of the scale its own pane could reach.
  *
  * The comparison has to be against the *reachable* zoom, not the affordable one.
- * `zoomToFit` answers a pure geometry question and knows nothing about the map's
- * ceiling, so on a tall pane over this survey block it happily reports zoom 23 while
- * the imagery caps the map at 22. Comparing the two directly therefore flags a
+ * `zoomToFit` answers a pure geometry question and knows nothing about how far the
+ * map may be driven, so on a tall pane over this survey block it happily reports zoom
+ * 23 while the console stops at 22. Comparing the two directly therefore flags a
  * perfectly healthy view as short by exactly one level — and a diagnostic that fires
  * when nothing is wrong trains its reader to ignore it, which costs more than the
  * diagnostic is worth.
  *
- * Clamping the target to `maxZoom` fixes that without making the check toothless: a
- * pane that genuinely cannot reach a legible scale still reports short, because its
- * truth lies below the ceiling rather than above it.
+ * Clamping the target fixes that without making the check toothless: a pane that
+ * genuinely cannot reach a legible scale still reports short, because its truth lies
+ * below the limit rather than above it.
+ *
+ * `imageryDepth` is deliberately named for the *picture* rather than the map. It used
+ * to be called `maxZoom`, which invited it to be passed to Leaflet's map `maxZoom` —
+ * and it was, which clamped the operator at Esri's native 19 and disabled the tile
+ * layers above that zoom outright. The number is a fact about the imagery; it is not
+ * a limit on the operator. Keep the two apart by naming them apart.
  *
  * Pure, and here rather than in the component, so the off-by-one that produced a
  * false amber can be pinned by a test.
@@ -130,26 +135,34 @@ export function zoomToFit(
 export function isBelowAffordableZoom(
   zoom: number,
   affordableZoom: number,
-  maxZoom: number,
+  imageryDepth: number,
 ): boolean {
-  return zoom < Math.min(affordableZoom, maxZoom)
+  return zoom < Math.min(affordableZoom, imageryDepth)
 }
 
 /**
- * Whether a pane of this size can hold `spanM` legibly under a given ceiling.
+ * Whether a pane of this size can hold `spanM` legibly under a given imagery depth.
  *
  * This is the question the map's legibility guard asks, stated as arithmetic so it
  * can be decided without attempting a fit. It exists because the guard's previous
  * method — fit, measure, retry if short, give up after three — cannot tell "the fit
  * has not happened yet" apart from "no fit exists", and it spends its whole budget
- * proving the second one on every raster basemap. See `RASTER_MAX_ZOOM`.
+ * proving the second one on every basemap whose tiles stop short of the limit. See
+ * `ESRI_MAX_NATIVE_ZOOM`.
  *
- * Pass the ceiling the *current basemap* can reach, not the configured maximum: the
- * difference between the two is exactly what made imagery look broken.
+ * `imageryDepth` is how deep the *picture* goes, not how far the *map* may be driven.
+ * Those differ (19 against 22), and the whole zoom defect came from passing one where
+ * the other was meant. If this function is ever wired into the guard, that is the
+ * number it wants — the guard asks "is this view as good as this basemap gets", not
+ * "may the operator keep going".
  *
  * `minPxPerMetre` is the legibility requirement, and it is compared against the scale
  * at the best zoom reachable inside this pane. If the best is not good enough then no
  * fit will be, and the honest response is to say so once — not to refit.
+ *
+ * Currently unreferenced: the guard reaches the same conclusion through
+ * `useViewReadiness`'s `atCeiling` test. Kept because the arithmetic is the clearest
+ * statement of the rule, and a test can pin it without a DOM.
  */
 export function paneHoldsSpanLegibly(
   spanM: number,
@@ -157,10 +170,10 @@ export function paneHoldsSpanLegibly(
   viewportHeightPx: number,
   paddingPx: number,
   latDeg: number,
-  ceilingZoom: number,
+  imageryDepth: number,
   minPxPerMetre: number,
 ): boolean {
   const affordable = zoomToFit(spanM, viewportWidthPx, viewportHeightPx, paddingPx, latDeg)
-  const reachable = Math.min(affordable, ceilingZoom)
+  const reachable = Math.min(affordable, imageryDepth)
   return pixelsPerMetre(reachable, latDeg) >= minPxPerMetre
 }
