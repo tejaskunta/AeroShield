@@ -5,6 +5,7 @@ import type { Detection } from '@/types'
 import { CLASS_LABELS } from '@/types'
 import { RISK_LABELS, formatConfidence, riskOf } from '@/lib/risk'
 import { formatLatLng, formatZulu } from '@/lib/geo'
+import { PROVENANCE_SHORT, PROVENANCE_TONE, provenanceOf } from '@/lib/provenance'
 import { Badge } from '@/components/ui/Badge'
 import { DetectionFrame } from '@/components/ui/DetectionFrame'
 import { GradCamWipe } from '@/components/detections/GradCamWipe'
@@ -161,9 +162,7 @@ export function Lightbox({
           {index + 1} / {detections.length}
         </span>
         <span>Scroll to zoom · drag to pan · double-click to reset · ← → to step</span>
-        <span className={d.source === 'backend' ? 'text-cleared' : 'text-caution'}>
-          {d.source === 'backend' ? 'Flown' : 'Simulated'}
-        </span>
+        <span className={PROVENANCE_TONE[provenanceOf(d)]}>{PROVENANCE_SHORT[provenanceOf(d)]}</span>
       </footer>
     </div>,
     document.body,

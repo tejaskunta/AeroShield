@@ -10,13 +10,15 @@ a mock detector. It is kept as a dev tool and tagged as such.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import uuid4
 from typing import Optional, Tuple
 
 from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Response,
@@ -171,6 +173,93 @@ async def ingest_detection(
         duplicate=duplicate,
         image_upload_url="/api/detections/{0}/image".format(detection.id),
     )
+
+
+# The label every test injection carries. The dashboard reads it to show "Test
+# injection" instead of "Flown", so a hand-placed landmine can never be mistaken for
+# one the aircraft found.
+TEST_INJECT_SOURCE = "manual-test"
+
+
+@router.post(
+    "/test-inject",
+    response_model=DetectionRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="DEV ONLY: inject a test detection with an image at given coordinates",
+)
+async def test_inject_detection(
+    image: UploadFile = File(..., description="Any landmine-like JPEG or PNG"),
+    latitude: float = Form(..., ge=-90.0, le=90.0),
+    longitude: float = Form(..., ge=-180.0, le=180.0),
+    mission_name: str = Form(..., min_length=1, max_length=200),
+    frame_width: int = Form(..., ge=1),
+    frame_height: int = Form(..., ge=1),
+    bbox_x1: int = Form(..., ge=0),
+    bbox_y1: int = Form(..., ge=0),
+    bbox_x2: int = Form(..., ge=1),
+    bbox_y2: int = Form(..., ge=1),
+    confidence: float = Form(0.8, ge=0.0, le=1.0),
+    class_name: str = Form("landmine", min_length=1, max_length=100),
+    db: AsyncSession = Depends(get_db),
+    _: Principal = Depends(require_scope(SCOPE_DETECTIONS_READ)),
+) -> DetectionRead:
+    """Prove the dashboard end of the pipeline without the aircraft.
+
+    Runs the SAME steps the drone's upload does - the ingest row, the stored frame,
+    the live broadcast to every open dashboard - so a pin appearing on the map means
+    the backend, database, socket and map all work. Only the origin differs, and it
+    is recorded: ``source`` is always ``manual-test``.
+
+    Refused outside development (AEROSHIELD_ENV). The dashboard's browser key only
+    reads, and in a real deployment a read key must never be able to create
+    detections; in development it is how the console's own test panel works.
+    """
+    if settings.env != "development":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Test injection is only available when AEROSHIELD_ENV=development.",
+        )
+    if bbox_x2 <= bbox_x1 or bbox_y2 <= bbox_y1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Box must have positive width and height (x2 > x1, y2 > y1).",
+        )
+    payload = DetectionIngest(
+        client_detection_id=uuid4(),
+        mission_name=mission_name,
+        class_name=class_name,
+        class_id=0,
+        confidence=confidence,
+        bbox_x1=min(bbox_x1, frame_width - 1),
+        bbox_y1=min(bbox_y1, frame_height - 1),
+        bbox_x2=min(bbox_x2, frame_width),
+        bbox_y2=min(bbox_y2, frame_height),
+        latitude=latitude,
+        longitude=longitude,
+        altitude_m=0.0,
+        relative_altitude_m=0.0,
+        horizontal_error_m=0.5,
+        frame_width=frame_width,
+        frame_height=frame_height,
+        model_version=TEST_INJECT_SOURCE,
+        source=TEST_INJECT_SOURCE,
+        captured_at=datetime.now(timezone.utc),
+    )
+    mission_id = await _resolve_mission_id(db, payload)
+    detection, _dup = await detection_repository.create(db, payload, mission_id)
+    if detection is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Test detection could not be stored.")
+    data = await image.read()
+    relative_path = storage.save_detection_image(
+        data, detection_id=detection.id, mission_id=detection.mission_id
+    )
+    detection = await detection_repository.attach_image(db, detection, relative_path)
+    read = DetectionRead.model_validate(detection)
+    bus.publish(detection.mission_id, detection_frame(read))
+    logger.info("test detection %s injected at %.6f,%.6f (mission %s)",
+                detection.id, latitude, longitude, mission_name)
+    return read
 
 
 # IMPORTANT: /geojson is declared before /{detection_id}. FastAPI matches routes in

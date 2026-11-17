@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Compass, Crosshair, Hand, Layers, Minus, Plus, Scan } from 'lucide-react'
+import { Columns2, Compass, Crosshair, FlaskConical, Hand, Layers, Minus, PictureInPicture2, Plus, Scan } from 'lucide-react'
 import type { Basemap } from '@/components/map/basemaps'
 import type { FollowMode } from '@/components/map/useMapHooks'
 import type { MapControls, ViewMode } from '@/components/map/viewTypes'
@@ -14,19 +14,36 @@ import { IconButton } from '@/components/ui/IconButton'
  * moves (zoom, tracking, layers, north). Grouping by question rather than scattering
  * buttons is what keeps a full-bleed map from turning into a cockpit of widgets.
  */
+export type Layout = 'overlay' | 'split'
+
 export function MapChromeTopLeft({
   view,
   onView,
   basemap,
   onBasemap,
+  layout,
+  onLayout,
 }: {
   view: ViewMode
   onView: (v: ViewMode) => void
   basemap: Basemap
   onBasemap: (b: Basemap) => void
+  layout: Layout
+  /** Absent when there is no camera stream to lay out. */
+  onLayout?: (l: Layout) => void
 }) {
   return (
     <div className="pointer-events-auto flex flex-wrap items-center gap-2">
+      {onLayout && (
+        <div role="radiogroup" aria-label="Camera layout" className="glass inline-flex gap-0.5 p-1">
+          <LayoutBtn on={layout === 'overlay'} label="Camera over the map" onClick={() => onLayout('overlay')}>
+            <PictureInPicture2 size={15} aria-hidden />
+          </LayoutBtn>
+          <LayoutBtn on={layout === 'split'} label="Map and camera side by side" onClick={() => onLayout('split')}>
+            <Columns2 size={15} aria-hidden />
+          </LayoutBtn>
+        </div>
+      )}
       <Segmented
         label="Map view"
         value={view}
@@ -51,6 +68,22 @@ export function MapChromeTopLeft({
   )
 }
 
+function LayoutBtn({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={on}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={`grid h-[30px] w-8 place-items-center rounded transition-colors ${on ? 'bg-white/[0.10] text-paper' : 'text-paper-faint hover:bg-white/[0.05] hover:text-paper-dim'}`}
+    >
+      {children}
+    </button>
+  )
+}
+
 export function MapChromeTopRight({
   controls,
   follow,
@@ -60,6 +93,8 @@ export function MapChromeTopRight({
   droneLabel,
   view,
   bearing,
+  testOpen,
+  onTest,
 }: {
   controls: MapControls | null
   follow: FollowMode
@@ -70,6 +105,8 @@ export function MapChromeTopRight({
   view: ViewMode
   /** Current map bearing in degrees (3D); the compass turns to match. */
   bearing: number
+  testOpen: boolean
+  onTest: () => void
 }) {
   const [layersOpen, setLayersOpen] = useState(false)
   return (
@@ -99,6 +136,10 @@ export function MapChromeTopRight({
         <span className="mx-1.5 my-0.5 h-px bg-white/[0.08]" aria-hidden />
         <IconButton bare label="Layers" active={layersOpen} onClick={() => setLayersOpen((o) => !o)}>
           <Layers size={16} />
+        </IconButton>
+        <span className="mx-1.5 my-0.5 h-px bg-white/[0.08]" aria-hidden />
+        <IconButton bare label="Test detection: inject a landmine image through the pipeline" active={testOpen} onClick={onTest}>
+          <FlaskConical size={16} />
         </IconButton>
         {view === '3d' && (
           <IconButton bare label="Reset north and tilt" onClick={() => controls?.resetNorth?.()}>

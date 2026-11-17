@@ -49,6 +49,20 @@ reports `inferred 0`. Stop the detector with `.\scripts\flightcheck.ps1 -Stop`.
       The tunnel delivers the real feed to the same `127.0.0.1:8080`, so this is
       the browser half of flight day for real. Stop `dev_mjpeg.py` afterwards:
       the tunnel needs that port.
+- [ ] **Prove a detection reaches the dashboard, without the drone** (1 minute).
+      Mission → the flask button (right-hand controls) → choose any landmine photo →
+      click the map where it should be → *Send through the pipeline*. It goes through
+      the real backend path (row, stored photo, live socket), so a pin appearing proves
+      backend, database, socket and map. From a terminal instead:
+
+      ```
+      python scripts\inject_detection.py --image mine.jpg --lat 17.39699 --lon 78.49076
+      ```
+
+      These are labelled **Test injection** everywhere and never counted as flown.
+      Use a rehearsal mission name (`--mission rehearsal-local`) if you do not want
+      them in the flight mission's record. The backend refuses this route unless
+      `AEROSHIELD_ENV=development`.
 - [ ] **Full dress rehearsal on battery power:** the fast path above, end to end.
 
 ---

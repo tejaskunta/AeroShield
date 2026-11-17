@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react'
-import { NavLink } from 'react-router-dom'
 import { FlaskConical, Radio } from 'lucide-react'
 import type { Detection, LinkStatus, StreamState, Telemetry } from '@/types'
 import { MISSION } from '@/lib/mockData'
 import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
 import { formatZulu } from '@/lib/geo'
 import { countByRisk } from '@/hooks/useDetections'
+import { provenanceOf } from '@/lib/provenance'
 
 /**
  * TopBar — the console's single piece of persistent chrome.
  *
- * Replaces the 44 px status rail and the 56 px icon rail. The icon rail spent the
- * whole left edge on five cryptic three-letter codes (MSN, DET, ANL...); the screens
- * now sit as named tabs in the centre of one 52 px bar, which gives the map back its
- * full width and makes the navigation readable at a glance.
+ * Status only: navigation lives in the left rail (NavRail). A slim 44 px band, so
+ * the map below keeps as much height as possible.
  *
  * What it must still answer, and does, unchanged: "what am I looking at, and is it
  * real?" Three verdicts stay separate on purpose — provenance (flown vs simulated),
@@ -24,14 +22,6 @@ import { countByRisk } from '@/hooks/useDetections'
  * PROVENANCE IS DERIVED, NEVER ASSERTED: `link.source` flips to `backend` the first
  * time the API answers, the same signal the rest of the app trusts.
  */
-export const SCREENS = [
-  { to: '/mission', label: 'Mission' },
-  { to: '/detections', label: 'Detections' },
-  { to: '/analytics', label: 'Analytics' },
-  { to: '/copilot', label: 'Copilot' },
-  { to: '/reports', label: 'Reports' },
-] as const
-
 export function TopBar({
   telemetry,
   detections,
@@ -48,11 +38,11 @@ export function TopBar({
   const callsign = HAS_LIVE_MISSION ? MISSION_NAME : MISSION.name
 
   return (
-    <header className="relative z-40 flex h-topbar shrink-0 items-center gap-4 border-b border-white/[0.06] bg-ink-deep/95 px-4 backdrop-blur">
+    <header className="relative z-40 flex h-11 shrink-0 items-center gap-4 border-b border-white/[0.06] bg-ink-deep px-3">
       {/* Identity */}
-      <div className="flex min-w-0 shrink-0 items-center gap-3">
+      <div className="flex min-w-0 shrink-0 items-center gap-2.5">
         <Mark />
-        <div className="flex min-w-0 flex-col leading-tight">
+        <div className="flex min-w-0 items-baseline gap-2.5 leading-tight">
           <span className="text-[0.8125rem] font-semibold tracking-[0.04em] text-paper">
             AeroShield
           </span>
@@ -66,23 +56,7 @@ export function TopBar({
         </div>
       </div>
 
-      {/* Screens — centred tabs */}
-      <nav aria-label="Screens" className="mx-auto flex items-center gap-1 rounded-md border border-white/[0.06] bg-white/[0.02] p-1">
-        {SCREENS.map(({ to, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              `rounded px-3 py-1.5 text-[0.8125rem] font-medium transition-colors ${isActive
-                ? 'bg-white/[0.08] text-paper shadow-[inset_0_-2px_0_0_var(--signal)]'
-                : 'text-paper-faint hover:bg-white/[0.04] hover:text-paper-dim'
-              }`
-            }
-          >
-            {label}
-          </NavLink>
-        ))}
-      </nav>
+      <div className="flex-1" />
 
       {/* Verdicts */}
       <div className="flex shrink-0 items-center gap-2">
@@ -148,7 +122,8 @@ function Pill({ className = '', title, children }: { className?: string; title?:
  * on *simulated* on purpose: a simulated marker is a hazard that does not exist.
  */
 function ProvenanceMarker({ flown, detections }: { flown: boolean; detections: Detection[] }) {
-  const real = detections.filter((d) => d.source === 'backend').length
+  // Test injections travel the backend path but are not finds; they do not count.
+  const real = detections.filter((d) => provenanceOf(d) === 'flown').length
   if (flown) {
     return (
       <Pill

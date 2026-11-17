@@ -294,6 +294,8 @@ export interface BackendDetectionRow {
   reviewed_by: string | null
   reviewed_at: string | null
   model_version: string | null
+  /** What produced the row: `jetson-trt` from the aircraft, `manual-test` from the console's test panel. */
+  source?: string | null
   captured_at: string
 }
 
@@ -361,6 +363,7 @@ export function toDetection(r: BackendDetectionRow): Detection | null {
       reviewedBy: r.reviewed_by ?? undefined,
     },
     source: 'backend',
+    origin: r.source ?? undefined,
   }
 }
 
@@ -404,6 +407,56 @@ export async function listDetections(missionId: number, limit = 500): Promise<De
  * Null means "no picture", which every consumer already has to handle for
  * simulated rows.
  */
+/**
+ * REAL — `POST /api/detections/test-inject` (backend in development only).
+ *
+ * Places a hand-picked image at chosen coordinates through the real ingest path:
+ * row, stored frame, live broadcast. The new pin arrives over the mission socket
+ * like any detection, which is what proves the pipeline end to end. The backend
+ * stamps it `manual-test`, and the console labels it "Test injection".
+ */
+export interface TestInjectInput {
+  image: File
+  lat: number
+  lon: number
+  missionName: string
+  confidence: number
+  frameWidth: number
+  frameHeight: number
+  bbox: { x1: number; y1: number; x2: number; y2: number }
+}
+
+export async function injectTestDetection(
+  input: TestInjectInput,
+): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
+  if (!DASHBOARD_KEY) return { ok: false, error: 'No dashboard key configured (VITE_DASHBOARD_KEY).' }
+  const fd = new FormData()
+  fd.append('image', input.image)
+  fd.append('latitude', input.lat.toFixed(7))
+  fd.append('longitude', input.lon.toFixed(7))
+  fd.append('mission_name', input.missionName)
+  fd.append('confidence', input.confidence.toFixed(2))
+  fd.append('frame_width', String(input.frameWidth))
+  fd.append('frame_height', String(input.frameHeight))
+  fd.append('bbox_x1', String(Math.round(input.bbox.x1)))
+  fd.append('bbox_y1', String(Math.round(input.bbox.y1)))
+  fd.append('bbox_x2', String(Math.round(input.bbox.x2)))
+  fd.append('bbox_y2', String(Math.round(input.bbox.y2)))
+  try {
+    // No Content-Type: the browser sets the multipart boundary itself.
+    const r = await fetch(`${BASE}/detections/test-inject`, { method: 'POST', headers: authHeaders(), body: fd })
+    if (!r.ok) {
+      const body = (await r.json().catch(() => null)) as { detail?: unknown } | null
+      const detail = typeof body?.detail === 'string' ? body.detail : `HTTP ${r.status}`
+      return { ok: false, error: detail }
+    }
+    const row = (await r.json()) as { id: number }
+    return { ok: true, id: row.id }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
 export async function fetchDetectionImage(
   id: string,
   variant: 'frame' | 'gradcam' = 'frame',

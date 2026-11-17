@@ -165,6 +165,13 @@ export interface Detection {
    * simulated detection can never be mistaken for a real one.
    */
   source: 'simulated' | 'backend'
+  /**
+   * The backend's own `source` string, when the row came from the API: `jetson-trt`
+   * for the aircraft, `manual-test` for a test injection. A test injection travels
+   * the real backend path, so `source` alone would call it flown; this is what lets
+   * the console label it honestly.
+   */
+  origin?: string
 }
 
 // ---------------------------------------------------------------------------

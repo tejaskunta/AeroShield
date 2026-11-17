@@ -4,6 +4,7 @@ import type { Detection } from '@/types'
 import { CLASS_LABELS } from '@/types'
 import { RISK_LABELS, riskOf } from '@/lib/risk'
 import { formatLatLng, formatZulu } from '@/lib/geo'
+import { PROVENANCE_LABEL, PROVENANCE_TONE, provenanceOf } from '@/lib/provenance'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfidenceBar } from '@/components/ui/ConfidenceBar'
@@ -38,7 +39,7 @@ export function DetectionCard({
   onExpand: () => void
 }) {
   const level = riskOf(detection)
-  const flown = detection.source === 'backend'
+  const prov = provenanceOf(detection)
   const [copied, setCopied] = useState(false)
 
   const copyPosition = () => {
@@ -137,9 +138,7 @@ export function DetectionCard({
           </div>
         )}
         <div className="mt-2.5 flex items-center justify-between">
-          <span className={`text-[0.6875rem] ${flown ? 'text-cleared' : 'text-caution'}`}>
-            {flown ? 'Flown · captured by the aircraft' : 'Simulated · not a real find'}
-          </span>
+          <span className={`text-[0.6875rem] ${PROVENANCE_TONE[prov]}`}>{PROVENANCE_LABEL[prov]}</span>
           <button
             type="button"
             onClick={() => onOpenInCenter(detection.id)}

@@ -21,7 +21,10 @@ export function DetectionCallout({
   onReview,
   onOpenInCenter,
   onExpand,
+  bottomInset = 12,
 }: {
+  /** Space to keep clear at the bottom (the status strip). */
+  bottomInset?: number
   detection: Detection
   onClose: () => void
   onReview: (id: string, state: 'confirmed' | 'dismissed', reason?: string) => void
@@ -49,7 +52,7 @@ export function DetectionCallout({
   const onLeft = pin.x > size.x / 2
   const preferredX = onLeft ? pin.x - cardW - 56 : pin.x + 56
   const cardX = Math.max(12, Math.min(size.x - cardW - 12, preferredX))
-  const cardY = Math.max(64, Math.min(size.y - cardH - 12, pin.y - 120))
+  const cardY = Math.max(64, Math.min(size.y - cardH - bottomInset, pin.y - 120))
   const cardIsLeftOfPin = cardX + cardW / 2 < pin.x
   const anchorX = cardIsLeftOfPin ? cardX + cardW : cardX
   const anchorY = cardY + 28

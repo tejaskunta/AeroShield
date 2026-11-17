@@ -7,6 +7,7 @@ import {
   OSM_ATTRIBUTION,
   OSM_TILE_URL,
 } from '@/lib/config'
+import { seamlessTileLayer } from './seamlessTiles'
 
 /**
  * Basemap definitions — the one place tile URLs and their licensing live.
@@ -62,74 +63,46 @@ export const NATIVE_TILE_ZOOM = ESRI_MAX_NATIVE_ZOOM
  * Returned as an array rather than a single layer because Hybrid needs two. Callers
  * group them so one add/remove disposes of all of them.
  */
-export function basemapTileLayers(basemap: Basemap, maxZoom: number): L.TileLayer[] {
+export function basemapTileLayers(basemap: Basemap, maxZoom: number): L.GridLayer[] {
+  /*
+   * Seamless canvas tiles (seamlessTiles.ts) rather than L.tileLayer: past the
+   * imagery's native zoom, Leaflet's CSS-stretched <img> tiles showed a pale seam
+   * along every tile edge on a real GPU. These are drawn at the map's own zoom.
+   */
   const common = {
     maxZoom,
-    /**
-     * Leaflet's own `maxZoom` is where it stops *fetching*; this is where the tiles
-     * stop being *real*. Above it the deepest tile is scaled up, so the map keeps
-     * working past the imagery's resolution instead of going blank.
-     */
-    maxNativeZoom: NATIVE_TILE_ZOOM,
-    /**
-     * Load tiles during the pan rather than only once it settles.
-     *
-     * Leaflet defaults this to `true` on touch, which is right for a phone on a slow
-     * connection and wrong here: this map follows a moving aircraft, and a view that
-     * fills in only after the operator stops dragging reads as a stutter.
-     */
+    nativeZoom: NATIVE_TILE_ZOOM,
+    // Load during the pan, not after: this map follows a moving aircraft.
     updateWhenIdle: false,
-    /**
-     * Keep two tiles of buffer beyond the viewport, so a small pan reveals content
-     * that is already downloaded instead of a grey gap.
-     */
+    // Two tiles of buffer, so a small pan reveals downloaded imagery, not a gap.
     keepBuffer: 2,
-    /**
-     * Do not request `@2x` tiles.
-     *
-     * Esri's World Imagery has no retina variant at these levels, so `detectRetina`
-     * would quadruple the request count for no sharpness gain and push the operator
-     * into upscaled mush sooner.
-     */
-    detectRetina: false,
-  } as const
+  }
 
   if (basemap === 'roadmap') {
     return [
-      L.tileLayer(OSM_TILE_URL, {
+      seamlessTileLayer({
         ...common,
+        url: OSM_TILE_URL,
         subdomains: 'abc',
         attribution: OSM_ATTRIBUTION,
-        /**
-         * The dimmed street treatment, as CSS on the tile pane rather than as a
-         * fog-of-war overlay on top of it.
-         *
-         * This is the honest replacement for the old Maps `STREET_STYLES`: a filter
-         * on the raster keeps place labels visible only at the size they were drawn,
-         * so there is no risk of the geometry styling that previously flattened the
-         * satellite imagery being applied here by accident. Hazard red has to be the
-         * most saturated thing on this map, and a filtered street canvas is how it
-         * stays that way.
-         */
+        // Dimmed street canvas, so hazard red stays the most saturated thing on screen.
         className: 'aeroshield-tiles-street',
       }),
     ]
   }
 
-  const imagery = L.tileLayer(ESRI_WORLD_IMAGERY_URL, {
+  const imagery = seamlessTileLayer({
     ...common,
+    url: ESRI_WORLD_IMAGERY_URL,
     attribution: ESRI_ATTRIBUTION,
+    // A mild haze correction (index.css); Esri's photo over this block is washed out.
+    className: 'aeroshield-tiles-imagery',
   })
 
   if (basemap === 'satellite') return [imagery]
 
-  // Hybrid: imagery, then the reference labels above it. Labels carry no attribution
-  // of their own — they are the same Esri product, already credited by the imagery.
-  const labels = L.tileLayer(ESRI_LABELS_URL, {
-    ...common,
-    opacity: 0.9,
-  })
-
+  // Hybrid: imagery, then Esri's reference labels (same product, same credit).
+  const labels = seamlessTileLayer({ ...common, url: ESRI_LABELS_URL, opacity: 0.9 })
   return [imagery, labels]
 }
 

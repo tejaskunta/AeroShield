@@ -23,8 +23,8 @@
   --rule: #1d2630;
   --rule-bright: #2c3846;
   --signal: #5cc8f5;
-  --glass: rgba(13, 18, 24, 0.74);
-  --glass-border: rgba(255, 255, 255, 0.075);
+  --glass: rgba(11, 15, 20, 0.9);
+  --glass-border: rgba(255, 255, 255, 0.09);
   --tick-white: #f5f3ef;
   --paper: #e9edf1;
   --paper-dim: #9aa6b2;
@@ -97,8 +97,8 @@
   /* Floating glass, for anything laid over the map or imagery. */
   .glass {
     background: var(--glass);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
-    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
     border: 1px solid var(--glass-border);
     @apply rounded-lg shadow-glass;
   }
@@ -212,43 +212,33 @@
 /* ---------------------------------------------------------------------------
    Tile seams.
 
-   Raster tile layers show a hairline gap between adjacent tiles because browsers
-   round each tile's position to a whole device pixel and the leftover fraction is
-   left unpainted. On a dark console the container behind it shows through, and at
-   zoom 22 where one 256 px source tile is drawn 2048 px wide that single-device-
-   pixel gap is magnified into a clearly visible grid of pale lines across the
-   imagery. It looks exactly like a broken coverage layer, which is why it has
-   been mistaken for one.
+   Past the imagery's native zoom, Leaflet used to keep the z19 <img> tiles and
+   CSS-scale their container 2-8x. On a real GPU each tile is composited as its own
+   stretched layer and the edges land on fractional device pixels, which showed a
+   pale line along every tile boundary. A 1 px CSS overlap on those images did not
+   survive that in a real browser (it did in headless rendering, which is why it
+   looked fixed).
 
-   Two independent problems, and they need different cures.
+   The cure is structural, in `seamlessTiles.ts`: tiles are drawn as canvases at
+   the map's own zoom, cut from their z19 ancestor, so the only CSS scale left is a
+   half-step zoom's 1.41x. Each canvas also bleeds one source pixel past its edges.
+   The 1 px overlap below is kept as a second line of defence for that small scale.
 
-   The gaps: each tile image is drawn ONE PIXEL LARGER than its 256 px slot, so
-   neighbours overlap instead of abutting (the remedy from Leaflet issue #3575).
-   This replaced a 1 px `outline`, which did not work: an outline is painted
-   *outside* the box, in the tile's own unscaled pixels, and the next tile is
-   drawn over it. Past the imagery's native zoom the whole tile container is
-   CSS-scaled (about 2.8x at z20.5 from z19 tiles), the edges land on fractional
-   device pixels, and the browser blends the edge texels with whatever is behind
-   them, which showed as one pale hairline per tile edge across the imagery. A
-   1 px overlap in tile space becomes ~3 screen px after that scaling, so the
-   rounding never opens a gap. The extra pixel is the neighbour's own first row,
-   duplicated, so nothing visibly shifts.
+   Scoped to tiles only: the coverage hatch is an `L.imageOverlay` whose size comes
+   from its geographic bounds and must not be enlarged.
 
-   Scoped to tile images only. The coverage hatch uses `L.imageOverlay`
-   (`.leaflet-image-layer`), whose size is set from its geographic bounds and
-   must not be enlarged.
-
-   The mush is not fixable here and should not be faked. Past its native depth a
-   basemap is the deepest real tile drawn larger (Esri: z19 at this site, Google:
-   z20, both measured), and no CSS recovers detail the source does not contain.
-   `image-rendering: pixelated` makes it worse rather than better: blocky
-   interpolation over an aerial photograph reads as a broken renderer. Real detail
-   at z21-23 comes from the drone photo overlay (`DroneImageryLayer.tsx`), not
-   from here.
+   No CSS adds detail the source lacks. Past z19 this is the z19 photo drawn well;
+   the real detail at z21-23 is the drone photo overlay (`DroneImageryLayer.tsx`).
 --------------------------------------------------------------------------- */
-.leaflet-tile-container img.leaflet-tile {
+.leaflet-tile-container .leaflet-tile {
   width: 257px !important;
   height: 257px !important;
+}
+
+/* Esri's photo over the block is hazy and flat. A mild contrast and saturation
+   lift makes edges and ground texture read; it does not invent detail. */
+.aeroshield-tiles-imagery {
+  filter: contrast(1.1) saturate(1.15) brightness(0.97);
 }
 
 /* ---------------------------------------------------------------------------
@@ -432,4 +422,48 @@
     min-width: 0;
     padding-inline: 0.375rem;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   3D drone ground mark (LiveMap3D). Laid flat on the map (pitch-aligned), so the
+   ring reads as a circle on the ground under the airframe and the tether rises
+   from it. The label stays upright for reading. Animated in CSS, so the 3D map is
+   not repainted to make it pulse.
+--------------------------------------------------------------------------- */
+.aeroshield-drone3d {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  pointer-events: none;
+}
+.aeroshield-drone3d__ring,
+.aeroshield-drone3d__pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 2px solid var(--signal);
+}
+.aeroshield-drone3d__ring {
+  background: rgba(92, 200, 245, 0.14);
+  box-shadow: 0 0 18px rgba(92, 200, 245, 0.55);
+}
+.aeroshield-drone3d__pulse {
+  animation: aeroshield-pulse 1.8s ease-out infinite;
+}
+.aeroshield-drone3d__label {
+  white-space: nowrap;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(11, 15, 20, 0.92);
+  border: 1px solid rgba(92, 200, 245, 0.55);
+  color: var(--paper);
+  font: 600 11px/1.4 'Inter Variable', system-ui, sans-serif;
+}
+@keyframes aeroshield-pulse {
+  0% { transform: scale(0.6); opacity: 0.9; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aeroshield-drone3d__pulse { animation: none; opacity: 0; }
 }

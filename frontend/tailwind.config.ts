@@ -197,16 +197,17 @@ export default {
       },
 
       // Instrument-panel radii: nearly square, never pill-shaped.
+      // Tight radii: a sharp instrument, not a soft consumer app.
       borderRadius: {
-        DEFAULT: '6px',
-        sm: '4px',
-        md: '8px',
-        lg: '12px',
-        xl: '16px',
+        DEFAULT: '4px',
+        sm: '3px',
+        md: '5px',
+        lg: '7px',
+        xl: '10px',
       },
 
       boxShadow: {
-        glass: '0 10px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)',
+        glass: '0 4px 18px rgba(0,0,0,0.38)',
         lift: '0 4px 16px rgba(0,0,0,0.35)',
         glow: '0 0 0 1px rgba(92,200,245,0.45), 0 0 24px rgba(92,200,245,0.18)',
       },
@@ -234,7 +235,7 @@ export default {
          * camera would leave the map under 330px. 18rem buys the map another 32px
          * exactly where it is scarcest, and the picture is still legible.
          */
-        camera: 'clamp(18rem, 26vw, 24rem)',
+        camera: 'clamp(22rem, 38vw, 46rem)',
         /*
          * The map's floor. Paired with `camera` so the two cannot drift into each
          * other again: the canvas claims at least half the row before the camera

@@ -32,8 +32,8 @@ import type { MapControls, MapViewState } from '@/components/map/viewTypes'
  * It is drawn DRONE_SCALE times real size: a ~0.5 m airframe is a few pixels at the
  * working zoom, and an object you cannot see cannot be tracked. The chrome says so.
  */
-export const DRONE_SCALE = 3
-const PITCH = 55
+export const DRONE_SCALE = 4
+const PITCH = 58
 const BEARING = -18
 
 const OSM_TILES = ['a', 'b', 'c'].map((s) => `https://${s}.tile.openstreetmap.org/{z}/{x}/{y}.png`)
@@ -56,7 +56,8 @@ function buildStyle(): StyleSpecification {
     },
     layers: [
       { id: 'bg', type: 'background', paint: { 'background-color': '#070a0e' } },
-      { id: 'esri', type: 'raster', source: 'esri' },
+      // Same haze correction as 2D: Esri's photo over the block is flat and washed out.
+      { id: 'esri', type: 'raster', source: 'esri', paint: { 'raster-contrast': 0.12, 'raster-saturation': 0.15 } },
       { id: 'osm', type: 'raster', source: 'osm', layout: { visibility: 'none' }, paint: { 'raster-saturation': -0.6, 'raster-brightness-max': 0.7 } },
       { id: 'labels', type: 'raster', source: 'labels', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.9 } },
       {
@@ -69,7 +70,7 @@ function buildStyle(): StyleSpecification {
           'fill-extrusion-color': '#b9c4cf',
           'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 6],
           'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
-          'fill-extrusion-opacity': 0.28,
+          'fill-extrusion-opacity': 0.2,
           'fill-extrusion-vertical-gradient': true,
         },
       },
@@ -126,11 +127,12 @@ function makeDrone(): { root: THREE.Group; rotors: THREE.Mesh[]; tether: THREE.L
   model.scale.setScalar(DRONE_SCALE)
   root.add(model)
 
-  const body = new THREE.MeshStandardMaterial({ color: 0x2a3340, metalness: 0.4, roughness: 0.5 })
-  const trim = new THREE.MeshStandardMaterial({ color: 0xd8dee5, metalness: 0.2, roughness: 0.6 })
+  // Light hull, dark arms: reads against both bright ground and dark foliage.
+  const body = new THREE.MeshStandardMaterial({ color: 0x1b222b, metalness: 0.3, roughness: 0.5 })
+  const trim = new THREE.MeshStandardMaterial({ color: 0xf2f5f8, metalness: 0.1, roughness: 0.45 })
   const accent = new THREE.MeshStandardMaterial({ color: 0x5cc8f5, emissive: 0x5cc8f5, emissiveIntensity: 0.9 })
 
-  const hull = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.06), body)
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.06), trim)
   model.add(hull)
   const lid = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.15, 0.025), trim)
   lid.position.z = 0.04
@@ -184,7 +186,6 @@ function makeDroneLayer(getState: () => DroneState): CustomLayerInterface {
   let camera: THREE.Camera
   let drone: ReturnType<typeof makeDrone>
   let mapRef: maplibregl.Map
-  let spin = 0
   return {
     id: 'drone-3d',
     type: 'custom',
@@ -219,15 +220,15 @@ function makeDroneLayer(getState: () => DroneState): CustomLayerInterface {
       drone.tether.scale.set(1, 1, alt)
       drone.shadow.position.z = -alt + 0.02
       drone.root.rotation.z = -(st.headingDeg * Math.PI) / 180
-      spin += 0.6
-      for (const r of drone.rotors) r.rotation.z = spin
+      // Blades at a fixed 45°: spinning them meant repainting the whole 3D map every
+      // frame, which keeps a field laptop's GPU busy for nothing.
+      for (const r of drone.rotors) r.rotation.z = Math.PI / 4
 
       const m = new THREE.Matrix4().fromArray(matrix as number[])
       const l = new THREE.Matrix4().makeTranslation(mc.x, mc.y, mc.z).scale(new THREE.Vector3(u, -u, u))
       camera.projectionMatrix = m.multiply(l)
       renderer.resetState()
       renderer.render(scene, camera)
-      mapRef.triggerRepaint()
     },
   }
 }
@@ -268,6 +269,9 @@ export default function LiveMap3D({
   const loaded = useRef(false)
   const droneState = useRef<DroneState>(null)
   const markers = useRef<maplibregl.Marker[]>([])
+  const droneMarker = useRef<maplibregl.Marker | null>(null)
+  const droneLabel = useRef<HTMLSpanElement | null>(null)
+  const droneLabelMarker = useRef<maplibregl.Marker | null>(null)
   const cb = useRef({ onSelect, onMapClick, onBearing })
   cb.current = { onSelect, onMapClick, onBearing }
 
@@ -338,8 +342,25 @@ export default function LiveMap3D({
       },
     })
 
+    // The drone's ground mark: a pulsing accent ring under it and a label chip, so it
+    // can be found at a glance; the 3D tether rises from this ring to the airframe.
+    const el = document.createElement('div')
+    el.className = 'aeroshield-drone3d'
+    el.innerHTML = '<span class="aeroshield-drone3d__pulse"></span><span class="aeroshield-drone3d__ring"></span>'
+    droneMarker.current = new maplibregl.Marker({ element: el, pitchAlignment: 'map', rotationAlignment: 'map' })
+    // The label is a separate, screen-aligned marker: on the flat ring it rendered
+    // skewed into the ground plane and was hard to read.
+    const label = document.createElement('span')
+    label.className = 'aeroshield-drone3d__label'
+    droneLabel.current = label
+    droneLabelMarker.current = new maplibregl.Marker({ element: label, anchor: 'bottom', offset: [0, -34] })
+
     return () => {
       onControls?.(null)
+      droneMarker.current?.remove()
+      droneMarker.current = null
+      droneLabelMarker.current?.remove()
+      droneLabelMarker.current = null
       markers.current.forEach((m) => m.remove())
       markers.current = []
       map.remove()
@@ -401,7 +422,19 @@ export default function LiveMap3D({
     droneState.current = telemetry && validCoordinate(telemetry.position)
       ? { lon: telemetry.position.lon, lat: telemetry.position.lat, altM: telemetry.altitudeM, headingDeg: telemetry.headingDeg }
       : null
-    mapRef.current?.triggerRepaint()
+    const map = mapRef.current
+    const st = droneState.current
+    if (map && droneMarker.current) {
+      if (st) {
+        droneMarker.current.setLngLat([st.lon, st.lat]).addTo(map)
+        droneLabelMarker.current?.setLngLat([st.lon, st.lat]).addTo(map)
+        if (droneLabel.current) droneLabel.current.textContent = `Drone · ${st.altM.toFixed(1)} m up`
+      } else {
+        droneMarker.current.remove()
+        droneLabelMarker.current?.remove()
+      }
+    }
+    map?.triggerRepaint()
     if (follow === 'follow' && telemetry && validCoordinate(telemetry.position)) {
       mapRef.current?.easeTo({ center: [telemetry.position.lon, telemetry.position.lat], duration: 400 })
     }

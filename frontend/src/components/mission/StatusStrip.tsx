@@ -62,9 +62,9 @@ export function StatusStrip({
 
 function Card({ title, aside, children }: { title: string; aside?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="glass min-w-0 p-4">
+    <section className="glass min-w-0 px-4 py-3.5">
       <header className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-[0.8125rem] font-medium text-paper-dim">{title}</h2>
+        <h2 className="text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-paper-faint">{title}</h2>
         {aside}
       </header>
       {children}
@@ -100,7 +100,7 @@ function MissionCard({ progress }: { progress: MissionProgress | null }) {
   return (
     <Card title="Mission">
       <div className="flex items-center gap-4">
-        <Ring value={progress.coveragePct / 100} label="Block surveyed">
+        <Ring value={progress.coveragePct / 100} label="Block surveyed" size={80} stroke={6}>
           <div>
             <div className="readout text-[1.5rem] leading-none">
               <CountUp value={progress.coveragePct} />
@@ -213,7 +213,7 @@ function Mini({ k, v, u, bad = false, icon }: { k: string; v: string; u: string;
 
 /** Heading as a compass dial: the needle is the aircraft's nose. */
 function HeadingDial({ deg }: { deg: number }) {
-  const size = 84
+  const size = 76
   const c = size / 2
   return (
     <div className="flex shrink-0 flex-col items-center gap-1">

@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import { CONNECTING_LINK } from '@/types'
 import { useMissionStream } from '@/hooks/useMissionStream'
 import { TopBar } from './TopBar'
+import { NavRail } from './NavRail'
 import { MissionContext } from './missionContext'
 
 /**
@@ -27,9 +28,12 @@ export function AppShell() {
           streamState={snapshot?.streamState ?? 'connecting'}
           link={snapshot?.link ?? CONNECTING_LINK}
         />
-        <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-          <Outlet />
-        </main>
+        <div className="flex min-h-0 flex-1">
+          <NavRail />
+          <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+            <Outlet />
+          </main>
+        </div>
       </div>
     </MissionContext.Provider>
   )

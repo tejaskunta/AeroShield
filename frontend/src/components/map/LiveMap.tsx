@@ -493,8 +493,9 @@ function ScaleReadout({ view }: { view: ViewMetrics }) {
   const capped = view.affordableZoom > view.imageryDepth
   return (
     <div
-      className={`pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 whitespace-nowrap rounded-md border bg-ink-deep/80 px-2 py-1 font-mono text-[0.625rem] backdrop-blur-sm ${
-        short ? 'border-hazard/60 text-hazard-lit' : 'border-white/[0.06] text-paper-faint'
+      // Bottom-left corner, in the attribution row: a developer readout, out of the way.
+      className={`pointer-events-none absolute bottom-[5px] left-3 z-[600] whitespace-nowrap font-mono text-[0.625rem] ${
+        short ? 'text-hazard-lit' : 'text-paper-faint/80'
       }`}
     >
       zoom {view.zoom} · {view.width}x{view.height} · {view.binding}-bound ·{' '}
