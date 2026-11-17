@@ -61,11 +61,11 @@ export function SafetyCopilot() {
   return (
     <div className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-3 py-2">
-          <h1 className="font-display text-title uppercase tracking-[0.12em] text-paper">
+        <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-6 pb-3 pt-5">
+          <h1 className="text-[1.25rem] font-semibold tracking-tight text-paper">
             Safety Copilot
           </h1>
-          <p className="font-mono text-small text-paper-dim">
+          <p className="text-[0.8125rem] text-paper-faint">
             {citations.length} source{citations.length === 1 ? '' : 's'} cited
           </p>
         </header>
@@ -80,17 +80,17 @@ export function SafetyCopilot() {
         {/* Starter questions, phrased the way a field question is actually asked.
             Hidden once the operator has asked something of their own. */}
         {!asked && (
-          <div className="shrink-0 px-4 pb-1">
-            <div className="mx-auto max-w-2xl">
-              <p className="eyebrow mb-1.5">Try</p>
-              <div className="flex flex-wrap gap-1.5">
+          <div className="shrink-0 px-6 pb-3">
+            <div className="mx-auto max-w-3xl">
+              <p className="eyebrow mb-2">Try asking</p>
+              <div className="grid gap-2 sm:grid-cols-2">
                 {SUGGESTED_QUERIES.map((q) => (
                   <button
                     key={q}
                     type="button"
                     onClick={() => void ask(q)}
                     disabled={pending}
-                    className="border border-rule px-2 py-1 text-left text-small text-paper-dim transition-colors hover:border-rule-bright hover:text-paper disabled:opacity-50"
+                    className="rounded-xl border border-white/[0.07] bg-ink-raised px-4 py-3 text-left text-[0.8125rem] text-paper-dim transition-colors hover:border-signal/40 hover:text-paper disabled:opacity-50"
                   >
                     {q}
                   </button>

@@ -98,7 +98,7 @@ export function RiskHeatmap({
         </div>
 
         {/* Readout for the hovered cell — a legend can't give exact counts. */}
-        <div className="w-24 shrink-0 border-l border-rule pl-2">
+        <div className="w-24 shrink-0 border-l border-white/[0.06] pl-2">
           <p className="eyebrow">Cell</p>
           <p className="font-display text-readout tabular text-paper">
             {hover?.cellId ?? '--'}

@@ -100,8 +100,8 @@ export function FilterRail({
   }
 
   return (
-    <div className="flex h-full w-52 shrink-0 flex-col border-r border-rule bg-ink-deep">
-      <div className="border-b border-rule p-2">
+    <div className="flex h-full w-52 shrink-0 flex-col border-r border-white/[0.06] bg-ink-deep">
+      <div className="border-b border-white/[0.06] p-2">
         <label className="sr-only" htmlFor="det-search">
           Search detections
         </label>
@@ -174,7 +174,7 @@ export function FilterRail({
       </div>
 
       {/* Standing count, plus an escape hatch when a filter hides everything. */}
-      <div className="border-t border-rule p-2">
+      <div className="border-t border-white/[0.06] p-2">
         <p className="font-mono text-tiny text-paper-dim">
           <span className="text-paper">{shown}</span> of {all.length} shown
         </p>

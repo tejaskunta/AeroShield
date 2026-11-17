@@ -31,15 +31,12 @@ export function Conversation({
   }, [messages.length, pending])
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-      <div className="mx-auto max-w-2xl space-y-5">
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+      <div className="mx-auto max-w-3xl space-y-6">
         {messages.map((m) =>
           m.role === 'operator' ? (
-            <div key={m.id} className="flex gap-3">
-              <span className="mt-0.5 shrink-0 font-mono text-tiny uppercase tracking-[0.12em] text-paper-faint">
-                You
-              </span>
-              <p className="font-display text-title leading-snug tracking-[0.02em] text-paper">
+            <div key={m.id} className="flex justify-end">
+              <p className="max-w-[80%] rounded-2xl rounded-br-md border border-signal/25 bg-signal/10 px-4 py-2.5 text-[0.875rem] leading-relaxed text-paper">
                 {m.text}
               </p>
             </div>
@@ -55,10 +52,11 @@ export function Conversation({
 
         {pending && (
           <div className="flex gap-3">
-            <span className="mt-0.5 shrink-0 font-mono text-tiny uppercase tracking-[0.12em] text-paper-faint">
-              Copilot
-            </span>
-            <p className="text-compact text-paper-dim">Searching the reference set…</p>
+            <Avatar />
+            <p className="flex items-center gap-2 pt-1.5 text-[0.8125rem] text-paper-dim">
+              <span className="size-1.5 animate-pulse rounded-full bg-signal" aria-hidden />
+              Searching the reference set…
+            </p>
           </div>
         )}
 
@@ -79,18 +77,16 @@ function Answer({
 }) {
   return (
     <div className="flex gap-3">
-      <span className="mt-1 shrink-0 font-mono text-tiny uppercase tracking-[0.12em] text-paper-faint">
-        Copilot
-      </span>
-      <div className="min-w-0 flex-1">
+      <Avatar />
+      <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border border-white/[0.06] bg-ink-raised px-4 py-3">
         {/* An ungrounded answer is marked before it is read, not after. */}
         {!message.grounded && (
-          <p className="mb-1.5 border-l-2 border-caution pl-2 font-mono text-tiny uppercase tracking-[0.08em] text-caution">
+          <p className="mb-2 inline-flex rounded-full border border-caution/40 bg-caution/10 px-2 py-0.5 text-[0.6875rem] font-medium text-caution">
             No supporting source found
           </p>
         )}
 
-        <div className="space-y-2 text-compact leading-relaxed text-paper">
+        <div className="space-y-2 text-[0.875rem] leading-relaxed text-paper">
           {message.text.split('\n\n').map((para, i) => (
             <p key={i}>{para}</p>
           ))}
@@ -98,7 +94,7 @@ function Answer({
 
         {/* Inline citation chips — hovering one highlights it in the rail. */}
         {message.citations && message.citations.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {message.citations.map((c, i) => (
               <button
                 key={c.id}
@@ -107,10 +103,10 @@ function Answer({
                 onMouseLeave={() => onCiteHover(null)}
                 onFocus={() => onCiteHover(c.id)}
                 onBlur={() => onCiteHover(null)}
-                className={`border px-1.5 py-px font-mono text-tiny transition-colors ${
+                className={`rounded-full border px-2.5 py-0.5 text-[0.6875rem] font-medium transition-colors ${
                   activeCitationId === c.id
-                    ? 'border-paper text-paper'
-                    : 'border-rule text-paper-dim hover:border-rule-bright hover:text-paper'
+                    ? 'border-signal/60 bg-signal/10 text-signal'
+                    : 'border-white/10 text-paper-dim hover:border-white/20 hover:text-paper'
                 }`}
               >
                 [{i + 1}] {c.document}
@@ -119,9 +115,20 @@ function Answer({
           </div>
         )}
 
-        <p className="mt-1.5 font-mono text-tiny text-paper-faint">{formatZulu(message.at)}</p>
+        <p className="mt-2 font-mono text-[0.625rem] text-paper-faint">{formatZulu(message.at)}</p>
       </div>
     </div>
+  )
+}
+
+/** The copilot's mark: a shield in the accent ring. */
+function Avatar() {
+  return (
+    <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border border-signal/30 bg-signal/10 text-signal" aria-hidden>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      </svg>
+    </span>
   )
 }
 
@@ -143,8 +150,8 @@ export function CitationsRail({
   onHover: (id: string | null) => void
 }) {
   return (
-    <aside className="hidden w-[300px] shrink-0 flex-col border-l border-rule bg-ink-deep xl:flex">
-      <header className="flex h-8 shrink-0 items-center justify-between border-b border-rule px-3">
+    <aside className="hidden w-[300px] shrink-0 flex-col border-l border-white/[0.06] bg-ink-deep xl:flex">
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/[0.06] px-4">
         <h2 className="eyebrow">Sources</h2>
         <span className="font-mono text-tiny text-paper-faint">{citations.length}</span>
       </header>
@@ -161,7 +168,7 @@ export function CitationsRail({
                 key={c.id}
                 onMouseEnter={() => onHover(c.id)}
                 onMouseLeave={() => onHover(null)}
-                className={`border p-2 transition-colors ${
+                className={`rounded-lg border p-3 transition-colors ${
                   activeCitationId === c.id
                     ? 'border-paper bg-ink-hover'
                     : 'border-rule bg-ink-raised'
@@ -185,7 +192,7 @@ export function CitationsRail({
                     style={{ width: `${Math.round(c.relevance * 100)}%` }}
                   />
                 </div>
-                <p className="mt-1.5 border-l border-rule pl-2 text-small leading-relaxed text-paper-dim">
+                <p className="mt-1.5 border-l border-white/[0.06] pl-2 text-small leading-relaxed text-paper-dim">
                   {c.excerpt}
                 </p>
               </article>
@@ -194,7 +201,7 @@ export function CitationsRail({
         )}
       </div>
 
-      <p className="shrink-0 border-t border-rule px-3 py-1.5 font-mono text-tiny leading-snug text-caution/80">
+      <p className="shrink-0 border-t border-white/[0.06] px-3 py-1.5 font-mono text-tiny leading-snug text-caution/80">
         Fixture corpus. No retrieval or model is running.
       </p>
     </aside>
@@ -231,8 +238,8 @@ export function Composer({
   }
 
   return (
-    <div className="shrink-0 border-t border-rule bg-ink px-4 py-2.5">
-      <div className="mx-auto flex max-w-2xl items-end gap-2">
+    <div className="shrink-0 border-t border-white/[0.06] bg-ink px-6 py-3">
+      <div className="mx-auto flex max-w-3xl items-end gap-2">
         <div className="flex-1">
           <label className="sr-only" htmlFor="copilot-input">
             Ask the safety copilot
@@ -249,7 +256,7 @@ export function Composer({
             }}
             rows={2}
             placeholder={listening ? 'Listening…' : 'Ask about procedure, standoff, marking…'}
-            className="w-full resize-none border border-rule bg-ink-raised px-2.5 py-1.5 text-compact text-paper placeholder:text-paper-faint focus:border-rule-bright focus:outline-none"
+            className="w-full resize-none rounded-xl border border-white/[0.08] bg-ink-raised px-4 py-2.5 text-[0.875rem] text-paper placeholder:text-paper-faint focus:border-signal/50 focus:outline-none"
           />
           {error && <p className="mt-1 text-tiny text-caution">{error}</p>}
         </div>
@@ -266,7 +273,7 @@ export function Composer({
               : 'This browser has no speech recognition'
           }
           icon={listening ? <MicOff size={12} aria-hidden /> : <Mic size={12} aria-hidden />}
-          className="h-[34px]"
+          className="h-[42px]"
         >
           {listening ? 'Stop' : 'Speak'}
         </Button>
@@ -275,7 +282,7 @@ export function Composer({
           onClick={submit}
           disabled={!text.trim() || disabled}
           icon={<Send size={12} aria-hidden />}
-          className="h-[34px]"
+          className="h-[42px]"
         >
           Ask
         </Button>

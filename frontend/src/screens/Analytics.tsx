@@ -16,6 +16,7 @@ import { formatConfidence } from '@/lib/risk'
 import { StatTile } from '@/components/analytics/StatTile'
 import {
   ConfidenceHistogram,
+  CoverageOverTime,
   DetectionsOverTime,
   ReviewProgressPanel,
 } from '@/components/analytics/Charts'
@@ -61,19 +62,19 @@ export function Analytics() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-3 py-2">
-        <h1 className="font-display text-title uppercase tracking-[0.12em] text-paper">
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 px-6 pb-3 pt-5">
+        <h1 className="text-[1.25rem] font-semibold tracking-tight text-paper">
           Analytics
         </h1>
-        <p className="font-mono text-small text-paper-dim">
+        <p className="text-[0.8125rem] text-paper-faint">
           {HAS_LIVE_MISSION ? MISSION_NAME : MISSION.name} ·{' '}
           {formatDuration(progress?.elapsedS ?? 0)} elapsed
         </p>
       </header>
 
-      <div className="space-y-2 p-2">
+      <div className="space-y-3 px-6 pb-6">
         {/* The outcome, in four numbers. */}
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile
             label="Hazards"
             value={stats.hazards}
@@ -105,13 +106,14 @@ export function Analytics() {
         </div>
 
         {/* How it accumulated, and how trustworthy it is. */}
-        <div className="grid gap-2 lg:grid-cols-2">
+        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
           <DetectionsOverTime data={time} />
           <ConfidenceHistogram data={hist} />
+          <CoverageOverTime data={time} />
         </div>
 
         {/* Where it is, and how much of it a person has ruled on. */}
-        <div className="grid gap-2 lg:grid-cols-[1.4fr_1fr]">
+        <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
           <RiskHeatmap
             cells={cells}
             grid={MISSION.grid}
@@ -121,11 +123,11 @@ export function Analytics() {
         </div>
 
         {/* Caveats. Part of the analysis, not a footnote. */}
-        <section className="border border-rule bg-ink-raised">
-          <header className="flex h-8 items-center border-b border-rule px-3">
-            <h3 className="eyebrow">Reading these numbers</h3>
+        <section className="card">
+          <header className="flex h-11 items-center px-4">
+            <h3 className="text-[0.8125rem] font-medium text-paper-dim">Reading these numbers</h3>
           </header>
-          <ul className="space-y-1.5 p-3 text-small leading-relaxed text-paper-dim">
+          <ul className="space-y-1.5 px-4 pb-4 text-[0.8125rem] leading-relaxed text-paper-dim">
             <li className="flex gap-2">
               <span aria-hidden className="text-paper-faint">·</span>
               <span>

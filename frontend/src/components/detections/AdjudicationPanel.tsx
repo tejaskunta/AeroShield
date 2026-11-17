@@ -58,7 +58,7 @@ export function AdjudicationPanel({
 
   if (!detection) {
     return (
-      <div className="flex w-full flex-col border-l border-rule bg-ink lg:w-[380px]">
+      <div className="flex w-full flex-col border-l border-white/[0.06] bg-ink lg:w-[380px]">
         <div className="p-3">
           <EmptyState
             title="No detection selected"
@@ -80,9 +80,9 @@ export function AdjudicationPanel({
   }
 
   return (
-    <div className="flex w-full min-w-0 flex-col border-l border-rule bg-ink lg:w-[380px]">
+    <div className="flex w-full min-w-0 flex-col border-l border-white/[0.06] bg-ink lg:w-[380px]">
       {/* Header */}
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-rule px-3 py-2">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="font-mono text-compact tracking-[0.04em] text-paper">
             {detection.id}
@@ -92,7 +92,7 @@ export function AdjudicationPanel({
         <button
           type="button"
           onClick={() => onShowOnMap(detection.id)}
-          className="flex shrink-0 items-center gap-1 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:text-paper"
+          className="flex shrink-0 items-center gap-1 text-[0.75rem] font-medium text-paper-dim hover:text-paper"
         >
           <ExternalLink size={11} aria-hidden />
           On map
@@ -141,7 +141,7 @@ export function AdjudicationPanel({
 
         {/* Current review state, if any. */}
         {reviewed && (
-          <div className="mb-3 border border-rule bg-ink-raised p-2">
+          <div className="mb-3 rounded-lg border border-white/[0.06] bg-ink-raised p-2">
             <p className="eyebrow mb-1">Review</p>
             <p className="font-display text-compact uppercase tracking-[0.08em] text-paper">
               {detection.review.state}
@@ -211,7 +211,7 @@ export function AdjudicationPanel({
       </div>
 
       {/* Actions pinned to the bottom, always reachable in a long scroll. */}
-      <footer className="shrink-0 border-t border-rule p-2">
+      <footer className="shrink-0 border-t border-white/[0.06] p-2">
         {confirmingDelete ? (
           /*
            * A confirm step, because this is the one irreversible action here. The
@@ -219,7 +219,7 @@ export function AdjudicationPanel({
            * second button is the safe one so a stray Enter does not delete.
            */
           <div className="border border-hazard/60 bg-hazard/10 p-2">
-            <p className="font-display text-tiny uppercase tracking-[0.1em] text-hazard-lit">
+            <p className="text-[0.75rem] font-medium text-hazard-lit">
               Delete {detection.id}?
             </p>
             <p className="mt-1 text-tiny leading-snug text-paper-dim">
@@ -306,7 +306,7 @@ export function AdjudicationPanel({
                 title="Delete this detection"
               />
             </div>
-            <p className="mt-1.5 font-mono text-tiny uppercase tracking-[0.1em] text-paper-faint">
+            <p className="mt-1.5 text-[0.6875rem] font-medium text-paper-faint">
               C confirm · X dismiss · F flag · J/K move
             </p>
           </>

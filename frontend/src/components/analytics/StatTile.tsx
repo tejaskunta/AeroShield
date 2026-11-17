@@ -33,15 +33,15 @@ export function StatTile({
   const tone = risk ? RISK_CLASSES[risk].text : 'text-paper'
 
   return (
-    <div className="border border-rule bg-ink-raised p-2.5">
+    <div className="card p-5">
       <p className="eyebrow">{label}</p>
-      <div className="mt-1 flex items-baseline gap-1">
-        <span className={`font-display text-readout-lg tabular ${tone}`}>
+      <div className="mt-3 flex items-baseline gap-1.5">
+        <span className={`readout text-[2.5rem] leading-none ${tone}`}>
           {typeof value === 'number' ? <CountUp value={value} decimals={decimals} /> : value}
         </span>
-        {unit && <span className="font-mono text-small text-paper-dim">{unit}</span>}
+        {unit && <span className="text-[0.75rem] text-paper-faint">{unit}</span>}
       </div>
-      {sub && <p className="mt-1 text-tiny leading-snug text-paper-faint">{sub}</p>}
+      {sub && <p className="mt-2 text-[0.75rem] leading-snug text-paper-faint">{sub}</p>}
     </div>
   )
 }

@@ -80,11 +80,11 @@ export function ContactSheet({
   }
 
   return (
-    <div ref={containerRef} className="min-h-0 flex-1 overflow-y-auto p-2">
+    <div ref={containerRef} className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
       {/* Bulk bar. Only mounted while a tick exists, so it can never be the thing
           the cursor happens to be over when a reviewer reaches for a tile. */}
       {checked.size > 0 && (
-        <div className="sticky top-0 z-10 mb-2 flex flex-wrap items-center gap-2 border border-rule-bright bg-ink-deep px-2 py-1.5">
+        <div className="glass sticky top-0 z-10 mb-3 flex flex-wrap items-center gap-2 px-3 py-2">
           <span className="font-mono text-small text-paper">
             {checked.size} selected
           </span>
@@ -107,7 +107,7 @@ export function ContactSheet({
         </div>
       )}
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-2">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
         {detections.map((d) => {
           const level = riskOf(d)
           const selected = d.id === selectedId
@@ -116,10 +116,10 @@ export function ContactSheet({
             <div
               key={d.id}
               data-det={d.id}
-              className={`group relative border text-left transition-colors ${
+              className={`group relative overflow-hidden rounded-lg border text-left transition-all ${
                 selected
-                  ? 'border-paper bg-ink-hover'
-                  : 'border-rule bg-ink-raised hover:border-rule-bright'
+                  ? 'border-signal/60 bg-ink-hover shadow-glow'
+                  : 'border-white/[0.06] bg-ink-raised hover:-translate-y-0.5 hover:border-white/15 hover:shadow-lift'
               }`}
             >
               {/* The click target is a real button covering the tile content, so
@@ -131,31 +131,31 @@ export function ContactSheet({
                 aria-current={selected}
                 className="block w-full text-left"
               >
-                <div className="relative aspect-video border-b border-rule bg-ink-deep">
+                <div className="relative aspect-video bg-ink-deep">
                   <DetectionFrame detection={d} risk={level} showStamp={false} />
                   {/* Review mark, top-right — shape-coded to match the map pins. */}
-                  <span className="absolute right-1 top-1">
+                  <span className="absolute right-2 top-2 rounded-full bg-black/45 p-1 backdrop-blur-sm">
                     <ReviewMark state={d.review.state} level={level} />
                   </span>
                 </div>
 
-                <div className="p-1.5">
+                <div className="px-3 py-2.5">
                   <div className="flex items-baseline justify-between gap-1">
-                    <span className="font-mono text-tiny tracking-[0.04em] text-paper">
+                    <span className="font-mono text-[0.75rem] text-paper">
                       {d.id}
                     </span>
-                    <span className="font-mono text-tiny text-paper-faint">{d.gridCell}</span>
+                    <span className="font-mono text-[0.6875rem] text-paper-faint">{d.gridCell || '—'}</span>
                   </div>
                   {/* Bare bar, no number — the number is already in the row above at
                       the size it needs. Repeating it here would be noise. */}
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <div className="h-1 flex-1 bg-ink-deep">
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/[0.07]">
                       <div
-                        className={`h-full ${RISK_CLASSES[level].bg}`}
+                        className={`h-full rounded-full ${RISK_CLASSES[level].bg}`}
                         style={{ width: `${Math.min(100, d.confidence * 100)}%` }}
                       />
                     </div>
-                    <span className={`font-mono text-tiny tabular ${RISK_CLASSES[level].text}`}>
+                    <span className={`font-mono text-[0.75rem] tabular-nums ${RISK_CLASSES[level].text}`}>
                       {formatConfidence(d.confidence)}
                     </span>
                   </div>
@@ -164,7 +164,7 @@ export function ContactSheet({
 
               {/* Tick box, top-left, above the button rather than inside it. */}
               <label
-                className="absolute left-1 top-1 flex cursor-pointer items-center justify-center bg-ink-deep/80 p-0.5"
+                className="absolute left-2 top-2 flex cursor-pointer items-center justify-center rounded bg-black/55 p-1 backdrop-blur-sm"
                 title={ticked ? 'Deselect for bulk action' : 'Select for bulk action'}
               >
                 <input
@@ -172,7 +172,7 @@ export function ContactSheet({
                   checked={ticked}
                   onChange={() => onToggleChecked(d.id)}
                   aria-label={`Select ${d.id}`}
-                  className="h-3 w-3 accent-paper"
+                  className="h-3.5 w-3.5 accent-[var(--signal)]"
                 />
               </label>
             </div>

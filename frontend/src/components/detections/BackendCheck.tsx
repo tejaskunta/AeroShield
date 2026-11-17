@@ -54,7 +54,7 @@ export function BackendCheck() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex items-center gap-1.5 border border-rule px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim hover:border-rule-bright hover:text-paper"
+        className="flex items-center gap-1.5 border border-rule px-2 py-1 text-[0.75rem] font-medium text-paper-dim hover:border-rule-bright hover:text-paper"
       >
         <Plug size={11} aria-hidden />
         Backend check

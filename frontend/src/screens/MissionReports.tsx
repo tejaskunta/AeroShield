@@ -93,12 +93,12 @@ export function MissionReports() {
       <ReportList reports={reports} selectedId={selectedId} onSelect={setSelectedId} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-3 py-2">
-          <h1 className="font-display text-title uppercase tracking-[0.12em] text-paper">
+        <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-6 pb-3 pt-5">
+          <h1 className="text-[1.25rem] font-semibold tracking-tight text-paper">
             Mission Reports
           </h1>
           {reconciled && (
-            <p className="font-mono text-small text-paper-dim">
+            <p className="text-[0.8125rem] text-paper-faint">
               {reconciled.register.length} detections in register
             </p>
           )}

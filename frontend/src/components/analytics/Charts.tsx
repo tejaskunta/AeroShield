@@ -1,9 +1,9 @@
 import {
+  Area,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  Line,
   ComposedChart,
   ReferenceLine,
   ResponsiveContainer,
@@ -39,26 +39,24 @@ export function DetectionsOverTime({ data }: { data: TimeBucket[] }) {
   return (
     <ChartFrame
       title="Detections over time"
-      note="Bars count detections per minute, with confirmed hazards alongside. The dashed line is cumulative coverage. Coverage history is interpolated; the simulator does not log it per tick."
+      note="Detections per minute, with confirmed hazards alongside. Confirmed is a subset of detections, so the bars sit side by side rather than stacked."
+      aside={
+        <div className="flex items-center gap-3 text-[0.6875rem] text-paper-dim">
+          <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm" style={{ background: NEUTRAL_SERIES[2] }} aria-hidden />Detections</span>
+          <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm" style={{ background: RISK_HEX.hazard }} aria-hidden />Confirmed</span>
+        </div>
+      }
     >
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+        <ComposedChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} barGap={2}>
           <CartesianGrid {...gridProps} />
           <XAxis
             dataKey="minute"
             {...axisProps}
             tickFormatter={(m: number) => `${m}′`}
-            interval="preserveStartEnd"
+            interval="preserveStartEnd" minTickGap={28}
           />
           <YAxis yAxisId="count" {...axisProps} allowDecimals={false} width={34} />
-          <YAxis
-            yAxisId="pct"
-            orientation="right"
-            {...axisProps}
-            domain={[0, 100]}
-            width={34}
-            tickFormatter={(v: number) => `${v}%`}
-          />
           <Tooltip
             cursor={{ fill: CONSOLE_HEX.inkHover, opacity: 0.5 }}
             content={({ active, payload, label }) => (
@@ -76,29 +74,58 @@ export function DetectionsOverTime({ data }: { data: TimeBucket[] }) {
                     value: payload?.[0]?.payload?.confirmed ?? 0,
                     color: RISK_HEX.hazard,
                   },
-                  {
-                    label: 'Coverage',
-                    value: `${Math.round(payload?.[0]?.payload?.coveragePct ?? 0)}%`,
-                    color: NEUTRAL_SERIES[1],
-                  },
                 ]}
               />
             )}
           />
-          <Bar yAxisId="count" dataKey="detections" fill={NEUTRAL_SERIES[2]} maxBarSize={22} />
+          <Bar yAxisId="count" dataKey="detections" fill={NEUTRAL_SERIES[2]} maxBarSize={22} radius={[4, 4, 0, 0]} />
           {/* Confirmed hazards beside the total, not stacked on it — confirmed is a
               subset of detections, so stacking would double-count. This part IS
               risk-encoded, hence the one saturated colour on the chart. */}
-          <Bar yAxisId="count" dataKey="confirmed" fill={RISK_HEX.hazard} maxBarSize={22} />
-          <Line
-            yAxisId="pct"
-            type="monotone"
-            dataKey="coveragePct"
-            stroke={NEUTRAL_SERIES[0]}
-            strokeWidth={1.5}
-            dot={false}
-            strokeDasharray="3 3"
+          <Bar yAxisId="count" dataKey="confirmed" fill={RISK_HEX.hazard} maxBarSize={22} radius={[4, 4, 0, 0]} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </ChartFrame>
+  )
+}
+
+/**
+ * CoverageOverTime — how much of the block has been imaged, minute by minute.
+ *
+ * Its own chart, on its own axis. It used to be a dashed line on a second y-scale
+ * over the detection bars: two measures of different units on one plot invites a
+ * reader to compare the bars' height with the line's, which means nothing. One
+ * series, so the title names it and there is no legend box.
+ */
+export function CoverageOverTime({ data }: { data: TimeBucket[] }) {
+  if (data.length === 0) return <EmptyChart title="Coverage over time" />
+  return (
+    <ChartFrame
+      title="Coverage over time"
+      note="Share of the block imaged from the air, not cleared. History is interpolated; the simulator does not log coverage per tick."
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id="cov-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={NEUTRAL_SERIES[0]} stopOpacity={0.22} />
+              <stop offset="100%" stopColor={NEUTRAL_SERIES[0]} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid {...gridProps} />
+          <XAxis dataKey="minute" {...axisProps} tickFormatter={(m: number) => `${m}′`} interval="preserveStartEnd" minTickGap={28} />
+          <YAxis {...axisProps} domain={[0, 100]} width={34} tickFormatter={(v: number) => `${v}%`} />
+          <Tooltip
+            cursor={{ stroke: NEUTRAL_SERIES[2], strokeWidth: 1 }}
+            content={({ active, payload, label }) => (
+              <ChartTooltip
+                active={active}
+                label={`T+${label} min`}
+                rows={[{ label: 'Coverage', value: `${Math.round(payload?.[0]?.payload?.coveragePct ?? 0)}%` }]}
+              />
+            )}
           />
+          <Area type="monotone" dataKey="coveragePct" stroke={NEUTRAL_SERIES[0]} strokeWidth={2} fill="url(#cov-fill)" dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: CONSOLE_HEX.inkRaised }} />
         </ComposedChart>
       </ResponsiveContainer>
     </ChartFrame>
@@ -132,7 +159,7 @@ export function ConfidenceHistogram({ data }: { data: ConfidenceBucket[] }) {
       }
     >
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+        <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
           <CartesianGrid {...gridProps} />
           <XAxis
             dataKey="binStart"

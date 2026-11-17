@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react'
 import { RISK_HEX } from '@/lib/risk'
 import {
-  CAUTION_HEX,
   CONSOLE_HEX,
   HAZARD_HEX,
+  HAZARD_SOFT_HEX,
   rgbOf,
 } from '@/lib/consoleInk'
 
@@ -46,7 +46,7 @@ export const NEUTRAL_SERIES = [
 export const axisProps = {
   stroke: CHART_AXIS,
   strokeWidth: 1,
-  tick: { fill: CHART_LABEL, fontSize: 10, fontFamily: 'IBM Plex Mono, monospace' },
+  tick: { fill: CHART_LABEL, fontSize: 10, fontFamily: '"JetBrains Mono Variable", ui-monospace, monospace' },
   tickLine: { stroke: CHART_AXIS },
 } as const
 
@@ -66,9 +66,9 @@ export const gridProps = {
 export function densityColor(t: number): string {
   const clamped = Math.max(0, Math.min(1, t))
   if (clamped <= 0.001) return CONSOLE_HEX.inkRaised
+  // One hue (hazard red), dark -> bright. Sequential magnitude never changes hue.
   const stops: Array<[number, [number, number, number]]> = [
-    [0, rgbOf(CONSOLE_HEX.inkRaised)],
-    [0.45, rgbOf(CAUTION_HEX)],
+    [0, rgbOf(HAZARD_SOFT_HEX)],
     [1, rgbOf(HAZARD_HEX)],
   ]
   for (let i = 1; i < stops.length; i++) {
@@ -105,16 +105,16 @@ export function ChartFrame({
   aside?: ReactNode
 }) {
   return (
-    <section className="border border-rule bg-ink-raised">
-      <header className="flex h-8 items-center justify-between gap-2 border-b border-rule px-3">
-        <h3 className="eyebrow truncate">{title}</h3>
+    <section className="card">
+      <header className="flex h-11 items-center justify-between gap-2 px-4">
+        <h3 className="truncate text-[0.8125rem] font-medium text-paper-dim">{title}</h3>
         {aside}
       </header>
-      <div className="p-2" style={{ height }}>
+      <div className="px-3 pb-2" style={{ height }}>
         {children}
       </div>
       {note && (
-        <p className="border-t border-rule px-3 py-1.5 text-tiny leading-snug text-paper-faint">
+        <p className="border-t border-white/[0.06] px-4 py-2 text-[0.6875rem] leading-snug text-paper-faint">
           {note}
         </p>
       )}
@@ -137,15 +137,15 @@ export function ChartTooltip({
 }) {
   if (!active) return null
   return (
-    <div className="border border-rule-bright bg-ink-deep/95 px-2 py-1.5">
+    <div className="glass px-3 py-2">
       {label != null && (
-        <p className="mb-1 font-mono text-tiny uppercase tracking-[0.08em] text-paper-dim">
+        <p className="mb-1.5 text-[0.6875rem] font-medium text-paper-dim">
           {label}
         </p>
       )}
       {rows.map((r) => (
         <div key={r.label} className="flex items-baseline gap-2">
-          {r.color && <span className="h-1.5 w-1.5 shrink-0" style={{ background: r.color }} />}
+          {r.color && <span className="size-2 shrink-0 rounded-full" style={{ background: r.color }} />}
           <span className="flex-1 text-tiny text-paper-dim">{r.label}</span>
           <span className="font-mono text-small tabular text-paper">{r.value}</span>
         </div>

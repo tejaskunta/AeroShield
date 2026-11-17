@@ -27,8 +27,8 @@ export function ReportList({
   onSelect: (id: string) => void
 }) {
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r border-rule bg-ink-deep lg:flex">
-      <header className="flex h-8 shrink-0 items-center justify-between border-b border-rule px-3">
+    <aside className="hidden w-64 shrink-0 flex-col border-r border-white/[0.06] bg-ink-deep lg:flex">
+      <header className="flex h-8 shrink-0 items-center justify-between border-b border-white/[0.06] px-3">
         <h2 className="eyebrow">Reports</h2>
         <span className="font-mono text-tiny text-paper-faint">{reports.length}</span>
       </header>
@@ -42,7 +42,7 @@ export function ReportList({
               type="button"
               onClick={() => onSelect(r.id)}
               aria-current={selected}
-              className={`flex w-full flex-col gap-1 border-b border-rule/60 px-3 py-2 text-left transition-colors ${
+              className={`flex w-full flex-col gap-1 border-b border-white/[0.06]/60 px-3 py-2 text-left transition-colors ${
                 selected ? 'bg-ink-hover' : 'hover:bg-ink-raised'
               }`}
             >
@@ -90,7 +90,7 @@ export function ExportBar({
   const stem = exportStem(report)
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-rule bg-ink px-3 py-2">
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-white/[0.06] bg-ink px-3 py-2">
       <span className="mr-1 font-mono text-small text-paper-dim">
         {report.id}
         <span className="ml-2 text-paper-faint">
