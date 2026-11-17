@@ -467,3 +467,16 @@
 @media (prefers-reduced-motion: reduce) {
   .aeroshield-drone3d__pulse { animation: none; opacity: 0; }
 }
+
+/* Measure tool segment labels (MeasureLayer). */
+.aeroshield-measure-label span {
+  display: inline-block;
+  transform: translate(-50%, -140%);
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(11, 15, 20, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--paper);
+  font: 500 11px/1.4 'JetBrains Mono Variable', ui-monospace, monospace;
+}

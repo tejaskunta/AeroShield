@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Layers } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
-import { CAUTION_HEX, CONSOLE_HEX, HAZARD_HEX } from '@/lib/consoleInk'
+import { CAUTION_HEX, CONSOLE_HEX, HAZARD_HEX, SIGNAL_HEX } from '@/lib/consoleInk'
 
 /**
  * LayerToggles — the map's layer checklist.
@@ -22,6 +22,8 @@ export interface LayerState {
   detections: boolean
   /** The georeferenced drone photo of the block, when one has been made. */
   drone: boolean
+  /** The ground the camera sees right now. */
+  footprint: boolean
 }
 
 /**
@@ -41,10 +43,13 @@ export const DEFAULT_LAYERS: LayerState = {
   detections: true,
   // On whenever a photo exists: it is the only imagery with real detail at z21-23.
   drone: true,
+  // On: it is what tells the operator what the camera is looking at this second.
+  footprint: true,
 }
 
 const ROWS: Array<{ key: keyof LayerState; label: string; swatch: ReactNode }> = [
   { key: 'detections', label: 'Detections', swatch: <Dot /> },
+  { key: 'footprint', label: 'Camera footprint', swatch: <Line color={SIGNAL_HEX} /> },
   { key: 'coverage', label: 'Coverage', swatch: <HatchSwatch /> },
   { key: 'track', label: 'Flown track', swatch: <Line color={CONSOLE_HEX.paper} /> },
   { key: 'grid', label: 'Survey grid', swatch: <GridSwatch /> },

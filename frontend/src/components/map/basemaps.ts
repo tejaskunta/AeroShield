@@ -97,6 +97,7 @@ export function basemapTileLayers(basemap: Basemap, maxZoom: number): L.GridLaye
     attribution: ESRI_ATTRIBUTION,
     // A mild haze correction (index.css); Esri's photo over this block is washed out.
     className: 'aeroshield-tiles-imagery',
+    sharpen: 0.85,
   })
 
   if (basemap === 'satellite') return [imagery]

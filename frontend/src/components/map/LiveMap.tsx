@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import type L from 'leaflet'
 import type { Detection, LatLng, MissionProgress, Telemetry } from '@/types'
 import { MISSION } from '@/lib/mockData'
 import { MAX_LIVE_MAP_ZOOM, MIN_LIVE_MAP_PX_PER_METRE } from '@/lib/config'
@@ -7,6 +8,8 @@ import { isBelowAffordableZoom } from '@/lib/scale'
 import { gridBounds, gridCenter, M_PER_DEG_LAT, mPerDegLon } from '@/lib/geo'
 import { basemapNativeDepth, type Basemap } from './basemaps'
 import { DroneImageryLayer, type DroneOverlayMeta } from './DroneImageryLayer'
+import { MapFooter } from './MapFooter'
+import { MeasureLayer } from './MeasureLayer'
 import type { MapControls, MapViewState } from './viewTypes'
 import { useMap } from './mapContext'
 import { MapRoot } from './MapRoot'
@@ -198,8 +201,13 @@ export function LiveMap({
   droneOverlay,
   initialView,
   onControls,
+  measuring = false,
+  onMeasure,
   children,
 }: {
+  /** Click-to-measure mode (2D only). */
+  measuring?: boolean
+  onMeasure?: (metres: number, points: number) => void
   telemetry: Telemetry | null
   progress: MissionProgress | null
   detections: Detection[]
@@ -328,7 +336,10 @@ export function LiveMap({
           <DetectionPins detections={detections} selectedId={selectedId} onSelect={onSelect} />
         )}
 
-        {telemetry && <DronePlatform telemetry={telemetry} />}
+        {/* What the camera sees right now, under the aircraft glyph. */}
+        {telemetry && <DronePlatform telemetry={telemetry} showFootprint={layers.footprint} />}
+        {measuring && onMeasure && <MeasureLayer onTotal={onMeasure} />}
+        <MapFooter extra={import.meta.env.DEV && view ? <ScaleReadout view={view} /> : null} />
 
         <FollowController
           position={telemetry?.position ?? null}
@@ -356,7 +367,6 @@ export function LiveMap({
 
       {/* The map's own diagnostics. Every control lives in the shared glass chrome. */}
       <div className="pointer-events-none absolute inset-0 z-[500]">
-        {import.meta.env.DEV && view && <ScaleReadout view={view} />}
         {!legible && <ScaleWarning />}
       </div>
     </div>
@@ -369,6 +379,14 @@ export function LiveMap({
  */
 function ControlsBridge({ onControls }: { onControls?: (c: MapControls | null) => void }) {
   const { map } = useMap()
+  // Dev builds only: lets a test drive the map to an exact zoom (seam checks).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    ;(window as unknown as { __aeroMap?: L.Map }).__aeroMap = map
+    return () => {
+      delete (window as unknown as { __aeroMap?: L.Map }).__aeroMap
+    }
+  }, [map])
   useEffect(() => {
     if (!onControls) return
     onControls({
@@ -493,10 +511,8 @@ function ScaleReadout({ view }: { view: ViewMetrics }) {
   const capped = view.affordableZoom > view.imageryDepth
   return (
     <div
-      // Bottom-left corner, in the attribution row: a developer readout, out of the way.
-      className={`pointer-events-none absolute bottom-[5px] left-3 z-[600] whitespace-nowrap font-mono text-[0.625rem] ${
-        short ? 'text-hazard-lit' : 'text-paper-faint/80'
-      }`}
+      // Inline in the bottom-left map footer: a developer readout, out of the way.
+      className={`whitespace-nowrap font-mono text-[0.625rem] ${short ? 'text-hazard-lit' : 'text-paper-faint/70'}`}
     >
       zoom {view.zoom} · {view.width}x{view.height} · {view.binding}-bound ·{' '}
       {view.pixelsPerMetre.toFixed(1)} px/m · block {Math.round(view.spanPx)} px ·{' '}

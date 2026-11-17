@@ -7,7 +7,8 @@ import type { Detection, LatLng, MissionProgress, Telemetry } from '@/types'
 import { MISSION } from '@/lib/mockData'
 import { ESRI_LABELS_URL, ESRI_WORLD_IMAGERY_URL, FIT_MAX_ZOOM, MAX_LIVE_MAP_ZOOM } from '@/lib/config'
 import { cellBounds, gridBounds, gridCenter, offsetM, parseCellId, validCoordinate } from '@/lib/geo'
-import { riskOf } from '@/lib/risk'
+import { RISK_HEX, riskOf } from '@/lib/risk'
+import { cameraFootprint, footprintHalfExtents } from '@/lib/footprint'
 import { detectionGlyphHtml, pinSize } from '@/components/map/markerGlyphs'
 import type { Basemap } from '@/components/map/basemaps'
 import type { LayerState } from '@/components/map/LayerToggles'
@@ -76,6 +77,17 @@ function buildStyle(): StyleSpecification {
       },
     ],
     terrain: { source: 'terrain', exaggeration: 1 },
+    // A night-console sky: deep blue overhead, a soft horizon, ground fog that fades
+    // distant tiles into the page colour instead of a hard black edge at the horizon.
+    sky: {
+      'sky-color': '#0d2236',
+      'horizon-color': '#1c3a52',
+      'fog-color': '#0a0e13',
+      'sky-horizon-blend': 0.6,
+      'horizon-fog-blend': 0.55,
+      'fog-ground-blend': 0.75,
+    },
+    light: { anchor: 'viewport', color: '#ffffff', intensity: 0.35, position: [1.15, 210, 30] },
   }
 }
 
@@ -114,6 +126,27 @@ function coveredCells(ids: readonly string[]): GeoJSON.FeatureCollection {
   return { type: 'FeatureCollection', features }
 }
 
+/** An eight-sided pillar footprint (~0.3 m across) around each detection. */
+function beacons(dets: readonly Detection[], selectedId: string | null): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = []
+  for (const d of dets) {
+    if (!validCoordinate(d.position)) continue
+    const r = d.id === selectedId ? 0.28 : 0.16
+    const ring: number[][] = []
+    for (let i = 0; i <= 8; i++) {
+      const a = (i / 8) * Math.PI * 2
+      const p = offsetM(d.position, Math.cos(a) * r, Math.sin(a) * r)
+      ring.push([p.lon, p.lat])
+    }
+    features.push({
+      type: 'Feature',
+      properties: { color: RISK_HEX[riskOf(d)], h: d.id === selectedId ? 3.2 : 2.2 },
+      geometry: { type: 'Polygon', coordinates: [ring] },
+    })
+  }
+  return { type: 'FeatureCollection', features }
+}
+
 function trackLine(points: readonly LatLng[]): GeoJSON.FeatureCollection {
   const coords = points.filter(validCoordinate).map((p) => [p.lon, p.lat])
   if (coords.length < 2) return EMPTY
@@ -121,7 +154,7 @@ function trackLine(points: readonly LatLng[]): GeoJSON.FeatureCollection {
 }
 
 /** A small quadcopter in metres: x east, y north, z up. Nose is +y. */
-function makeDrone(): { root: THREE.Group; rotors: THREE.Mesh[]; tether: THREE.Line; shadow: THREE.Mesh } {
+function makeDrone(): { root: THREE.Group; rotors: THREE.Mesh[]; tether: THREE.Line; shadow: THREE.Mesh; frustum: THREE.LineSegments } {
   const root = new THREE.Group()
   const model = new THREE.Group()
   model.scale.setScalar(DRONE_SCALE)
@@ -175,7 +208,18 @@ function makeDrone(): { root: THREE.Group; rotors: THREE.Mesh[]; tether: THREE.L
     new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }),
   )
   root.add(shadow)
-  return { root, rotors, tether, shadow }
+
+  // The camera frustum: four edges from the airframe down to the footprint corners.
+  // Built on a unit pyramid and scaled per frame to the real footprint (metres).
+  const f = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(-1, 1, -1),
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 1, -1),
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, -1, -1),
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(-1, -1, -1),
+  ])
+  const frustum = new THREE.LineSegments(f, new THREE.LineBasicMaterial({ color: 0x5cc8f5, transparent: true, opacity: 0.55 }))
+  root.add(frustum)
+  return { root, rotors, tether, shadow, frustum }
 }
 
 type DroneState = { lon: number; lat: number; altM: number; headingDeg: number } | null
@@ -219,6 +263,9 @@ function makeDroneLayer(getState: () => DroneState): CustomLayerInterface {
 
       drone.tether.scale.set(1, 1, alt)
       drone.shadow.position.z = -alt + 0.02
+      const fe = footprintHalfExtents(alt)
+      // Model space: x across the frame, y forward (the nose), z up.
+      drone.frustum.scale.set(fe.halfAcross, fe.halfAlong, alt)
       drone.root.rotation.z = -(st.headingDeg * Math.PI) / 180
       // Blades at a fixed 45°: spinning them meant repainting the whole 3D map every
       // frame, which keeps a field laptop's GPU busy for nothing.
@@ -306,13 +353,32 @@ export default function LiveMap3D({
       attributionControl: false,
     })
     mapRef.current = map
+    // Dev builds only: lets a test set an exact camera.
+    if (import.meta.env.DEV) (window as unknown as { __aeroMap3d?: maplibregl.Map }).__aeroMap3d = map
 
     map.on('load', () => {
       loaded.current = true
       map.addSource('grid', { type: 'geojson', data: gridLines() })
       map.addSource('coverage', { type: 'geojson', data: EMPTY })
       map.addSource('track', { type: 'geojson', data: EMPTY })
+      map.addSource('footprint', { type: 'geojson', data: EMPTY })
+      map.addSource('beacons', { type: 'geojson', data: EMPTY })
       map.addLayer({ id: 'coverage', type: 'fill', source: 'coverage', paint: { 'fill-color': '#e9edf1', 'fill-opacity': 0.1 } })
+      map.addLayer({ id: 'footprint-fill', type: 'fill', source: 'footprint', paint: { 'fill-color': '#5cc8f5', 'fill-opacity': 0.1 } })
+      map.addLayer({ id: 'footprint-line', type: 'line', source: 'footprint', paint: { 'line-color': '#5cc8f5', 'line-width': 1.5, 'line-dasharray': [2, 2] } })
+      // Hazard beacons: a thin coloured pillar at each detection, so pins read as
+      // objects standing on the ground in a tilted view rather than flat dots.
+      map.addLayer({
+        id: 'beacons',
+        type: 'fill-extrusion',
+        source: 'beacons',
+        paint: {
+          'fill-extrusion-color': ['get', 'color'],
+          'fill-extrusion-height': ['get', 'h'],
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': 0.85,
+        },
+      })
       map.addLayer({ id: 'grid', type: 'line', source: 'grid', paint: { 'line-color': '#e9edf1', 'line-opacity': 0.45, 'line-width': 1 } })
       map.addLayer({
         id: 'track',
@@ -424,6 +490,15 @@ export default function LiveMap3D({
       : null
     const map = mapRef.current
     const st = droneState.current
+    const fpSrc = loaded.current ? (map?.getSource('footprint') as GeoJSONSource | undefined) : undefined
+    if (fpSrc) {
+      if (st && layers.footprint && st.altM > 0.2) {
+        const c = cameraFootprint({ lat: st.lat, lon: st.lon }, st.altM, st.headingDeg).map((p) => [p.lon, p.lat])
+        fpSrc.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[...c, c[0]!]] } }] })
+      } else {
+        fpSrc.setData(EMPTY)
+      }
+    }
     if (map && droneMarker.current) {
       if (st) {
         droneMarker.current.setLngLat([st.lon, st.lat]).addTo(map)
@@ -438,7 +513,7 @@ export default function LiveMap3D({
     if (follow === 'follow' && telemetry && validCoordinate(telemetry.position)) {
       mapRef.current?.easeTo({ center: [telemetry.position.lon, telemetry.position.lat], duration: 400 })
     }
-  }, [telemetry, follow])
+  }, [telemetry, follow, layers.footprint])
 
   // Fit block (+ track) on request, keeping the tilt.
   useEffect(() => {
@@ -461,7 +536,18 @@ export default function LiveMap3D({
     if (!map) return
     markers.current.forEach((m) => m.remove())
     markers.current = []
-    if (!layers.detections) return
+    // Beacons follow the same data; re-applied when the style finishes loading too,
+    // in case detections arrived first.
+    const setBeacons = () => {
+      if (!loaded.current) return
+      ;(map.getSource('beacons') as GeoJSONSource | undefined)?.setData(layers.detections ? beacons(detections, selectedId) : EMPTY)
+    }
+    setBeacons()
+    map.on('aeroshield:sync', setBeacons)
+    const cleanup = () => {
+      map.off('aeroshield:sync', setBeacons)
+    }
+    if (!layers.detections) return cleanup
     for (const d of detections) {
       if (!validCoordinate(d.position)) continue
       const selected = d.id === selectedId
@@ -478,6 +564,7 @@ export default function LiveMap3D({
       })
       markers.current.push(new maplibregl.Marker({ element: el }).setLngLat([d.position.lon, d.position.lat]).addTo(map))
     }
+    return cleanup
   }, [detections, selectedId, layers.detections])
 
   // The holder is sized by its parent, not by `absolute inset-0` on itself:

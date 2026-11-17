@@ -17,6 +17,7 @@ import { LiveFeed } from '@/components/mission/LiveFeed'
 import { MapChromeTopLeft, MapChromeTopRight, type Layout } from '@/components/mission/MapChrome'
 import { StatusStrip } from '@/components/mission/StatusStrip'
 import { TestInjectPanel } from '@/components/mission/TestInjectPanel'
+import { fmtM } from '@/components/map/MeasureLayer'
 import { Lightbox } from '@/components/ui/Lightbox'
 
 // The 3D engine (MapLibre + three.js, ~1 MB) loads only when someone opens 3D.
@@ -104,6 +105,14 @@ export function MissionControl() {
   const [picking, setPicking] = useState(false)
   const [testPoint, setTestPoint] = useState<LatLng | null>(null)
 
+  // Measure tool (2D): its clicks belong to the ruler, not to selection.
+  const [measuring, setMeasuring] = useState(false)
+  const [measure, setMeasure] = useState<{ m: number; n: number }>({ m: 0, n: 0 })
+  const onMeasure = useCallback((m: number, n: number) => setMeasure({ m, n }), [])
+  useEffect(() => {
+    if (view !== '2d') setMeasuring(false)
+  }, [view])
+
   const onMapClick = useCallback(
     (p: LatLng) => {
       if (picking) {
@@ -111,9 +120,10 @@ export function MissionControl() {
         setPicking(false)
         return
       }
+      if (measuring) return
       select(null)
     },
-    [picking, select],
+    [picking, measuring, select],
   )
 
   const pick = useCallback(
@@ -183,6 +193,7 @@ export function MissionControl() {
     initialView: carry.current,
     onControls: setControls,
   }
+  const measureProps = { measuring, onMeasure }
 
   const split = layout === 'split' && HAS_JETSON_STREAM
 
@@ -192,7 +203,7 @@ export function MissionControl() {
       <div className={`relative min-w-0 flex-1 overflow-hidden ${picking ? 'cursor-crosshair' : ''}`}>
         <div className="absolute inset-0">
           {view === '2d' ? (
-            <LiveMap {...shared}>
+            <LiveMap {...shared} {...measureProps}>
               {cardProps && <DetectionCallout {...cardProps} bottomInset={stripH + 24} />}
             </LiveMap>
           ) : (
@@ -250,10 +261,24 @@ export function MissionControl() {
               bearing={bearing}
               testOpen={testOpen}
               onTest={() => setTestOpen((o) => !o)}
+              measuring={measuring}
+              onMeasure={() => {
+                setMeasuring((v) => !v)
+                setMeasure({ m: 0, n: 0 })
+              }}
             />
           </div>
 
           <div className="flex-1" />
+
+          {measuring && (
+            <div className="mb-2 flex justify-center">
+              <span className="glass pointer-events-auto px-3 py-1.5 font-mono text-[0.75rem] text-paper">
+                {measure.n < 2 ? 'Click points on the map to measure' : `Total ${fmtM(measure.m)} · ${measure.n} points`}
+                <span className="ml-2 font-body text-paper-faint">Esc to finish</span>
+              </span>
+            </div>
+          )}
 
           <div ref={stripRef}>
             <StatusStrip

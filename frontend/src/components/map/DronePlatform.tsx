@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 import type { Telemetry } from '@/types'
+import { cameraFootprint } from '@/lib/footprint'
 import { useMap } from './mapContext'
-import { CONSOLE_HEX } from '@/lib/consoleInk'
+import { CONSOLE_HEX, SIGNAL_HEX } from '@/lib/consoleInk'
 
 /**
  * DronePlatform — the aircraft, and the ground it can see.
@@ -38,11 +39,13 @@ import { CONSOLE_HEX } from '@/lib/consoleInk'
  * that moves continuously: tearing down and rebuilding its marker on every frame would
  * make it flicker, and would also reset any in-flight map animation.
  */
-export function DronePlatform({ telemetry }: { telemetry: Telemetry }) {
+export function DronePlatform({ telemetry, showFootprint = true }: { telemetry: Telemetry; showFootprint?: boolean }) {
   const { map } = useMap()
 
   const markerRef = useRef<L.Marker | null>(null)
-  const discRef = useRef<L.Circle | null>(null)
+  const discRef = useRef<L.Polygon | null>(null)
+  const showFootprintRef = useRef(showFootprint)
+  showFootprintRef.current = showFootprint
   const frameRef = useRef<number | null>(null)
 
   // The latest thing the aircraft reported. Telemetry arrives at about 1 Hz, so
@@ -71,21 +74,19 @@ export function DronePlatform({ telemetry }: { telemetry: Telemetry }) {
     }).addTo(map)
 
     /*
-     * Kept, but quieter than it was (0.4 -> 0.22 stroke, 0.06 -> 0.04 fill).
-     *
-     * The ring answers a real question the marker cannot — how much ground a single
-     * frame covers — and it does so in the same `paper` ink as the track, so it
-     * belongs to the same visual family. At 0.4 it competed with the pins it is
-     * supposed to sit behind; at 0.22 it is legible when looked for and ignorable
-     * when not.
+     * The camera footprint: the exact ground rectangle the frame covers (same optics
+     * as the Jetson's geotagging, lib/footprint.ts), turning with the heading. It
+     * replaced an approximate radius ring. Updated in the same easing loop as the
+     * glyph below, so the two never disagree mid-move; as a separate layer it jumped
+     * to each packet while the glyph eased, and drew a metre or two off.
      */
-    const disc = L.circle([telemetry.position.lat, telemetry.position.lon], {
-      radius: footprintM(telemetry.altitudeM),
-      color: CONSOLE_HEX.paper,
-      weight: 1,
-      opacity: 0.22,
-      fillColor: CONSOLE_HEX.paper,
-      fillOpacity: 0.04,
+    const disc = L.polygon([], {
+      color: SIGNAL_HEX,
+      weight: 1.5,
+      opacity: 0.9,
+      dashArray: '4 4',
+      fillColor: SIGNAL_HEX,
+      fillOpacity: 0.08,
       interactive: false,
       pane: 'overlayPane',
     }).addTo(map)
@@ -202,8 +203,11 @@ export function DronePlatform({ telemetry }: { telemetry: Telemetry }) {
     shown.altitudeM += (target.altitudeM - shown.altitudeM) * 0.25
 
     marker.setLatLng([shown.lat, shown.lon])
-    disc.setLatLng([shown.lat, shown.lon])
-    disc.setRadius(footprintM(shown.altitudeM))
+    disc.setLatLngs(
+      showFootprintRef.current && shown.altitudeM > 0.2
+        ? cameraFootprint({ lat: shown.lat, lon: shown.lon }, shown.altitudeM, shown.headingDeg).map((c) => [c.lat, c.lon] as [number, number])
+        : [],
+    )
 
     // Rebuilding a 40 px divIcon is only worth doing when the arrow would actually
     // look different; at 1 Hz telemetry that is a real saving over 60 rebuilds a
@@ -332,17 +336,4 @@ export function droneIcon(headingDeg: number | null): L.DivIcon {
     iconSize: [DRONE_PX, DRONE_PX],
     iconAnchor: [half, half],
   })
-}
-
-/**
- * Ground area currently under the camera.
- *
- * The camera looks down at a known field of view, so the swath width grows linearly
- * with altitude — this is the tangent of the half-angle, and 0.65 corresponds to a
- * ~66° field of view. Kept as a named function rather than inlined because the
- * constant is an assumption about hardware and should be findable when the actual
- * camera is known.
- */
-function footprintM(altitudeM: number): number {
-  return Math.max(0, altitudeM * 0.65)
 }

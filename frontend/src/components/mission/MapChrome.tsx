@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Columns2, Compass, Crosshair, FlaskConical, Hand, Layers, Minus, PictureInPicture2, Plus, Scan } from 'lucide-react'
+import { Columns2, Compass, Crosshair, FlaskConical, Hand, Layers, Minus, PictureInPicture2, Plus, Ruler, Scan } from 'lucide-react'
 import type { Basemap } from '@/components/map/basemaps'
 import type { FollowMode } from '@/components/map/useMapHooks'
 import type { MapControls, ViewMode } from '@/components/map/viewTypes'
@@ -95,7 +95,11 @@ export function MapChromeTopRight({
   bearing,
   testOpen,
   onTest,
+  measuring,
+  onMeasure,
 }: {
+  measuring: boolean
+  onMeasure: () => void
   controls: MapControls | null
   follow: FollowMode
   onFollow: (m: FollowMode) => void
@@ -137,6 +141,11 @@ export function MapChromeTopRight({
         <IconButton bare label="Layers" active={layersOpen} onClick={() => setLayersOpen((o) => !o)}>
           <Layers size={16} />
         </IconButton>
+        {view === '2d' && (
+          <IconButton bare label="Measure distance (click points, Esc to finish)" active={measuring} onClick={onMeasure}>
+            <Ruler size={16} />
+          </IconButton>
+        )}
         <span className="mx-1.5 my-0.5 h-px bg-white/[0.08]" aria-hidden />
         <IconButton bare label="Test detection: inject a landmine image through the pipeline" active={testOpen} onClick={onTest}>
           <FlaskConical size={16} />
