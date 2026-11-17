@@ -198,25 +198,33 @@
 
    Two independent problems, and they need different cures.
 
-   The gaps: a 1 px `outline` in the container's own background colour is the
-   standard Leaflet remedy, because an outline is painted inside the tile's own
-   box and therefore covers the unpainted fraction rather than adding to the
-   layout. It must be the *container* colour and not a map colour, or the seams
-   become bright lines instead of disappearing.
+   The gaps: each tile image is drawn ONE PIXEL LARGER than its 256 px slot, so
+   neighbours overlap instead of abutting (the remedy from Leaflet issue #3575).
+   This replaced a 1 px `outline`, which did not work: an outline is painted
+   *outside* the box, in the tile's own unscaled pixels, and the next tile is
+   drawn over it. Past the imagery's native zoom the whole tile container is
+   CSS-scaled (about 2.8x at z20.5 from z19 tiles), the edges land on fractional
+   device pixels, and the browser blends the edge texels with whatever is behind
+   them, which showed as one pale hairline per tile edge across the imagery. A
+   1 px overlap in tile space becomes ~3 screen px after that scaling, so the
+   rounding never opens a gap. The extra pixel is the neighbour's own first row,
+   duplicated, so nothing visibly shifts.
 
-   The mush is not fixable here and should not be faked. Past zoom 19 Esri serves
-   no more detail for this site -- z20 and deeper come back as a uniform pale
-   placeholder tile, which is measured, not assumed -- so Leaflet scales the
-   deepest real tile up and every edge softens. No CSS recovers detail the source
-   does not contain, and `image-rendering: pixelated` makes it worse rather than
-   better: blocky interpolation over an aerial photograph reads as a broken
-   renderer. The browser's own smoothing is the better of the bad options, so the
-   default is left alone and the overshoot is prevented instead, in `useMapHooks`
-   (the fit is capped at the imagery's native depth).
+   Scoped to tile images only. The coverage hatch uses `L.imageOverlay`
+   (`.leaflet-image-layer`), whose size is set from its geographic bounds and
+   must not be enlarged.
+
+   The mush is not fixable here and should not be faked. Past its native depth a
+   basemap is the deepest real tile drawn larger (Esri: z19 at this site, Google:
+   z20, both measured), and no CSS recovers detail the source does not contain.
+   `image-rendering: pixelated` makes it worse rather than better: blocky
+   interpolation over an aerial photograph reads as a broken renderer. Real detail
+   at z21-23 comes from the drone photo overlay (`DroneImageryLayer.tsx`), not
+   from here.
 --------------------------------------------------------------------------- */
-.leaflet-tile {
-  /* Covers the sub-pixel gap between tiles. Container colour, not a map colour. */
-  outline: 1px solid var(--ink-deep);
+.leaflet-tile-container img.leaflet-tile {
+  width: 257px !important;
+  height: 257px !important;
 }
 
 /* ---------------------------------------------------------------------------

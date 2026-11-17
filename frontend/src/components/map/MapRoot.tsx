@@ -46,6 +46,7 @@ const MAP_BACKGROUND = CONSOLE_HEX.inkDeep
  */
 const TILE_ERROR_NOTICE_AT = 12
 
+
 export interface MapRootProps {
   center: { lat: number; lon: number }
   zoom: number

@@ -144,3 +144,8 @@ export function basemapTileLayers(basemap: Basemap, maxZoom: number): L.TileLaye
 export function basemapAttribution(basemap: Basemap): string {
   return basemap === 'roadmap' ? OSM_ATTRIBUTION : ESRI_ATTRIBUTION
 }
+
+/** How deep a basemap's imagery is real (the readout's "capped zN"). Esri and OSM both stop at 19. */
+export function basemapNativeDepth(_basemap: Basemap): number {
+  return NATIVE_TILE_ZOOM
+}

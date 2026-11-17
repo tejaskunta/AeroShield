@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Detection, LatLng, MissionProgress, Telemetry } from '@/types'
 import { MISSION } from '@/lib/mockData'
-import { MAX_LIVE_MAP_ZOOM, ESRI_MAX_NATIVE_ZOOM, MIN_LIVE_MAP_PX_PER_METRE } from '@/lib/config'
+import { MAX_LIVE_MAP_ZOOM, MIN_LIVE_MAP_PX_PER_METRE } from '@/lib/config'
 import { isBelowAffordableZoom } from '@/lib/scale'
 import { gridBounds, gridCenter, M_PER_DEG_LAT, mPerDegLon } from '@/lib/geo'
-import { BASEMAP_LABELS, type Basemap } from './basemaps'
+import { BASEMAP_LABELS, basemapNativeDepth, type Basemap } from './basemaps'
+import { DroneImageryLayer, droneOverlayLabel, useDroneOverlay } from './DroneImageryLayer'
 import { MapRoot } from './MapRoot'
 import { MissionGridLayer } from './MissionGridLayer'
 import { CoverageHatchLayer } from './CoverageHatchLayer'
@@ -97,24 +98,22 @@ export type { Basemap }
  * as a value rather than special-casing it keeps the readout the same shape on every
  * basemap.
  */
-const BASEMAP_NATIVE_DEPTH: Record<Basemap, number> = {
-  satellite: ESRI_MAX_NATIVE_ZOOM,
-  hybrid: ESRI_MAX_NATIVE_ZOOM,
-  roadmap: MAX_LIVE_MAP_ZOOM,
-}
+// The table itself now lives in `basemapNativeDepth` (basemaps.ts), because the
+// answer depends on the provider as well as the basemap: Google is real to z20,
+// Esri to z19, and OSM's street tiles to z19. Over the drone photo the answer is
+// the map's own ceiling, which `LiveMap` applies below.
 
 /**
  * How far the operator may zoom, on every basemap.
  *
  * One number for all three, because the limit is the console's and not the imagery's.
- * The imagery's limit is `BASEMAP_NATIVE_DEPTH` above, enforced by `maxNativeZoom`.
+ * The imagery's limit is `basemapNativeDepth` (basemaps.ts), enforced by `maxNativeZoom`.
  *
- * `MAX_LIVE_MAP_ZOOM` is 22 — a single level of upscaling past Esri's native 19 over
- * this block, which is soft but still readable at the ~28 px/m the ten-metre span
- * needs. Two levels of interpolation would look like a broken map rather than a
- * closer one, so 22 is where the console stops. That is a judgement about legibility,
- * not about what the tiles contain, which is precisely why it no longer varies by
- * basemap.
+ * `MAX_LIVE_MAP_ZOOM` is 23 (about 1.8 cm per pixel here), so a drone-sized object
+ * on the field is a recognisable shape. Real detail at 21-23 comes from the drone
+ * photo overlay; over the satellite base alone those levels are a magnifier, and the
+ * readout says `capped zN` with the provider's true depth. Automatic fits stop at
+ * `FIT_MAX_ZOOM` (22) so the framed view the console opens on is unchanged.
  */
 const MAX_ZOOM = MAX_LIVE_MAP_ZOOM
 
@@ -127,7 +126,7 @@ const MAX_ZOOM = MAX_LIVE_MAP_ZOOM
  * visibly interpolating it.
  *
  * It used to be 22 to make a metre a larger square, but that traded honesty for
- * apparent scale. Twenty-two is four levels past `BASEMAP_NATIVE_DEPTH`, so every
+ * apparent scale. Twenty-two is four levels past the imagery's native depth, so every
  * frame opened on upscaled imagery — four times magnified, blurry, and reading as a
  * bad map rather than a close one. The block is legible at 20, and an operator who
  * still wants 22 can zoom in; `MAX_ZOOM` is unchanged so that stays possible.
@@ -233,7 +232,7 @@ export function LiveMap({
   const center = useMemo(() => gridCenter(MISSION.grid), [])
 
   /**
-   * What the current basemap's imagery actually contains — see `BASEMAP_NATIVE_DEPTH`.
+   * What the current basemap's imagery actually contains — see `basemapNativeDepth` in basemaps.ts.
    *
    * This is *not* handed to `MapRoot` any more. It used to be, as a `ceilingZoom` prop
    * that clamped the map's maximum zoom, which is how zoom 19 became a wall. The map's
@@ -245,7 +244,12 @@ export function LiveMap({
    * which names the real limit beside the configured one. Those are honest questions
    * about the picture; the clamp was not.
    */
-  const imageryDepth = BASEMAP_NATIVE_DEPTH[basemap]
+  const droneOverlay = useDroneOverlay()
+  const showDrone = Boolean(droneOverlay) && layers.drone
+
+  // Over the drone photo the imagery is real to the map's own ceiling; otherwise it
+  // is the provider's measured depth.
+  const imageryDepth = showDrone ? MAX_ZOOM : basemapNativeDepth(basemap)
 
   /**
    * The area that must stay visible. Covers the grid *and* the flown track, because
@@ -302,6 +306,7 @@ export function LiveMap({
         restrictTo={padBoundsM(extent, RESTRICTION_RADIUS_M)}
         onMapClick={onMapClick}
       >
+        {showDrone && droneOverlay && <DroneImageryLayer meta={droneOverlay} />}
         {layers.grid && <MissionGridLayer grid={MISSION.grid} />}
         {layers.coverage && progress && (
           <CoverageHatchLayer grid={MISSION.grid} coveredCells={progress.coveredCells} />
@@ -357,7 +362,11 @@ export function LiveMap({
               if (m === 'fit') setRefitKey((k) => k + 1)
             }}
           />
-          <LayerToggles value={layers} onChange={setLayers} />
+          <LayerToggles
+            value={layers}
+            onChange={setLayers}
+            droneLabel={droneOverlay ? droneOverlayLabel(droneOverlay) : null}
+          />
         </div>
         <div className="pointer-events-auto absolute bottom-6 right-2">
           <MapLegend detections={detections} />
@@ -431,7 +440,7 @@ function ViewReporter({
   // satellite and hybrid the limit *was* 19 while the reachable zoom *was* 22. "20 or
   // 22" read as non-determinism but was two different ceilings, and the map spent its
   // life below the one it could have had. Both numbers are real; only the clamp was
-  // wrong. See `BASEMAP_NATIVE_DEPTH`.
+  // wrong. See `basemapNativeDepth` in basemaps.ts.
   //
   // Note the guard takes no ceiling at all now. It asks the map, which is the only
   // thing that knows how far the map may go — the imagery depth was the wrong number
@@ -526,7 +535,7 @@ function ScaleWarning() {
  */
 function ImageryAttribution({ basemap }: { basemap: Basemap }) {
   return (
-    <div className="pointer-events-none absolute bottom-2 left-2 font-mono text-tiny text-paper-faint">
+    <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 font-mono text-tiny text-paper-faint">
       {basemap === 'roadmap' ? (
         <>
           ©{' '}
@@ -665,3 +674,4 @@ function padBoundsM(
     east: Math.max(b.east, b.east + lonPad),
   }
 }
+

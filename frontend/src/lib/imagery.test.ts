@@ -5,6 +5,7 @@ import {
   ESRI_LABELS_URL,
   ESRI_MAX_NATIVE_ZOOM,
   ESRI_WORLD_IMAGERY_URL,
+  FIT_MAX_ZOOM,
   IMAGERY_URL_ORDER,
   MAX_LIVE_MAP_ZOOM,
   OSM_TILE_URL,
@@ -95,10 +96,22 @@ test("the map's zoom limit is not the imagery depth", () => {
     `the map must be able to zoom past the imagery (${MAX_LIVE_MAP_ZOOM} vs ` +
       `${ESRI_MAX_NATIVE_ZOOM}); using one number for both is the bug this pins`,
   )
-  // And the gap is the deliberate upscaling budget, not an accident of two nearby
-  // literals. Three levels is what the config's own note argues for.
-  assert.equal(MAX_LIVE_MAP_ZOOM - ESRI_MAX_NATIVE_ZOOM, 3)
+  // And the gap is deliberate, not an accident of two nearby literals: 23 is the
+  // ceiling the drone photo overlay is real to (see the config's note), four levels
+  // past Esri's 19.
+  assert.equal(MAX_LIVE_MAP_ZOOM - ESRI_MAX_NATIVE_ZOOM, 4)
 })
+
+/**
+ * Automatic fits keep the framing tuned at 22 even though the operator may go to 23.
+ * `fitBounds` without its own `maxZoom` inherits the map's, so without a separate
+ * fit ceiling, raising the map's limit silently re-framed the view the console opens on.
+ */
+test('the automatic fit stops below the operator ceiling', () => {
+  assert.equal(FIT_MAX_ZOOM, 22)
+  assert.ok(FIT_MAX_ZOOM < MAX_LIVE_MAP_ZOOM)
+})
+
 
 /**
  * The street basemap is OSM, and OSM's scheme is the *other* one.

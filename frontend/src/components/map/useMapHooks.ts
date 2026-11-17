@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import { M_PER_DEG_LAT, distanceM, mPerDegLon } from '@/lib/geo'
 import {
+  FIT_MAX_ZOOM,
   FIT_PADDING_PX,
   MAX_LIVE_MAP_ZOOM,
   MIN_LIVE_MAP_PX_PER_METRE,
@@ -210,6 +211,9 @@ export function useFollowDrone({
       // trade is visible instead of silent.
       map.fitBounds(bounds, {
         padding: [FIT_PADDING_PX, FIT_PADDING_PX],
+        // The fit's own ceiling, not the map's: the operator may zoom to 23 by
+        // hand, but an automatic fit keeps the framing tuned at 22.
+        maxZoom: FIT_MAX_ZOOM,
         animate: false,
       })
 
@@ -559,7 +563,7 @@ export function useViewReadiness(
        * landed short of a zoom the map *could* have reached, which is the
        * stale-viewport case and the one where re-fitting actually moves the map.
        */
-      const atCeiling = zoom >= (map.getMaxZoom() ?? Infinity) - 1e-6
+      const atCeiling = zoom >= Math.min(map.getMaxZoom() ?? Infinity, FIT_MAX_ZOOM) - 1e-6
 
       setReady(legible)
 
@@ -595,6 +599,9 @@ export function useViewReadiness(
       attempts.current += 1
       map.fitBounds(bounds, {
         padding: [FIT_PADDING_PX, FIT_PADDING_PX],
+        // The fit's own ceiling, not the map's: the operator may zoom to 23 by
+        // hand, but an automatic fit keeps the framing tuned at 22.
+        maxZoom: FIT_MAX_ZOOM,
         animate: false,
       })
     }

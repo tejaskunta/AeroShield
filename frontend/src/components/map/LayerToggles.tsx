@@ -20,6 +20,8 @@ export interface LayerState {
   coverage: boolean
   track: boolean
   detections: boolean
+  /** The georeferenced drone photo of the block, when one has been made. */
+  drone: boolean
 }
 
 /**
@@ -37,6 +39,8 @@ export const DEFAULT_LAYERS: LayerState = {
   coverage: false,
   track: false,
   detections: true,
+  // On whenever a photo exists: it is the only imagery with real detail at z21-23.
+  drone: true,
 }
 
 const ROWS: Array<{ key: keyof LayerState; label: string; swatch: ReactNode }> = [
@@ -49,12 +53,22 @@ const ROWS: Array<{ key: keyof LayerState; label: string; swatch: ReactNode }> =
 export function LayerToggles({
   value,
   onChange,
+  droneLabel = null,
 }: {
   value: LayerState
   onChange: (next: LayerState) => void
+  /**
+   * The drone photo row's label, carrying its capture time ("Drone photo · 18 Nov
+   * 10:42"), or null when no photo exists. Imagery is labelled with when it was
+   * taken so a photo from this morning is never read as a live picture.
+   */
+  droneLabel?: string | null
 }) {
   const [open, setOpen] = useState(false)
-  const hiddenCount = Object.values(value).filter((v) => !v).length
+  const rows = droneLabel
+    ? [{ key: 'drone' as const, label: droneLabel, swatch: <PhotoSwatch /> }, ...ROWS]
+    : ROWS
+  const hiddenCount = rows.filter(({ key }) => !value[key]).length
 
   return (
     <div className="border border-rule bg-ink-deep/90 backdrop-blur-sm">
@@ -75,7 +89,7 @@ export function LayerToggles({
 
       {open && (
         <div className="border-t border-rule px-2 py-1.5">
-          {ROWS.map(({ key, label, swatch }) => (
+          {rows.map(({ key, label, swatch }) => (
             <Toggle
               key={key}
               checked={value[key]}
@@ -123,6 +137,15 @@ function HatchSwatch() {
         </pattern>
       </defs>
       <rect width="14" height="8" fill="url(#lt-hatch)" />
+    </svg>
+  )
+}
+
+function PhotoSwatch() {
+  return (
+    <svg width="14" height="8" aria-hidden className="shrink-0">
+      <rect x="0.5" y="0.5" width="13" height="7" fill={CONSOLE_HEX.rule} stroke={CONSOLE_HEX.paper} strokeWidth="1" />
+      <path d="M2 7 L6 3.5 L9 6 L11 4.5 L13 7 Z" fill={CONSOLE_HEX.paper} />
     </svg>
   )
 }

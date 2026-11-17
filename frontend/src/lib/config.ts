@@ -117,6 +117,20 @@ export const ESRI_LABELS_URL =
  */
 export const OSM_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 
+/**
+ * Why the satellite base stays Esri, measured at the survey origin (Nov 2026),
+ * deepest zoom with real pixels:
+ *
+ *   Esri World Imagery         z19   (z20+ is one identical placeholder tile)
+ *   Esri Clarity + Wayback     z19   (z20+ 404, across every sampled release)
+ *   Bing aerial                z19   (z20+ answers `X-VE-Tile-Info: no-tile`)
+ *   Google satellite           z20   (paid Map Tiles API; billing not available)
+ *
+ * Esri is keyless and free, and no provider is real past z20 here anyway:
+ * commercial satellites stop near 30 cm/px. Detail at z21-23 comes from the drone
+ * photo overlay (`DroneImageryLayer.tsx`).
+ */
+
 /** Attribution strings. Both are licence requirements, not decoration. */
 export const ESRI_ATTRIBUTION = 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
 export const OSM_ATTRIBUTION =
@@ -134,7 +148,7 @@ export const OSM_ATTRIBUTION =
  * values, and the choice is about which host can reach the Jetson:
  *
  *   /jetson/stream                     same-origin; the dev server proxies it
- *   http://10.11.101.241:8080/stream   browser talks to the Jetson directly
+ *   http://<jetson-ip>:8080/stream     browser talks to the Jetson directly
  *
  * The proxied path is the default because the direct one does not work in
  * Chromium. A cross-origin `multipart/x-mixed-replace` subresource is opaque to
@@ -167,8 +181,15 @@ export const HAS_JETSON_STREAM: boolean = JETSON_STREAM_URL.length > 0
  * aircraft needs only the one variable. Otherwise this comes from
  * `VITE_JETSON_DIRECT_ORIGIN`, which exists purely to keep the link working when the
  * in-app feed is proxied.
+ *
+ * The default is this laptop's loopback, not the aircraft's LAN address, because
+ * the feed reaches the laptop through `scripts/tunnel.ps1` (`ssh -L 8080`). On a
+ * phone hotspot the drone's address is whatever the DHCP lease says that day, so
+ * a hardcoded LAN IP is wrong more often than right. Loopback is right whenever
+ * the tunnel is up, and `scripts/dev_mjpeg.py` serves the same port for
+ * rehearsals.
  */
-const DEFAULT_DIRECT_ORIGIN = 'http://10.11.101.241:8080'
+const DEFAULT_DIRECT_ORIGIN = 'http://127.0.0.1:8080'
 const rawDirectOrigin = env.VITE_JETSON_DIRECT_ORIGIN
 
 function originOf(url: string): string | undefined {
@@ -294,12 +315,14 @@ export const FIT_PADDING_PX = 8
  * The map's zoom ceiling, and the reason it is a shared constant rather than a
  * number local to the map component.
  *
- * Raster imagery over this survey block is native to about zoom 19 — roughly 30 cm
- * per pixel at this latitude. Everything past that is the tile drawn larger, which
- * stays readable for a few steps and then becomes obvious interpolation that looks
- * like a broken map rather than a closer one. So the map stops at 22: three levels of
- * deliberate magnification past the imagery's own resolution, which is what makes a
- * one-metre survey cell an object at this zoom rather than a smudge.
+ * Satellite imagery over this survey block is native to zoom 19 (Esri) or 20
+ * (Google), roughly 30 and 15 cm per pixel at this latitude, and no provider goes
+ * deeper here (measured: Esri, its Wayback archive, Bing and Google all stop by
+ * z20). Past that a basemap is the deepest tile drawn larger. The map nevertheless
+ * goes to 23, about 1.8 cm per pixel, because the drone photo overlay
+ * (`DroneImageryLayer.tsx`) carries real detail at that scale over the block, and a
+ * drone-sized object is only a recognisable shape at 22-23. Over the satellite
+ * base alone, 22-23 is a magnifier, not new detail, and the readout says so.
  *
  * It lives here because the diagnostic reads it. A pane tall enough to frame the
  * ten-metre block at the fit's own padding *can afford* zoom 23 in the pure
@@ -309,4 +332,14 @@ export const FIT_PADDING_PX = 8
  * room looks exactly like a pane that has been given less than it asked for: the
  * same off-by-one, reported as a fault, at the one moment everything is working.
  */
-export const MAX_LIVE_MAP_ZOOM = 22
+export const MAX_LIVE_MAP_ZOOM = 23
+
+/**
+ * The highest zoom any *automatic* fit may choose — below the operator's ceiling.
+ *
+ * `fitBounds` with no `maxZoom` of its own uses the map's, so raising
+ * `MAX_LIVE_MAP_ZOOM` to 23 would silently change the framed view the console opens
+ * on. The framing was tuned at 22 and is kept there deliberately: the operator zooms
+ * to 23 by hand when they want to, and the map never jumps there on its own.
+ */
+export const FIT_MAX_ZOOM = 22
