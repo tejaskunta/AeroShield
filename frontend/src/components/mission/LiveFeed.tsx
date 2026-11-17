@@ -102,7 +102,13 @@ export function LiveFeed({
    * with nothing on its right that resizes nothing when dragged.
    */
   onDisplayModeChange,
+  /*
+   * Where the floating card sits and how wide it is, as Tailwind classes.
+   * Defaults keep the old bottom-left 320 px PiP; Mission Control floats it top-right.
+   */
+  floatClassName = 'bottom-3 left-3 w-[320px]',
 }: {
+  floatClassName?: string
   defaultOpen?: boolean
   detectorRunning?: boolean
   docked?: boolean
@@ -232,7 +238,7 @@ export function LiveFeed({
         className={
           docked
             ? `flex min-h-[260px] w-full shrink-0 items-center justify-center border-t border-rule bg-ink-deep/92 lg:min-h-0 lg:border-l lg:border-t-0 ${dockedWidthClass}`
-            : 'pointer-events-auto absolute bottom-3 left-3 z-[520]'
+            : `pointer-events-auto absolute z-[520] ${floatClassName.replace(/\bw-\S+/g, '')}`
         }
       >
         <button
@@ -241,7 +247,7 @@ export function LiveFeed({
             setOpen(true)
             if (state !== 'live') retry()
           }}
-          className="flex items-center gap-1.5 border border-rule bg-ink-deep/92 px-2 py-1.5 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim backdrop-blur-sm hover:bg-ink-hover hover:text-paper"
+          className="glass flex items-center gap-1.5 px-3 py-2 text-[0.8125rem] font-medium text-paper-dim hover:text-paper"
           title="Show camera feed"
         >
           {/* Decorative: the word "Camera" is the accessible name. */}
@@ -285,18 +291,18 @@ export function LiveFeed({
               // the divider, which is the only case where the column should not
               // simply take what the clamp would give it.
               `flex min-h-[260px] w-full shrink-0 flex-col border-t border-rule bg-ink-deep lg:min-h-0 lg:border-l lg:border-t-0 ${dockedWidthClass}`
-            : 'pointer-events-auto absolute bottom-3 left-3 z-[520] w-[320px] animate-rise-in border border-rule-bright bg-ink-deep/94 backdrop-blur-sm'
+            : `glass pointer-events-auto absolute z-[520] overflow-hidden animate-rise-in ${floatClassName}`
       }
       style={widthStyle}
     >
       {/* Status strip — the honest header. */}
-      <div className="flex items-center justify-between gap-2 border-b border-rule px-2 py-1">
+      <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
         <div className="flex min-w-0 items-center gap-1.5">
           <StateDot state={state} />
-          <span className="font-display text-tiny uppercase tracking-[0.1em] text-paper">
+          <span className="text-[0.8125rem] font-medium text-paper">
             Camera
           </span>
-          <span className="truncate font-mono text-tiny text-paper-faint">
+          <span className="truncate text-[0.6875rem] text-paper-faint">
             {statusText(state, detectorRunning)}
           </span>
         </div>
@@ -328,7 +334,7 @@ export function LiveFeed({
            * "Shrink" describe a size; these two are not sizes, they are a glance and
            * a study, and the labels should say which is which.
            */}
-          <div role="radiogroup" aria-label="Camera view" className="flex border border-rule">
+          <div role="radiogroup" aria-label="Camera view" className="flex gap-0.5 rounded-md bg-white/[0.04] p-0.5">
             {docked && (
               <ModeButton
                 active={isDocked}
@@ -537,8 +543,8 @@ function ModeButton({
       aria-checked={active}
       onClick={onClick}
       title={title}
-      className={`flex min-h-6 items-center px-2 py-0.5 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
-        active ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper'
+      className={`flex min-h-6 items-center rounded px-2 py-0.5 text-[0.6875rem] font-medium transition-colors ${
+        active ? 'bg-white/[0.10] text-paper' : 'text-paper-faint hover:text-paper'
       }`}
     >
       {label}

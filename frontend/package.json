@@ -12,18 +12,23 @@
     "test": "node --experimental-strip-types --import ./scripts/register.mjs --test src/lib/*.test.ts"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "5.2.5",
+    "@fontsource-variable/jetbrains-mono": "5.2.5",
     "@types/leaflet": "^1.9.22",
     "leaflet": "^1.9.4",
     "lucide-react": "0.469.0",
+    "maplibre-gl": "4.7.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-router-dom": "6.30.6",
-    "recharts": "2.15.0"
+    "recharts": "2.15.0",
+    "three": "0.169.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/react": "18.3.17",
     "@types/react-dom": "18.3.5",
+    "@types/three": "0.169.0",
     "@vitejs/plugin-react": "4.3.4",
     "autoprefixer": "10.4.20",
     "postcss": "8.5.32",

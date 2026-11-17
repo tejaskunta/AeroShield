@@ -5,16 +5,17 @@ import { MISSION } from '@/lib/mockData'
 import { MAX_LIVE_MAP_ZOOM, MIN_LIVE_MAP_PX_PER_METRE } from '@/lib/config'
 import { isBelowAffordableZoom } from '@/lib/scale'
 import { gridBounds, gridCenter, M_PER_DEG_LAT, mPerDegLon } from '@/lib/geo'
-import { BASEMAP_LABELS, basemapNativeDepth, type Basemap } from './basemaps'
-import { DroneImageryLayer, droneOverlayLabel, useDroneOverlay } from './DroneImageryLayer'
+import { basemapNativeDepth, type Basemap } from './basemaps'
+import { DroneImageryLayer, type DroneOverlayMeta } from './DroneImageryLayer'
+import type { MapControls, MapViewState } from './viewTypes'
+import { useMap } from './mapContext'
 import { MapRoot } from './MapRoot'
 import { MissionGridLayer } from './MissionGridLayer'
 import { CoverageHatchLayer } from './CoverageHatchLayer'
 import { DronePlatform } from './DronePlatform'
 import { DetectionPins } from './DetectionPins'
 import { TrackLayer } from './TrackLayer'
-import { LayerToggles, type LayerState, DEFAULT_LAYERS } from './LayerToggles'
-import { MapLegend } from './MapLegend'
+import type { LayerState } from './LayerToggles'
 import {
   VIEW_SPAN_M,
   useFollowDrone,
@@ -190,6 +191,13 @@ export function LiveMap({
   selectedId,
   onSelect,
   onMapClick,
+  basemap,
+  layers,
+  follow,
+  refitKey,
+  droneOverlay,
+  initialView,
+  onControls,
   children,
 }: {
   telemetry: Telemetry | null
@@ -198,38 +206,33 @@ export function LiveMap({
   selectedId: string | null
   onSelect: (id: string | null) => void
   onMapClick?: (p: LatLng) => void
+  /*
+   * Controlled view state. The glass chrome in Mission Control owns these so one set
+   * of controls drives both the 2D and the 3D view.
+   */
+  basemap: Basemap
+  layers: LayerState
+  follow: FollowMode
+  /** Bumped to ask for the framed view back ('fit' is otherwise idempotent). */
+  refitKey: number
+  droneOverlay: DroneOverlayMeta | null
+  /** Where to open, when switching back from 3D; otherwise the block's framing. */
+  initialView?: MapViewState | null
+  /** Hands the chrome its zoom buttons and a way to read the camera. */
+  onControls?: (c: MapControls | null) => void
   /** Rendered inside the map context, above every layer — how the callout and the
    *  live feed reach `useMap()`. */
   children?: ReactNode
 }) {
-  /*
-   * Imagery only, with no reference layer on top.
-   *
-   * The default used to be `hybrid`, which stacks Esri's
-   * `World_Boundaries_and_Places` labels and administrative boundaries over the
-   * photograph at 0.9 opacity. Over a ten-metre block that layer contributes
-   * nothing but clutter — no place name is legible at this scale, and the boundary
-   * strokes read as stray pale lines across the ground the operator is inspecting,
-   * which is exactly the one thing this view exists to show clearly.
-   *
-   * `hybrid` is still one click away for anyone who wants the context.
-   */
-  const [basemap, setBasemap] = useState<Basemap>('satellite')
-  const [layers, setLayers] = useState<LayerState>(DEFAULT_LAYERS)
-  const [follow, setFollow] = useState<FollowMode>('fit')
-  /**
-   * Bumped by choosing a follow mode again, to ask for the framed view back.
-   *
-   * 'fit' is deliberately idempotent, so an operator who has panned away has no
-   * other way to ask for it — the extent has not changed, so nothing re-fits and the
-   * control looks broken. Keyed by an integer rather than a boolean so repeated
-   * requests each produce a distinct value.
-   */
-  const [refitKey, setRefitKey] = useState(0)
   const [view, setView] = useState<ViewMetrics | null>(null)
   const [legible, setLegible] = useState(true)
 
-  const center = useMemo(() => gridCenter(MISSION.grid), [])
+  const center = useMemo(
+    () => (initialView ? { lat: initialView.lat, lon: initialView.lon } : gridCenter(MISSION.grid)),
+    // Read once: the map is created once, and later moves are the operator's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
 
   /**
    * What the current basemap's imagery actually contains — see `basemapNativeDepth` in basemaps.ts.
@@ -244,7 +247,6 @@ export function LiveMap({
    * which names the real limit beside the configured one. Those are honest questions
    * about the picture; the clamp was not.
    */
-  const droneOverlay = useDroneOverlay()
   const showDrone = Boolean(droneOverlay) && layers.drone
 
   // Over the drone photo the imagery is real to the map's own ceiling; otherwise it
@@ -284,7 +286,7 @@ export function LiveMap({
     <div className="relative h-full w-full bg-ink-deep">
       <MapRoot
         center={center}
-        zoom={INITIAL_ZOOM}
+        zoom={initialView?.zoom ?? INITIAL_ZOOM}
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
         mapTypeId={basemap}
@@ -335,6 +337,8 @@ export function LiveMap({
           refitKey={refitKey}
         />
 
+        <ControlsBridge onControls={onControls} />
+
         {/* Holds the map to a legible ground scale, and reports it. Both live here
             rather than in the chrome because both need the map instance, and the map
             is only in context inside `MapRoot`. */}
@@ -350,34 +354,35 @@ export function LiveMap({
         {children}
       </MapRoot>
 
-      {/* Map chrome, above every overlay the map draws. */}
+      {/* The map's own diagnostics. Every control lives in the shared glass chrome. */}
       <div className="pointer-events-none absolute inset-0 z-[500]">
-        <div className="pointer-events-auto absolute right-2 top-2 flex flex-col items-end gap-2">
-          <BasemapSwitcher value={basemap} onChange={setBasemap} />
-          <FollowSwitcher
-            value={follow}
-            onChange={(m) => {
-              setFollow(m)
-              // Choosing 'fit' again is a request for the framed view back.
-              if (m === 'fit') setRefitKey((k) => k + 1)
-            }}
-          />
-          <LayerToggles
-            value={layers}
-            onChange={setLayers}
-            droneLabel={droneOverlay ? droneOverlayLabel(droneOverlay) : null}
-          />
-        </div>
-        <div className="pointer-events-auto absolute bottom-6 right-2">
-          <MapLegend detections={detections} />
-        </div>
         {import.meta.env.DEV && view && <ScaleReadout view={view} />}
         {!legible && <ScaleWarning />}
-        {/* Which provider is serving this imagery. */}
-        <ImageryAttribution basemap={basemap} />
       </div>
     </div>
   )
+}
+
+/**
+ * Hands the chrome its controls. Render-nothing, inside MapRoot, because it needs
+ * the Leaflet instance; the same `MapControls` shape the 3D view provides.
+ */
+function ControlsBridge({ onControls }: { onControls?: (c: MapControls | null) => void }) {
+  const { map } = useMap()
+  useEffect(() => {
+    if (!onControls) return
+    onControls({
+      zoomIn: () => map.zoomIn(0.5),
+      zoomOut: () => map.zoomOut(0.5),
+      flyTo: (lat, lon) => map.panTo([lat, lon], { animate: true, duration: 0.5 }),
+      getView: () => {
+        const c = map.getCenter()
+        return { lat: c.lat, lon: c.lng, zoom: map.getZoom() }
+      },
+    })
+    return () => onControls(null)
+  }, [map, onControls])
+  return null
 }
 
 /**
@@ -488,8 +493,8 @@ function ScaleReadout({ view }: { view: ViewMetrics }) {
   const capped = view.affordableZoom > view.imageryDepth
   return (
     <div
-      className={`pointer-events-none absolute bottom-6 left-2 border bg-ink-deep/90 px-2 py-1 font-mono text-tiny backdrop-blur-sm ${
-        short ? 'border-hazard text-hazard-lit' : 'border-rule text-paper-dim'
+      className={`pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 whitespace-nowrap rounded-md border bg-ink-deep/80 px-2 py-1 font-mono text-[0.625rem] backdrop-blur-sm ${
+        short ? 'border-hazard/60 text-hazard-lit' : 'border-white/[0.06] text-paper-faint'
       }`}
     >
       zoom {view.zoom} · {view.width}x{view.height} · {view.binding}-bound ·{' '}
@@ -510,7 +515,7 @@ function ScaleReadout({ view }: { view: ViewMetrics }) {
  */
 function ScaleWarning() {
   return (
-    <div className="pointer-events-none absolute left-2 top-2 border border-hazard bg-ink-deep/90 px-2 py-1 font-mono text-tiny text-hazard-lit backdrop-blur-sm">
+    <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-hazard/50 bg-ink-deep/85 px-3 py-1.5 text-[0.75rem] text-hazard-lit backdrop-blur">
       Map is below {MIN_LIVE_MAP_PX_PER_METRE} px/m. Check the view is showing the
       survey block
     </div>
@@ -533,9 +538,9 @@ function ScaleWarning() {
  * configuration state in which the imagery is quietly worse — the failure mode it
  * reported cannot occur.
  */
-function ImageryAttribution({ basemap }: { basemap: Basemap }) {
+export function ImageryAttribution({ basemap }: { basemap: Basemap }) {
   return (
-    <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 font-mono text-tiny text-paper-faint">
+    <div className="flex items-center gap-1 text-[0.625rem] text-paper-faint">
       {basemap === 'roadmap' ? (
         <>
           ©{' '}
@@ -567,83 +572,7 @@ function ImageryAttribution({ basemap }: { basemap: Basemap }) {
   )
 }
 
-/**
- * Basemap switcher. Three states now: imagery with labels, imagery alone, and a
- * street canvas for when imagery is unusable.
- */
-function BasemapSwitcher({
-  value,
-  onChange,
-}: {
-  value: Basemap
-  onChange: (b: Basemap) => void
-}) {
-  const options: Basemap[] = ['hybrid', 'satellite', 'roadmap']
-  return (
-    <div
-      role="radiogroup"
-      aria-label="Basemap"
-      className="flex border border-rule bg-ink-deep/90 backdrop-blur-sm"
-    >
-      {options.map((b) => (
-        <button
-          key={b}
-          type="button"
-          role="radio"
-          aria-checked={value === b}
-          onClick={() => onChange(b)}
-          className={`flex min-h-6 items-center px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
-            value === b ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper-dim'
-          }`}
-        >
-          {BASEMAP_LABELS[b]}
-        </button>
-      ))}
-    </div>
-  )
-}
 
-/**
- * How the view tracks the aircraft. Three states, and the labels say what each one
- * *does to the map* rather than naming a setting — "Fit" is meaningless, "Fit
- * block + drone" is not.
- */
-function FollowSwitcher({
-  value,
-  onChange,
-}: {
-  value: FollowMode
-  onChange: (m: FollowMode) => void
-}) {
-  const options: { mode: FollowMode; label: string; title: string }[] = [
-    { mode: 'follow', label: 'Follow', title: 'Keep the drone centred as it flies' },
-    { mode: 'fit', label: 'Fit', title: 'Keep the drone and the whole survey block in view' },
-    { mode: 'manual', label: 'Manual', title: 'Never move the map on its own' },
-  ]
-  return (
-    <div
-      role="radiogroup"
-      aria-label="Map tracking"
-      className="flex border border-rule bg-ink-deep/90 backdrop-blur-sm"
-    >
-      {options.map((o) => (
-        <button
-          key={o.mode}
-          type="button"
-          role="radio"
-          aria-checked={value === o.mode}
-          onClick={() => onChange(o.mode)}
-          title={o.title}
-          className={`flex min-h-6 items-center px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] transition-colors ${
-            value === o.mode ? 'bg-ink-hover text-paper' : 'text-paper-faint hover:text-paper-dim'
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
 
 /**
  * Grow a bound by a distance in *metres* on every side.

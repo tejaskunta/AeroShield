@@ -54,7 +54,10 @@ export function LayerToggles({
   value,
   onChange,
   droneLabel = null,
+  defaultOpen = false,
 }: {
+  /** Start expanded — when the list is itself inside a popover the caller opened. */
+  defaultOpen?: boolean
   value: LayerState
   onChange: (next: LayerState) => void
   /**
@@ -64,31 +67,31 @@ export function LayerToggles({
    */
   droneLabel?: string | null
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
   const rows = droneLabel
     ? [{ key: 'drone' as const, label: droneLabel, swatch: <PhotoSwatch /> }, ...ROWS]
     : ROWS
   const hiddenCount = rows.filter(({ key }) => !value[key]).length
 
   return (
-    <div className="border border-rule bg-ink-deep/90 backdrop-blur-sm">
+    <div className="glass min-w-[12rem] overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex min-h-6 w-full items-center gap-1.5 px-2 py-1 font-display text-tiny uppercase tracking-[0.1em] text-paper-dim transition-colors hover:text-paper"
+        className="flex w-full items-center gap-2 px-3 py-2 text-[0.8125rem] font-medium text-paper-dim transition-colors hover:text-paper"
       >
-        <Layers size={12} strokeWidth={1.75} aria-hidden />
+        <Layers size={15} strokeWidth={1.75} aria-hidden />
         Layers
         {/* Say when the map is not showing everything — a hidden layer is a
             silent omission otherwise. */}
         {hiddenCount > 0 && (
-          <span className="font-mono text-tiny text-caution">{hiddenCount} off</span>
+          <span className="ml-auto rounded-full bg-white/[0.06] px-1.5 text-[0.6875rem] text-paper-faint">{hiddenCount} off</span>
         )}
       </button>
 
       {open && (
-        <div className="border-t border-rule px-2 py-1.5">
+        <div className="border-t border-white/[0.06] px-3 py-2">
           {rows.map(({ key, label, swatch }) => (
             <Toggle
               key={key}

@@ -102,10 +102,10 @@ export function Panel({
           aria-controls={bodyId}
           aria-label={`Expand ${title}`}
           title={`Expand ${title}`}
-          className="grid size-8 place-items-center border border-rule bg-ink-raised text-paper-dim transition-colors hover:border-rule-bright hover:bg-ink-hover hover:text-paper focus-visible:ring-2 focus-visible:ring-paper/70"
+          className="glass grid size-9 place-items-center text-paper-dim transition-colors hover:text-paper focus-visible:ring-2 focus-visible:ring-signal/80"
         >
           {Icon ? (
-            <Icon size={14} aria-hidden />
+            <Icon size={15} aria-hidden />
           ) : (
             <ChevronRight size={14} className="rotate-90" aria-hidden />
           )}
@@ -118,14 +118,14 @@ export function Panel({
   }
 
   return (
-    <section className={`border border-rule bg-ink-raised ${className}`} data-collapsed="false">
+    <section className={`card overflow-hidden ${className}`} data-collapsed="false">
       {title && (
-        <header className="flex h-8 items-center justify-between gap-2 border-b border-rule px-3">
+        <header className="flex h-11 items-center justify-between gap-2 px-4">
           <div className="flex min-w-0 items-center gap-1.5">
             {/* The same glyph the folded tile shows, so the two states read as
                 one control rather than two different things. */}
-            {Icon && <Icon size={12} className="shrink-0 text-paper-faint" aria-hidden />}
-            <h2 className="eyebrow truncate">{title}</h2>
+            {Icon && <Icon size={14} className="shrink-0 text-paper-faint" aria-hidden />}
+            <h2 className="truncate text-[0.8125rem] font-medium text-paper-dim">{title}</h2>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {aside}
@@ -146,7 +146,7 @@ export function Panel({
                 aria-controls={bodyId}
                 aria-label={`Collapse ${title}`}
                 title="Collapse to icon"
-                className="-mr-1.5 grid size-6 place-items-center text-paper-faint transition-colors hover:bg-ink-hover hover:text-paper focus-visible:ring-2 focus-visible:ring-paper/70"
+                className="-mr-1.5 grid size-7 place-items-center rounded text-paper-faint transition-colors hover:bg-white/[0.06] hover:text-paper focus-visible:ring-2 focus-visible:ring-signal/80"
               >
                 <ChevronRight size={13} className="-rotate-90" aria-hidden />
               </button>
@@ -154,7 +154,7 @@ export function Panel({
           </div>
         </header>
       )}
-      <div id={bodyId} className={flush ? '' : 'p-3'}>
+      <div id={bodyId} className={flush ? '' : 'px-4 pb-4'}>
         {children}
       </div>
     </section>

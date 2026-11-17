@@ -20,13 +20,13 @@ export function Badge({
 }) {
   const tone = risk
     ? `${RISK_CLASSES[risk].text} ${RISK_CLASSES[risk].border}`
-    : 'text-paper-dim border-rule'
+    : 'text-paper-dim border-white/10 bg-white/[0.03]'
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 border px-1.5 py-px font-mono text-tiny uppercase leading-4 tracking-[0.08em] ${tone} ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[0.6875rem] font-medium leading-4 ${tone} ${className}`}
     >
-      {risk && <span className={`h-1.5 w-1.5 ${RISK_CLASSES[risk].bg}`} aria-hidden />}
+      {risk && <span className={`h-1.5 w-1.5 rounded-full ${RISK_CLASSES[risk].bg}`} aria-hidden />}
       {children}
     </span>
   )

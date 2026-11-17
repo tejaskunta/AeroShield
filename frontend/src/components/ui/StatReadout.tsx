@@ -35,9 +35,9 @@ export function StatReadout({
   }[tone]
 
   const sizeClass = {
-    sm: 'text-title',
-    md: 'text-readout',
-    lg: 'text-readout-lg',
+    sm: 'text-[1.125rem]',
+    md: 'text-[1.75rem]',
+    lg: 'text-[2.5rem]',
   }[size]
 
   return (
@@ -46,9 +46,9 @@ export function StatReadout({
         <span className="eyebrow">{label}</span>
         {aside}
       </div>
-      <div className="mt-0.5 flex items-baseline gap-1">
-        <span className={`font-display tabular ${sizeClass} ${toneClass}`}>{value}</span>
-        {unit && <span className="font-mono text-tiny text-paper-dim">{unit}</span>}
+      <div className="mt-2 flex items-baseline gap-1">
+        <span className={`readout leading-none ${sizeClass} ${toneClass}`}>{value}</span>
+        {unit && <span className="text-[0.75rem] text-paper-faint">{unit}</span>}
       </div>
     </div>
   )

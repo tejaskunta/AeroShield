@@ -26,7 +26,7 @@ export function ConfidenceBar({
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <div
-        className="relative h-1.5 flex-1 bg-ink-deep"
+        className="relative h-1.5 flex-1 rounded-full bg-white/[0.07]"
         role="meter"
         aria-valuenow={confidence}
         aria-valuemin={0}
@@ -34,7 +34,7 @@ export function ConfidenceBar({
         aria-label="Detection confidence"
       >
         <div
-          className={`absolute inset-y-0 left-0 ${RISK_CLASSES[resolved].bg}`}
+          className={`absolute inset-y-0 left-0 rounded-full ${RISK_CLASSES[resolved].bg}`}
           style={{ width: `${pct}%` }}
         />
         {/* Threshold ticks — the bands the number is judged against. */}
@@ -42,7 +42,7 @@ export function ConfidenceBar({
         <Tick at={HAZARD_THRESHOLD} title="Hazard threshold 0.75" />
       </div>
       {showValue && (
-        <span className={`font-mono text-small tabular ${RISK_CLASSES[resolved].text}`}>
+        <span className={`font-mono text-[0.75rem] tabular-nums ${RISK_CLASSES[resolved].text}`}>
           {formatConfidence(confidence)}
         </span>
       )}
@@ -53,7 +53,7 @@ export function ConfidenceBar({
 function Tick({ at, title }: { at: number; title: string }) {
   return (
     <span
-      className="absolute top-[-2px] h-[10px] w-px bg-paper-faint"
+      className="absolute top-[-2px] h-[10px] w-px bg-paper-faint/70"
       style={{ left: `${at * 100}%` }}
       title={title}
       aria-hidden
@@ -87,7 +87,7 @@ export function Meter({
 
   return (
     <div
-      className={`flex items-center gap-px ${className}`}
+      className={`flex items-center gap-[2px] ${className}`}
       role="meter"
       aria-valuenow={Math.round(value * 100)}
       aria-valuemin={0}
@@ -97,7 +97,7 @@ export function Meter({
       {Array.from({ length: segments }, (_, i) => (
         <span
           key={i}
-          className={`h-2.5 flex-1 ${i < filled ? fillClass : 'bg-rule'}`}
+          className={`h-2 flex-1 rounded-[2px] ${i < filled ? fillClass : 'bg-white/[0.07]'}`}
           aria-hidden
         />
       ))}

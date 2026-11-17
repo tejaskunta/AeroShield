@@ -18,20 +18,30 @@ export default {
       colors: {
         // --- chrome (colourless) ---------------------------------------
         ink: {
-          DEFAULT: '#131A21', // app base — deep blue-slate, a chart at dusk
-          deep: '#0E141A', // recessed wells, map backdrop, scroll troughs
+          DEFAULT: '#0A0E13', // app base — graphite, near-black with a cold cast
+          deep: '#070A0E', // recessed wells, map backdrop, scroll troughs
           /*
            * The ground under a generated frame (`PlaceholderFrame`'s procedural
            * terrain). A touch desaturated from `raised` so a synthetic capture
            * reads as imagery and not as another panel. See `CONSOLE_HEX`.
            */
-          ground: '#1E2529',
-          raised: '#1B2530', // panel surface
-          hover: '#22303D', // panel hover / selected row
+          ground: '#0F141A',
+          raised: '#11171E', // card surface
+          hover: '#19212B', // card hover / selected row
+        },
+        /*
+         * The one accent. Interaction only: the active tab, selection, focus, the
+         * drone and its track. Never a hazard state, so a button can never be
+         * mistaken for a mine and a mine can never be mistaken for a button.
+         */
+        signal: {
+          DEFAULT: '#5CC8F5',
+          soft: 'rgba(92,200,245,0.14)',
+          dim: '#3A8DB3',
         },
         rule: {
-          DEFAULT: '#2C3A47', // hairlines, borders, survey grid, coverage hatch
-          bright: '#3E5060', // emphasised border, focus ring track
+          DEFAULT: '#1D2630', // hairlines, borders
+          bright: '#2C3846', // emphasised border, focus ring track
         },
         /*
          * The text tiers are declared so that the SMALLEST one still clears
@@ -46,9 +56,9 @@ export default {
          * paper → dim → faint stay visible (ΔL 0.18 and 0.11).
          */
         paper: {
-          DEFAULT: '#E8E4DA', // primary text + readouts — warm bone, never #FFF
-          dim: '#A9B3BD', // labels, secondary text
-          faint: '#8A97A2', // disabled, axis ticks, placeholder
+          DEFAULT: '#E9EDF1', // primary text + readouts — cool white, never #FFF
+          dim: '#9AA6B2', // labels, secondary text
+          faint: '#74818E', // tertiary, axis ticks, placeholder (4.9:1 on base)
         },
 
         // --- hazard semantics (the only saturated colour) --------------
@@ -131,12 +141,11 @@ export default {
       },
 
       fontFamily: {
-        // condensed grotesque — map-label energy, thrifty in a dense telemetry dock
-        display: ['Arial Narrow', 'system-ui', 'sans-serif'],
-        // a public-standards face, apt for a humanitarian tool's prose
-        body: ['system-ui', 'sans-serif'],
+        // Inter for everything read as UI; bundled locally (works offline in the field)
+        display: ['"Inter Variable"', 'system-ui', 'sans-serif'],
+        body: ['"Inter Variable"', 'system-ui', 'sans-serif'],
         // anything read digit-by-digit or copied into Mission Planner
-        mono: ['ui-monospace', 'monospace'],
+        mono: ['"JetBrains Mono Variable"', 'ui-monospace', 'monospace'],
       },
 
       fontSize: {
@@ -189,14 +198,22 @@ export default {
 
       // Instrument-panel radii: nearly square, never pill-shaped.
       borderRadius: {
-        DEFAULT: '2px',
-        sm: '1px',
-        md: '3px',
-        lg: '4px',
+        DEFAULT: '6px',
+        sm: '4px',
+        md: '8px',
+        lg: '12px',
+        xl: '16px',
+      },
+
+      boxShadow: {
+        glass: '0 10px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)',
+        lift: '0 4px 16px rgba(0,0,0,0.35)',
+        glow: '0 0 0 1px rgba(92,200,245,0.45), 0 0 24px rgba(92,200,245,0.18)',
       },
 
       spacing: {
         rail: '3.5rem', // 56px nav rail
+        topbar: '3.25rem', // 52px top bar
         dock: '20rem', // 320px right dock
         status: '2.75rem', // 44px status rail
         /*
@@ -229,10 +246,10 @@ export default {
       backgroundImage: {
         // The signature coverage hatch — 45° survey hatching.
         'survey-hatch':
-          'repeating-linear-gradient(45deg, rgba(62,80,96,0.55) 0 1px, transparent 1px 6px)',
+          'repeating-linear-gradient(45deg, rgba(120,140,160,0.35) 0 1px, transparent 1px 6px)',
         // Faint chart grid for empty wells and panel backdrops.
         'chart-grid':
-          'linear-gradient(rgba(44,58,71,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(44,58,71,0.5) 1px, transparent 1px)',
+          'linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px)',
       },
 
       keyframes: {

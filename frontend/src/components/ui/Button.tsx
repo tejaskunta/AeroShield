@@ -8,15 +8,18 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react'
  * would claim severity it doesn't have; `danger` therefore only tints the *text*
  * and border, and is reserved for actions that genuinely destroy or dismiss.
  */
-type Variant = 'default' | 'quiet' | 'danger'
+type Variant = 'default' | 'quiet' | 'danger' | 'primary'
 
 const VARIANTS: Record<Variant, string> = {
   default:
-    'border-rule-bright text-paper hover:border-paper-dim hover:bg-ink-hover',
+    'border-white/10 bg-white/[0.04] text-paper hover:border-white/20 hover:bg-white/[0.08]',
   quiet:
-    'border-transparent text-paper-dim hover:border-rule hover:text-paper hover:bg-ink-hover',
+    'border-transparent text-paper-dim hover:bg-white/[0.06] hover:text-paper',
   danger:
-    'border-rule text-hazard-lit hover:border-hazard hover:bg-hazard/10',
+    'border-hazard/30 bg-hazard/[0.06] text-hazard-lit hover:border-hazard/60 hover:bg-hazard/15',
+  // The one emphasised action on a surface. Accent, because it is interaction.
+  primary:
+    'border-signal/40 bg-signal/15 text-signal hover:border-signal/70 hover:bg-signal/25',
 }
 
 export function Button({
@@ -32,7 +35,7 @@ export function Button({
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center gap-1.5 border px-2.5 py-1 font-display text-small uppercase tracking-[0.1em] transition-colors disabled:cursor-not-allowed disabled:border-rule disabled:text-paper-faint disabled:hover:bg-transparent ${VARIANTS[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-[0.8125rem] font-medium transition-colors disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-transparent disabled:text-paper-faint ${VARIANTS[variant]} ${className}`}
       {...rest}
     >
       {icon}

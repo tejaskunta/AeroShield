@@ -15,17 +15,20 @@
    Keep the two in sync — tailwind.config.ts is the source of truth.
 --------------------------------------------------------------------------- */
 :root {
-  --ink: #131a21;
-  --ink-deep: #0e141a;
-  --ink-raised: #1b2530;
-  --ink-ground: #1e2529;
-  --ink-hover: #22303d;
-  --rule: #2c3a47;
-  --rule-bright: #3e5060;
+  --ink: #0a0e13;
+  --ink-deep: #070a0e;
+  --ink-raised: #11171e;
+  --ink-ground: #0f141a;
+  --ink-hover: #19212b;
+  --rule: #1d2630;
+  --rule-bright: #2c3846;
+  --signal: #5cc8f5;
+  --glass: rgba(13, 18, 24, 0.74);
+  --glass-border: rgba(255, 255, 255, 0.075);
   --tick-white: #f5f3ef;
-  --paper: #e8e4da;
-  --paper-dim: #a9b3bd;
-  --paper-faint: #8a97a2;
+  --paper: #e9edf1;
+  --paper-dim: #9aa6b2;
+  --paper-faint: #74818e;
   --hazard: #dc3840;
   --hazard-lit: #e67277;
   --caution: #c9922c;
@@ -57,11 +60,11 @@
 
   /* One focus treatment everywhere, always visible on keyboard. */
   :focus-visible {
-    @apply outline-none ring-2 ring-paper/70 ring-offset-2 ring-offset-ink;
+    @apply outline-none ring-2 ring-signal/80 ring-offset-2 ring-offset-ink;
   }
 
   ::selection {
-    background: var(--rule-bright);
+    background: rgba(92, 200, 245, 0.28);
     color: var(--paper);
   }
 
@@ -71,12 +74,13 @@
     height: 10px;
   }
   ::-webkit-scrollbar-track {
-    background: var(--ink-deep);
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--rule);
-    border: 2px solid var(--ink-deep);
-    border-radius: 0;
+    background: var(--rule-bright);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: var(--rule-bright);
@@ -84,9 +88,29 @@
 }
 
 @layer components {
-  /* Panel header: the small tracked-out eyebrow used across every dock panel. */
+  /* Section label. Sentence case, quiet, medium weight: the hierarchy comes from
+     the numbers and content below it, not from a shouting all-caps label. */
   .eyebrow {
-    @apply font-display text-eyebrow uppercase tracking-[0.14em] text-paper-dim;
+    @apply font-body text-[0.75rem] font-medium leading-none tracking-normal text-paper-faint;
+  }
+
+  /* Floating glass, for anything laid over the map or imagery. */
+  .glass {
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--glass-border);
+    @apply rounded-lg shadow-glass;
+  }
+
+  /* Solid card, for screens without imagery behind them. */
+  .card {
+    @apply rounded-lg border border-white/[0.06] bg-ink-raised;
+  }
+
+  /* The big number. Light weight, tabular, tight. */
+  .readout {
+    @apply font-body font-light tabular-nums tracking-tight text-paper;
   }
 
   /* A hairline that reads as a survey rule rather than a generic divider. */

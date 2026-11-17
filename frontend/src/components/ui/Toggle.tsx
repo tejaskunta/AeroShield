@@ -20,7 +20,7 @@ export function Toggle({
   swatch?: ReactNode
 }) {
   return (
-    <label className="flex cursor-pointer select-none items-center gap-2 py-0.5 text-small text-paper-dim transition-colors hover:text-paper">
+    <label className="flex cursor-pointer select-none items-center gap-2.5 py-1 text-[0.8125rem] text-paper-dim transition-colors hover:text-paper">
       <input
         type="checkbox"
         checked={checked}
@@ -28,20 +28,20 @@ export function Toggle({
         className="peer sr-only"
       />
       <span
-        className={`grid h-3 w-3 shrink-0 place-items-center border transition-colors ${
+        className={`relative h-4 w-7 shrink-0 rounded-full border transition-colors ${
           /* `paper-faint`, not `rule-bright`: an unchecked box has no inner mark,
              so its border is the only thing identifying the control. WCAG 1.4.11
              asks 3:1 of that, and `rule-bright` gave 1.62 — the switch was nearly
              invisible until hovered. The decorative hairlines elsewhere stay on
              `rule`, where the non-text exemption genuinely applies. */
-          checked ? 'border-paper-dim bg-paper' : 'border-paper-faint bg-transparent'
-        } peer-focus-visible:ring-2 peer-focus-visible:ring-paper/70 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-ink`}
+          checked ? 'border-signal/60 bg-signal/30' : 'border-paper-faint bg-transparent'
+        } peer-focus-visible:ring-2 peer-focus-visible:ring-signal/80 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-ink`}
         aria-hidden
       >
-        {checked && <span className="h-1 w-1 bg-ink" />}
+        <span className={`absolute top-1/2 size-2.5 -translate-y-1/2 rounded-full transition-all ${checked ? 'left-[0.9rem] bg-signal' : 'left-[0.2rem] bg-paper-faint'}`} />
       </span>
       {swatch}
-      <span className="font-mono uppercase tracking-[0.06em]">{label}</span>
+      <span>{label}</span>
     </label>
   )
 }

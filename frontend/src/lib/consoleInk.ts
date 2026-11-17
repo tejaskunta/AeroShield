@@ -24,8 +24,8 @@
  * see `HAZARD_TEXT_HEX`.
  */
 export const CONSOLE_HEX = {
-  ink: '#131A21',
-  inkDeep: '#0E141A',
+  ink: '#0A0E13',
+  inkDeep: '#070A0E',
   /*
    * The ground under a *generated* frame — `PlaceholderFrame`'s procedural
    * terrain. Deliberately close to `inkRaised` but a touch desaturated, so a
@@ -33,11 +33,11 @@ export const CONSOLE_HEX = {
    * declared token rather than a literal because the one thing a fake frame must
    * never do is drift away from the surface tones it has to sit among.
    */
-  inkGround: '#1E2529',
-  inkRaised: '#1B2530',
-  inkHover: '#22303D',
-  rule: '#2C3A47',
-  ruleBright: '#3E5060',
+  inkGround: '#0F141A',
+  inkRaised: '#11171E',
+  inkHover: '#19212B',
+  rule: '#1D2630',
+  ruleBright: '#2C3846',
   /*
    * The stake ticks that mark the covered/uncovered boundary, per the IMAS
    * marking convention. A warm white, deliberately not `paper` — the convention
@@ -45,9 +45,9 @@ export const CONSOLE_HEX = {
    * boundary read as chrome instead of as a surveyed edge.
    */
   tickWhite: '#F5F3EF',
-  paper: '#E8E4DA',
-  paperDim: '#A9B3BD',
-  paperFaint: '#8A97A2',
+  paper: '#E9EDF1',
+  paperDim: '#9AA6B2',
+  paperFaint: '#74818E',
 } as const
 
 /**
@@ -57,6 +57,9 @@ export const CONSOLE_HEX = {
  * Do not use this for text. It reads at 2.7:1 on a hovered panel, so a label
  * painted in it is a label the operator cannot read. Use `HAZARD_TEXT_HEX`.
  */
+/** The interaction accent (tailwind `signal`): selection, the drone, its track. */
+export const SIGNAL_HEX = '#5CC8F5'
+
 export const HAZARD_HEX = '#DC3840'
 
 /**

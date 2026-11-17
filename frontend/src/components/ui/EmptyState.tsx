@@ -17,9 +17,12 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 bg-chart-grid px-6 py-12 text-center [background-size:16px_16px]">
-      <h3 className="font-display text-title uppercase tracking-[0.1em] text-paper">{title}</h3>
-      <p className="max-w-sm text-compact leading-relaxed text-paper-dim">{detail}</p>
+    <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+      <span className="mb-1 grid size-10 place-items-center rounded-full border border-white/[0.08] bg-white/[0.03]" aria-hidden>
+        <span className="size-2 rounded-full bg-paper-faint/60" />
+      </span>
+      <h3 className="text-[0.9375rem] font-medium text-paper">{title}</h3>
+      <p className="max-w-sm text-[0.8125rem] leading-relaxed text-paper-faint">{detail}</p>
       {action && <div className="mt-2">{action}</div>}
     </div>
   )
