@@ -480,3 +480,25 @@
   color: var(--paper);
   font: 500 11px/1.4 'JetBrains Mono Variable', ui-monospace, monospace;
 }
+
+/* ---------------------------------------------------------------------------
+   Pin hover preview (pinTooltip.ts), shared by the Leaflet tooltip and the
+   MapLibre popup. Their own chrome (white bubble, arrow) is stripped so both
+   look like the console.
+--------------------------------------------------------------------------- */
+.leaflet-tooltip.aeroshield-tip-host,
+.maplibregl-popup.aeroshield-tip-host .maplibregl-popup-content {
+  background: rgba(11, 15, 20, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  color: var(--paper);
+  padding: 7px 9px;
+}
+.leaflet-tooltip.aeroshield-tip-host::before { display: none; }
+.maplibregl-popup.aeroshield-tip-host .maplibregl-popup-tip { display: none; }
+.aeroshield-tip { font: 500 12px/1.35 'Inter Variable', system-ui, sans-serif; white-space: nowrap; }
+.aeroshield-tip__head { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.aeroshield-tip__dot { width: 7px; height: 7px; border-radius: 999px; }
+.aeroshield-tip__row { display: flex; gap: 10px; margin-top: 3px; font: 500 11px/1.3 'JetBrains Mono Variable', monospace; color: var(--paper-dim); }
+.aeroshield-tip__hint { margin-top: 4px; font-size: 10.5px; color: var(--paper-faint); }

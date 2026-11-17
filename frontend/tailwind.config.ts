@@ -272,12 +272,19 @@ export default {
           '0%': { strokeDashoffset: '24' },
           '100%': { strokeDashoffset: '0' },
         },
+        // Opacity only: a transform (even a finished one, held by fill-mode) makes
+        // the element a containing block and traps `position: fixed` children.
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
       },
       animation: {
         ping: 'ping 1.4s cubic-bezier(0, 0, 0.2, 1) 1',
         'rise-in': 'rise-in 260ms ease-out both',
         'slide-in-right': 'slide-in-right 200ms ease-out both',
         'sweep-dash': 'sweep-dash 900ms linear infinite',
+        'fade-in': 'fade-in 220ms ease-out',
       },
     },
   },

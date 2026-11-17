@@ -9,6 +9,7 @@ import { countByRisk } from '@/hooks/useDetections'
 import { Meter } from '@/components/ui/ConfidenceBar'
 import { CountUp } from '@/components/ui/StatReadout'
 import { Ring } from '@/components/ui/Ring'
+import { Sparkline, useHistory } from '@/components/ui/Sparkline'
 
 /**
  * StatusStrip — the mission's numbers, as glass cards along the bottom of the map.
@@ -124,6 +125,13 @@ function MissionCard({ progress }: { progress: MissionProgress | null }) {
 }
 
 function AircraftCard({ telemetry }: { telemetry: Telemetry | null }) {
+  // Recent history, one sample per telemetry frame (~2 min). Above the early
+  // return so the hook order never changes.
+  const key = telemetry?.timestamp
+  const altH = useHistory(telemetry?.altitudeM, key)
+  const spdH = useHistory(telemetry?.groundSpeedMs, key)
+  const linkH = useHistory(telemetry?.linkPct, key)
+  const batH = useHistory(telemetry?.batteryPct, key)
   if (!telemetry) {
     return (
       <Card title="Aircraft">
@@ -171,12 +179,15 @@ function AircraftCard({ telemetry }: { telemetry: Telemetry | null }) {
               {batteryPct === null ? '--' : <CountUp value={batteryPct} />}
             </span>
             {batteryPct !== null && <span className="text-[0.75rem] text-paper-faint">%</span>}
+            <span className="ml-auto block w-[88px] self-center">
+              <Sparkline values={batH} width={88} height={18} minSpan={5} format={(v) => `${v.toFixed(0)}%`} label="Battery" />
+            </span>
           </div>
           <Meter value={batteryPct === null ? 0 : batteryPct / 100} tone={batteryTone} segments={20} className="mt-2" label="Battery remaining" />
           <div className="mt-3 grid grid-cols-3 gap-2">
-            <Mini k="Alt" v={altitudeM.toFixed(1)} u="m" />
-            <Mini k="Speed" v={groundSpeedMs.toFixed(1)} u="m/s" />
-            <Mini k="Link" v={linkPct === null ? '--' : String(linkPct)} u={linkPct === null ? '' : '%'} bad={linkBad} icon={<Radio size={10} aria-hidden />} />
+            <Mini k="Alt" v={altitudeM.toFixed(1)} u="m" spark={altH} fmt={(v) => `${v.toFixed(1)} m`} span={1} />
+            <Mini k="Speed" v={groundSpeedMs.toFixed(1)} u="m/s" spark={spdH} fmt={(v) => `${v.toFixed(1)} m/s`} span={1} />
+            <Mini k="Link" v={linkPct === null ? '--' : String(linkPct)} u={linkPct === null ? '' : '%'} bad={linkBad} icon={<Radio size={10} aria-hidden />} spark={linkH} fmt={(v) => `${v.toFixed(0)}%`} span={10} />
           </div>
         </div>
       </div>
@@ -196,9 +207,14 @@ function AircraftCard({ telemetry }: { telemetry: Telemetry | null }) {
   )
 }
 
-function Mini({ k, v, u, bad = false, icon }: { k: string; v: string; u: string; bad?: boolean; icon?: React.ReactNode }) {
+function Mini({
+  k, v, u, bad = false, icon, spark, fmt, span = 1,
+}: {
+  k: string; v: string; u: string; bad?: boolean; icon?: React.ReactNode
+  spark?: number[]; fmt?: (v: number) => string; span?: number
+}) {
   return (
-    <div className="min-w-0 rounded-md bg-white/[0.03] px-2 py-1.5">
+    <div className="min-w-0 rounded-md bg-white/[0.03] px-2 py-1.5 transition-colors hover:bg-white/[0.05]">
       <div className="flex items-center gap-1 text-[0.625rem] text-paper-faint">
         {icon}
         {k}
@@ -207,6 +223,11 @@ function Mini({ k, v, u, bad = false, icon }: { k: string; v: string; u: string;
         {v}
         <span className="ml-0.5 text-[0.625rem] text-paper-faint">{u}</span>
       </div>
+      {spark && (
+        <div className="mt-1">
+          <Sparkline values={spark} width={84} height={16} minSpan={span} format={fmt} label={k} />
+        </div>
+      )}
     </div>
   )
 }

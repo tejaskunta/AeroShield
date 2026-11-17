@@ -3,6 +3,7 @@ import L from 'leaflet'
 import type { Detection } from '@/types'
 import { RISK_HEX, riskOf } from '@/lib/risk'
 import { detectionIcon } from './markerGlyphs'
+import { pinTooltipHtml } from './pinTooltip'
 import { useMap } from './mapContext'
 import { useZoomScale } from './useMapHooks'
 
@@ -101,7 +102,6 @@ export function DetectionPins({
         // survives the port: the selected pin is never buried, a live hazard
         // outranks cleared ground, and everything outranks the track.
         zIndexOffset: selected ? 800 : level === 'hazard' ? 600 : 400,
-        title: `${d.id} · ${level} · cell ${d.gridCell}`,
         // Keyboard-reachable, because an operator reviewing a hazard field should
         // not be forced onto a mouse. Leaflet sets `tabindex` from `keyboard`.
         keyboard: true,
@@ -111,6 +111,13 @@ export function DetectionPins({
       // `on` rather than `addEventListener`: Leaflet's own listener registry is
       // what `marker.remove()` unwinds, so nothing is left attached to a marker the
       // map has outlived.
+      // Hover preview, instead of the bare browser title it used to have.
+      marker.bindTooltip(pinTooltipHtml(d), {
+        direction: 'top',
+        offset: [0, -12],
+        className: 'aeroshield-tip-host',
+        opacity: 1,
+      })
       marker.on('click', () => {
         selectRef.current(selectedRef.current === d.id ? null : d.id)
       })

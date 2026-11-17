@@ -10,6 +10,7 @@ import { cellBounds, gridBounds, gridCenter, offsetM, parseCellId, validCoordina
 import { RISK_HEX, riskOf } from '@/lib/risk'
 import { cameraFootprint, footprintHalfExtents } from '@/lib/footprint'
 import { detectionGlyphHtml, pinSize } from '@/components/map/markerGlyphs'
+import { pinTooltipHtml } from '@/components/map/pinTooltip'
 import type { Basemap } from '@/components/map/basemaps'
 import type { LayerState } from '@/components/map/LayerToggles'
 import type { FollowMode } from '@/components/map/useMapHooks'
@@ -544,8 +545,10 @@ export default function LiveMap3D({
     }
     setBeacons()
     map.on('aeroshield:sync', setBeacons)
+    const tips: maplibregl.Popup[] = []
     const cleanup = () => {
       map.off('aeroshield:sync', setBeacons)
+      tips.forEach((t) => t.remove())
     }
     if (!layers.detections) return cleanup
     for (const d of detections) {
@@ -562,6 +565,12 @@ export default function LiveMap3D({
         ev.stopPropagation()
         cb.current.onSelect(d.id)
       })
+      // Same hover preview as 2D, as a MapLibre popup without close chrome.
+      const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 14, className: 'aeroshield-tip-host' })
+        .setHTML(pinTooltipHtml(d))
+      tips.push(tip)
+      el.addEventListener('mouseenter', () => tip.setLngLat([d.position.lon, d.position.lat]).addTo(map))
+      el.addEventListener('mouseleave', () => tip.remove())
       markers.current.push(new maplibregl.Marker({ element: el }).setLngLat([d.position.lon, d.position.lat]).addTo(map))
     }
     return cleanup

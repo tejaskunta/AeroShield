@@ -26,7 +26,7 @@ export function IconButton({
       aria-label={label}
       title={label}
       aria-pressed={active || undefined}
-      className={`grid size-9 place-items-center rounded-md transition-colors ${bare ? '' : 'glass'} ${active ? 'text-signal' : 'text-paper-dim hover:bg-white/[0.07] hover:text-paper'
+      className={`grid size-9 place-items-center rounded-md transition-[colors,transform] active:scale-90 ${bare ? '' : 'glass'} ${active ? 'text-signal' : 'text-paper-dim hover:bg-white/[0.07] hover:text-paper'
         } ${className}`}
       {...rest}
     >

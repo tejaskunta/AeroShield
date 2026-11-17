@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FlaskConical, Radio } from 'lucide-react'
+import { FlaskConical, Radio, Search } from 'lucide-react'
 import type { Detection, LinkStatus, StreamState, Telemetry } from '@/types'
 import { MISSION } from '@/lib/mockData'
 import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
@@ -57,6 +57,16 @@ export function TopBar({
       </div>
 
       <div className="flex-1" />
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
+        className="hidden items-center gap-2 rounded-md border border-white/[0.08] bg-white/[0.02] px-2.5 py-1 text-[0.75rem] text-paper-faint transition-colors hover:border-white/15 hover:text-paper-dim md:flex"
+        title="Command palette"
+      >
+        <Search size={12} aria-hidden />
+        Search or run a command
+        <kbd className="rounded border border-white/10 px-1 font-mono text-[0.625rem]">Ctrl K</kbd>
+      </button>
 
       {/* Verdicts */}
       <div className="flex shrink-0 items-center gap-2">

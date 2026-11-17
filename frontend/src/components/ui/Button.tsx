@@ -35,7 +35,7 @@ export function Button({
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-[0.8125rem] font-medium transition-colors disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-transparent disabled:text-paper-faint ${VARIANTS[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-[0.8125rem] font-medium transition-[colors,transform] active:scale-[0.97] disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-transparent disabled:text-paper-faint ${VARIANTS[variant]} ${className}`}
       {...rest}
     >
       {icon}

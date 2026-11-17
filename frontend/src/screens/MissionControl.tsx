@@ -19,6 +19,8 @@ import { StatusStrip } from '@/components/mission/StatusStrip'
 import { TestInjectPanel } from '@/components/mission/TestInjectPanel'
 import { fmtM } from '@/components/map/MeasureLayer'
 import { Lightbox } from '@/components/ui/Lightbox'
+import { useCommand } from '@/lib/commands'
+import { DetectionToasts } from '@/components/mission/DetectionToasts'
 
 // The 3D engine (MapLibre + three.js, ~1 MB) loads only when someone opens 3D.
 const LiveMap3D = lazy(() => import('@/components/map3d/LiveMap3D'))
@@ -134,6 +136,45 @@ export function MissionControl() {
     },
     [controls, select],
   )
+
+  // Palette and keyboard commands (lib/commands.ts).
+  useCommand((cmd) => {
+    switch (cmd.type) {
+      case 'view':
+        switchView(cmd.value === 'toggle' ? (view === '2d' ? '3d' : '2d') : cmd.value)
+        break
+      case 'layout':
+        if (HAS_JETSON_STREAM) setLayout(cmd.value === 'toggle' ? (layout === 'split' ? 'overlay' : 'split') : cmd.value)
+        break
+      case 'fit':
+        onFollow('fit')
+        break
+      case 'follow':
+        onFollow('follow')
+        break
+      case 'zoom':
+        if (cmd.dir > 0) controls?.zoomIn()
+        else controls?.zoomOut()
+        break
+      case 'measure':
+        if (view === '2d') {
+          setMeasuring((v) => !v)
+          setMeasure({ m: 0, n: 0 })
+        }
+        break
+      case 'test':
+        setTestOpen((o) => !o)
+        break
+      case 'latest': {
+        const d = detections[detections.length - 1]
+        if (d) pick(d)
+        break
+      }
+      case 'basemap':
+        setBasemap(cmd.value)
+        break
+    }
+  })
 
   // Photo viewer, tracked by detection ID, not by position in the visible list: the
   // list is a sliding window, so an index silently pointed at a different detection
@@ -299,6 +340,8 @@ export function MissionControl() {
             )}
           </div>
         </div>
+
+        <DetectionToasts detections={detections} onPick={pick} bottom={stripH + 40} />
 
         {HAS_JETSON_STREAM && !split && (
           <LiveFeed key="float" detectorRunning={detectorRunning} floatClassName="right-[4.25rem] top-3 w-[min(400px,34vw)]" />

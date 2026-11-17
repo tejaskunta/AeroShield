@@ -1,8 +1,9 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { CONNECTING_LINK } from '@/types'
 import { useMissionStream } from '@/hooks/useMissionStream'
 import { TopBar } from './TopBar'
 import { NavRail } from './NavRail'
+import { CommandLayer } from './CommandPalette'
 import { MissionContext } from './missionContext'
 
 /**
@@ -18,6 +19,7 @@ import { MissionContext } from './missionContext'
  */
 export function AppShell() {
   const snapshot = useMissionStream()
+  const { pathname } = useLocation()
 
   return (
     <MissionContext.Provider value={snapshot}>
@@ -30,11 +32,13 @@ export function AppShell() {
         />
         <div className="flex min-h-0 flex-1">
           <NavRail />
-          <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+          {/* Keyed by route: each screen fades up as it arrives. */}
+          <main key={pathname} className="relative min-h-0 min-w-0 flex-1 animate-fade-in overflow-hidden">
             <Outlet />
           </main>
         </div>
       </div>
+      <CommandLayer />
     </MissionContext.Provider>
   )
 }
