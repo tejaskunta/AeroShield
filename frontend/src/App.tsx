@@ -5,20 +5,20 @@ import { DetectionCenter } from '@/screens/DetectionCenter'
 import { Analytics } from '@/screens/Analytics'
 import { SafetyCopilot } from '@/screens/SafetyCopilot'
 import { MissionReports } from '@/screens/MissionReports'
-import { MissionStart } from '@/screens/MissionStart'
 
 export function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route element={<AppShell />}>
-          <Route path="/" element={<Navigate to="/start" replace />} />
-          <Route path="/start" element={<MissionStart />} />
+          <Route path="/" element={<Navigate to="/mission" replace />} />
           <Route path="/mission" element={<MissionControl />} />
           <Route path="/detections" element={<DetectionCenter />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/copilot" element={<SafetyCopilot />} />
           <Route path="/reports" element={<MissionReports />} />
+          {/* Unknown paths, including old bookmarks to the removed /start page. */}
+          <Route path="*" element={<Navigate to="/mission" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>
