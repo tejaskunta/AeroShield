@@ -502,11 +502,26 @@ else {
     else {
         # The engine takes a while to deserialise; poll the feed for up to ~60 s.
         $tmp = Join-Path $OutDir 'frame.mjpg'
-        $tunnelFeed = Test-NetConnection -ComputerName 127.0.0.1 -Port $StreamPort -InformationLevel Quiet -WarningAction SilentlyContinue
+        # Is laptop :8080 really the tunnel? Anything listening there used to count,
+        # so a leftover dev_mjpeg.py (a stand-in camera) gave a false "feed live".
+        # Only an ssh process holding the port is the tunnel. Re-checked every poll.
+        function Test-TunnelFeed {
+            $c = Get-NetTCPConnection -LocalPort $StreamPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $c) { return 'none' }
+            $name = (Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue).ProcessName
+            if ($name -like 'ssh*') { return 'tunnel' }
+            return "other:$name"
+        }
+        $holder = Test-TunnelFeed
+        $tunnelFeed = $holder -eq 'tunnel'
+        if ($holder -like 'other:*') {
+            Note "laptop :$StreamPort is held by '$($holder.Substring(6))', not the tunnel - stop it (dev_mjpeg.py?) and run tunnel.ps1"
+        }
         $okFeed = $false
         $bytes = 0
         for ($i = 0; $i -lt 12 -and -not $okFeed; $i++) {
             Start-Sleep -Seconds 5
+            $tunnelFeed = (Test-TunnelFeed) -eq 'tunnel'
             if ($tunnelFeed) {
                 Remove-Item $tmp -ErrorAction SilentlyContinue
                 $null = Invoke-Native -FilePath 'curl.exe' -ArgumentList @('-s', '--max-time', '4', '-o', $tmp, "http://127.0.0.1:$StreamPort/stream") -TimeoutSec 10

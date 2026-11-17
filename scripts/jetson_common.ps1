@@ -24,9 +24,12 @@
 # key that CHANGES, which is the case that actually matters.
 
 $script:JetsonAlias   = 'jetson'
-$script:JetsonAliases = @('jetson', 'jetson-ip')
+$script:JetsonAliases = @('jetson', 'jetson-ip', 'jetson-ts')
 $script:RepoRoot      = Split-Path -Parent $PSScriptRoot
 $script:IpCacheFile   = Join-Path $script:RepoRoot 'logs/last_jetson_ip.txt'
+# Host keys seen while PROBING sweep candidates go here, never into the real
+# known_hosts under the aircraft's alias (see Get-SshOptions -Probe).
+$script:ProbeKnownHosts = Join-Path $script:RepoRoot 'logs/known_hosts.probe'
 
 # ---------------------------------------------------------------------------
 # A target is what every ssh/scp call is aimed at: the alias, plus an address
@@ -49,14 +52,28 @@ function Get-TargetLabel($Target) {
 # and prints "remote port forwarding failed". That warning lands in the middle of
 # output this script parses line by line.
 function Get-SshOptions {
-    param($Target, [int]$ConnectTimeout = 8)
+    param($Target, [int]$ConnectTimeout = 8, [switch]$Probe)
     $o = @(
         '-o', 'BatchMode=yes',
         '-o', "ConnectTimeout=$ConnectTimeout",
         '-o', 'ServerAliveInterval=15',
         '-o', 'ClearAllForwardings=yes'
     )
-    if ($Target.Ip) {
+    if ($Target.Ip -and $Probe) {
+        # A sweep candidate is not yet known to be the aircraft. Pinning its key under
+        # the aircraft's alias (accept-new) would let the first stranger on the hotspot
+        # with sshd claim that alias, and the real drone would then be refused as a
+        # changed key. Probe keys go to a scratch file instead; the alias is only used
+        # once the jetson key has actually logged in.
+        $kh = $script:ProbeKnownHosts
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $kh) | Out-Null
+        $o += @(
+            '-o', "HostName=$($Target.Ip)",
+            '-o', "UserKnownHostsFile=$kh",
+            '-o', 'StrictHostKeyChecking=no'
+        )
+    }
+    elseif ($Target.Ip) {
         $o += @(
             '-o', "HostName=$($Target.Ip)",
             '-o', 'HostKeyAlias=aeroshield-jetson',
@@ -151,8 +168,8 @@ function Copy-FromJetson {
 }
 
 function Test-JetsonTarget {
-    param($Target, [int]$ConnectTimeout = 6)
-    $a = (Get-SshOptions -Target $Target -ConnectTimeout $ConnectTimeout) + @($Target.Alias, 'echo SSH_OK')
+    param($Target, [int]$ConnectTimeout = 6, [switch]$Probe)
+    $a = (Get-SshOptions -Target $Target -ConnectTimeout $ConnectTimeout -Probe:$Probe) + @($Target.Alias, 'echo SSH_OK')
     $r = Invoke-Native -FilePath 'ssh.exe' -ArgumentList $a -TimeoutSec ($ConnectTimeout + 6)
     return [pscustomobject]@{ Ok = ($r.Out -match 'SSH_OK'); Detail = $r.Err }
 }
@@ -248,6 +265,12 @@ function Resolve-Jetson {
     }
 
     foreach ($alias in $script:JetsonAliases) {
+        # jetson-ts ships pointing at a 100.64.0.0 placeholder until Tailscale is set
+        # up; probing that would only add a timeout. Try it once it is real.
+        if ($alias -eq 'jetson-ts') {
+            $tsHost = (& ssh -G jetson-ts 2>$null | Select-String '^hostname ' | ForEach-Object { ($_ -split ' ', 2)[1] }) | Select-Object -First 1
+            if (-not $tsHost -or $tsHost -eq '100.64.0.0' -or $tsHost -eq 'jetson-ts') { continue }
+        }
         $t = New-JetsonTarget -Alias $alias
         if ((Test-JetsonTarget $t -ConnectTimeout 5).Ok) {
             # The `jetson` block owns the key and options, so if a fallback alias
@@ -267,7 +290,7 @@ function Resolve-Jetson {
     if (-not $hits) { Say 'nothing on the local subnet answers on :22'; return $null }
     foreach ($h in $hits) {
         $t = New-JetsonTarget -Ip $h.Ip
-        if ((Test-JetsonTarget $t -ConnectTimeout 5).Ok) {
+        if ((Test-JetsonTarget $t -ConnectTimeout 5 -Probe).Ok) {
             Say "found at $($h.Ip) via $($h.Via)"
             Save-JetsonIp $h.Ip
             return $t

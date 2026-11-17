@@ -78,15 +78,18 @@ def web_mercator_m_per_px(zoom: float, lat: float) -> float:
 
 
 def read_origin_from_env() -> tuple[float, float] | None:
-    env = os.path.join(REPO, "frontend", ".env.local")
-    try:
-        with open(env, encoding="utf-8") as f:
-            for line in f:
-                m = re.match(r"\s*VITE_SURVEY_ORIGIN\s*=\s*([-\d.]+)\s*,\s*([-\d.]+)", line)
-                if m:
-                    return float(m.group(1)), float(m.group(2))
-    except OSError:
-        pass
+    """VITE_SURVEY_ORIGIN as Vite reads it: .env.local over .env, quotes allowed."""
+    pat = re.compile(r"""\s*VITE_SURVEY_ORIGIN\s*=\s*['"]?\s*([-\d.]+)\s*,\s*([-\d.]+)\s*['"]?""")
+    for name in (".env.local", ".env"):
+        env = os.path.join(REPO, "frontend", name)
+        try:
+            with open(env, encoding="utf-8") as f:
+                for line in f:
+                    m = pat.match(line)
+                    if m:
+                        return float(m.group(1)), float(m.group(2))
+        except OSError:
+            continue
     return None
 
 
@@ -237,7 +240,13 @@ def main() -> int:
 
     import cv2
 
-    origin = parse_xy(args.origin) if args.origin else (read_origin_from_env() or DEFAULT_ORIGIN)
+    origin = parse_xy(args.origin) if args.origin else read_origin_from_env()
+    if origin is None:
+        # Said loudly: pinning to the wrong origin puts the photo off the grid while
+        # every other line of output still reads as success.
+        print("WARNING  : VITE_SURVEY_ORIGIN not found in frontend/.env.local or .env; "
+              "using the built-in default {0}. Pass --origin lat,lon if that is wrong.".format(DEFAULT_ORIGIN))
+        origin = DEFAULT_ORIGIN
     corners_px = click_corners(args.image) if args.click else [parse_xy(c) for c in args.corners]
     s = args.size_m
     ground = [(0.0, 0.0), (s, 0.0), (s, s), (0.0, s)]

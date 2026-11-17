@@ -99,8 +99,21 @@ while ($true) {
 
     # A forwarding failure exits immediately; do not spin on it.
     if ($held -lt 5) {
-        Write-Host "           exited within 5 s - usually a port already taken (another tunnel window, dev_mjpeg.py on :$StreamPort) or the drone already forwarding :$BackendPort from a stale session." -ForegroundColor DarkGray
-        Start-Sleep -Seconds 7
+        Write-Host "           exited within 5 s - usually a port already taken: another tunnel window, dev_mjpeg.py on :$StreamPort, or the drone still holding :$BackendPort from the dropped session." -ForegroundColor DarkGray
+        # After a hotspot drop the drone's sshd keeps the OLD session's 127.0.0.1:8000
+        # forward bound for minutes (no ClientAliveInterval on the image), so every
+        # reconnect would fail on `ExitOnForwardFailure` while detections spool. Free
+        # it: the stale sshd child runs as our own user, so `ss -p` names it and we may
+        # kill it. Over a separate connection with no forwards of its own.
+        $free = @'
+pid=$(ss -ltnp 2>/dev/null | grep '127.0.0.1:__PORT__ ' | grep -o 'pid=[0-9]*' | head -n 1 | cut -d= -f2)
+if [ -n "$pid" ]; then kill "$pid" 2>/dev/null && echo "FREED|$pid" || echo "FREED|denied"; else echo "FREED|none"; fi
+'@
+        $r = Invoke-Remote -Target $target -Script ($free.Replace('__PORT__', "$BackendPort")) -TimeoutSec 15
+        if ($r.Out -match 'FREED\|(\d+)') {
+            Write-Host "           freed the drone's stale :$BackendPort forward (sshd pid $($Matches[1]))." -ForegroundColor Yellow
+        }
+        Start-Sleep -Seconds 2
     }
     Start-Sleep -Seconds $RetryDelaySec
 }
