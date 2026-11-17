@@ -232,43 +232,40 @@ make stream
 | `/` | a minimal HTML page with `<img src="/stream">` |
 | `/stream` | `multipart/x-mixed-replace; boundary=frame`, latest JPEG only |
 
-Verify from the laptop, in this order — each step rules out one layer:
+The feed reaches the laptop through `scripts/tunnel.ps1`, which forwards
+laptop `127.0.0.1:8080` to the drone's `127.0.0.1:8080` over the same SSH
+connection that carries detections the other way. `stream.py` binds `0.0.0.0`,
+so its loopback answers. Verify in this order — each step rules out one layer:
 
-```sh
-# 1. is the port open at all?
+```powershell
+# 1. is the drone serving at all?
 ssh jetson 'ss -ltnp | grep 8080'
 
-# 2. does it answer headers (do NOT let this hang; --max-time is required,
-#    /stream never finishes on its own)
-curl -sI --max-time 5 http://10.11.101.241:8080/ | head -n 5
+# 2. does it answer through the tunnel? (--max-time is required: /stream never
+#    finishes on its own)
+curl.exe -sI --max-time 5 http://127.0.0.1:8080/
 
-# 3. one frame, actually decoded
-curl -s --max-time 5 http://10.11.101.241:8080/stream -o /tmp/f.jpg
-file /tmp/f.jpg          # must say "JPEG image data"
+# 3. frames, actually arriving (expect tens of KB in 4 s)
+curl.exe -s --max-time 4 http://127.0.0.1:8080/stream -o $env:TEMP\f.mjpg; (Get-Item $env:TEMP\f.mjpg).Length
 ```
 
-`make livecheck` runs 1–3 and reports each.
-
-A JPEG of a few hundred bytes is a black or truncated frame; a real CSI frame at
-`--stream-port 8080` is tens of kilobytes.
+`flightcheck.ps1 -Go` step 9 does 1–3 after launching. A JPEG of a few hundred
+bytes is a black or truncated frame; a real CSI frame is tens of kilobytes.
 
 The dashboard reaches the stream through the Vite proxy (`/jetson/stream` →
-`AEROSHIELD_JETSON_ORIGIN`, default `http://10.11.101.241:8080`). Both sides
-must agree on the port:
+`AEROSHIELD_JETSON_ORIGIN`, then `VITE_JETSON_DIRECT_ORIGIN`, default
+`http://127.0.0.1:8080` — the tunnel). The working `frontend/.env.local`:
 
 ```sh
-# frontend/.env.local — leave VITE_JETSON_STREAM_URL empty to use the proxy,
-# or set it to an absolute URL if you have a tunnel
-VITE_JETSON_STREAM_URL=
-
-# and the proxy target, if the aircraft's IP has moved
-AEROSHIELD_JETSON_ORIGIN=http://10.11.101.241:8080
+VITE_JETSON_STREAM_URL=/jetson/stream
+VITE_JETSON_DIRECT_ORIGIN=http://127.0.0.1:8080
 ```
 
-An empty `VITE_JETSON_STREAM_URL` is the normal configuration. It resolves to
-`/jetson/stream`, the dev server proxies it, and the browser never needs to know
-the aircraft's address — which is why a DHCP lease change only requires editing
-the Vite env, not the frontend build.
+Do not leave `VITE_JETSON_STREAM_URL` as an empty string: an explicit empty value
+*disables* the feed (`src/lib/config.ts`), it does not fall back to the proxy.
+Because the proxy target is loopback, a new DHCP lease on the hotspot changes
+nothing on the laptop. Only to bypass the tunnel (direct LAN, Firefox) do you
+point `AEROSHIELD_JETSON_ORIGIN` at the drone's address.
 
 ---
 

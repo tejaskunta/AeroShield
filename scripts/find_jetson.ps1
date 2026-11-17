@@ -82,8 +82,8 @@ if ($Scan) {
         Write-Host ("  sweeping {0}.0/24 via {1} ..." -f $prefix, $iface.InterfaceAlias) -ForegroundColor DarkGray
 
         $found = @()
-        foreach ($host in 1..254) {
-            $ip = "$prefix.$host"
+        foreach ($n in 1..254) {
+            $ip = "$prefix.$n"
             $client = New-Object System.Net.Sockets.TcpClient
             try {
                 $task = $client.ConnectAsync($ip, 22)

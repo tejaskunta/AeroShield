@@ -38,6 +38,8 @@
 - `make logs`: tail `logs/detections.jsonl` on the aircraft.
 - `make test-local`: run the root pytest suite on the laptop.
 
+On Windows (no make, no rsync) the flight path is `scripts/tunnel.ps1` (one SSH connection: `-R 8000` for the backend, `-L 8080` for the feed, auto-reconnect) plus `scripts/flightcheck.ps1` (`-Go` launches under the watchdog, `-Gps mavlink|sim`, `-Stop`). Both find the drone through `scripts/jetson_common.ps1`: alias, then `logs/last_jetson_ip.txt`, then a sweep of the WiFi /24, applied as `ssh -o HostName=<ip> jetson`. See `docs/FLIGHT-DAY.md`.
+
 Useful variables: `GPS=sim|mavlink` (default `sim`), `GPS_URL` (`/dev/ttyACM0:115200`), `GPS_MAX_AGE` (2.0), `MISSION` (`bench-jetson-1`), `CONF` (0.25), `STREAM_PORT` (8080), `ENTRY` (`jetson/live_detect.py`), `ENGINE` (`weights/best_512x288.engine`), `IMGSZ` (`288 512`), `BACKEND_URL`, and the `SIM_*` survey geometry.
 
 ## Mission name must agree across three places

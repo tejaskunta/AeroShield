@@ -15,8 +15,14 @@ import path from 'node:path'
  *
  * `AEROSHIELD_JETSON_ORIGIN` still wins if set, for a one-off run against a
  * different board without touching a tracked-adjacent file.
+ *
+ * The default is loopback because the feed arrives over `scripts/tunnel.ps1`
+ * (`ssh -L 8080:127.0.0.1:8080`), the same SSH connection that carries
+ * detections the other way. That makes the proxy target independent of whatever
+ * address the phone hotspot gave the aircraft. `scripts/dev_mjpeg.py` listens on
+ * the same port, so a rehearsal exercises exactly this path.
  */
-const DEFAULT_JETSON_ORIGIN = 'http://10.11.101.241:8080'
+const DEFAULT_JETSON_ORIGIN = 'http://127.0.0.1:8080'
 
 /**
  * There used to be a build-time guard here that failed a production build without
