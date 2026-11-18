@@ -76,6 +76,10 @@ export function basemapTileLayers(basemap: Basemap, maxZoom: number): L.GridLaye
     updateWhenIdle: false,
     // Two tiles of buffer, so a small pan reveals downloaded imagery, not a gap.
     keepBuffer: 2,
+    // Build tiles when a zoom settles, not on every animation frame of it: tile
+    // churn mid-zoom was part of the lag. The current tiles scale through the
+    // animation and are replaced once it ends.
+    updateWhenZooming: false,
   }
 
   if (basemap === 'roadmap') {
@@ -97,7 +101,7 @@ export function basemapTileLayers(basemap: Basemap, maxZoom: number): L.GridLaye
     attribution: ESRI_ATTRIBUTION,
     // A mild haze correction (index.css); Esri's photo over this block is washed out.
     className: 'aeroshield-tiles-imagery',
-    sharpen: 0.85,
+    sharpen: 0.7,
   })
 
   if (basemap === 'satellite') return [imagery]

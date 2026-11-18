@@ -19,7 +19,7 @@ Once the one-time setup in §2 is done, this is the whole flight:
 | 1 | phone | Hotspot on. Laptop joins it. Drone on the barrel jack; its dongle joins by itself. |
 | 2 | terminal A | `docker compose up -d db` then `cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir . --host 0.0.0.0 --port 8000` |
 | 3 | terminal B | `.\scripts\tunnel.ps1` — **leave it open** |
-| 4 | terminal C | `cd frontend; npm.cmd run dev` → <http://localhost:5173/mission> |
+| 4 | terminal C | `cd frontend; npm.cmd run demo` → <http://localhost:4173/mission> (production build: several times smoother than `npm run dev`, measured) |
 | 5 | terminal D | `.\scripts\flightcheck.ps1 -Go` |
 | 6 | browser | Rail flips **Simulated → Live**, the camera paints, detections land on the map. |
 
