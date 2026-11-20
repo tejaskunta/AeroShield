@@ -42,6 +42,8 @@ The system is intentionally built around an operator interface rather than a raw
 - The app uses client-side simulation data in the frontend
 - The backend currently returns mock detection results instead of live YOLO predictions
 - The repo is best understood as a foundation for a real AI mission platform rather than a final production deployment
+- **Onboard model.** The bench Jetson build ran a single-stage **YOLOv8m trained on the original (leaky) split**, not the models evaluated in the SafeMine paper. The evaluated two-stage models (YOLOv8s seed 0 + MobileNetV3-Large crop verifier) are exported as ONNX in `SafeMineAI-main/models/` (`yolo_s_seed0/last_512x288.onnx`, `stage2_s0/verifier.onnx`; SHA-256 in `models/SHA256SUMS.txt`). TensorRT engines must be built on the Nano with `jetson/build_engine.sh`.
+- **Two-stage verifier.** `jetson/verifier.py` adds the protected crop verifier to the onboard path (`make_detector(..., verifier=..., protect=0.4, tau=0.10, conf=0.02)`, the seed-0 thresholds chosen on validation). `scripts/replay_twostage.py` replays the onboard code on the test split; results are in `results/host_replay_twostage/`. The TensorRT verifier backend has not yet run on a device: the bench Nano failed before redeployment, and GNSS in all bench runs was simulated.
 
 ---
 
