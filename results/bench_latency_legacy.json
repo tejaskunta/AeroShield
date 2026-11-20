@@ -1,0 +1,36 @@
+{
+  "script": "scripts/summarize_bench_latency.py",
+  "source_log": "drone-data/aeroshield/jetson/logs/detections.jsonl",
+  "model_versions": [
+    "best_512x288.engine"
+  ],
+  "caveats": [
+    "earlier single-stage YOLOv8m engine trained on the original (leaky) split",
+    "logged only on frames with a detection; multi-detection frames repeat",
+    "power mode, thermal state and engine hash not recorded"
+  ],
+  "n_records": 2157,
+  "median_ms_all": 367.9,
+  "by_day": {
+    "2026-10-31": {
+      "n": 322,
+      "median_ms": 688.4000000000001
+    },
+    "2026-11-10": {
+      "n": 1125,
+      "median_ms": 381.5
+    },
+    "2026-11-11": {
+      "n": 59,
+      "median_ms": 250.3
+    },
+    "2026-11-13": {
+      "n": 651,
+      "median_ms": 262.6
+    }
+  },
+  "daily_median_range_ms": [
+    250.3,
+    688.4000000000001
+  ]
+}
