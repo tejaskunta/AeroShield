@@ -41,6 +41,9 @@ class Detection(NamedTuple):
     y1: int
     x2: int
     y2: int
+    # Stage-2 verifier probability (verifier.py). None when no verifier ran, or
+    # when the box was protected (conf >= protect) and so never scored.
+    cls_p: Optional[float] = None
 
     def centre(self):
         return (self.x1 + self.x2) / 2.0, (self.y1 + self.y2) / 2.0
@@ -363,7 +366,25 @@ def make_detector(kind: str, **kwargs) -> Detector:
     """Factory for live_detect.py's --detector flag.
 
     Filters kwargs per backend so the CLI can pass one flat option bag.
+
+    Two-stage: pass verifier=<onnx path or TensorRT engine> (and optionally
+    verifier_backend='onnx'|'trt'|'mock', protect=..., tau=...). The stage-1
+    detector then runs at conf (= c0) and is wrapped in verifier.VerifiedDetector,
+    which applies keep = conf>=c0 and (conf>=protect or cls_p>=tau).
     """
+    verifier_path = kwargs.pop("verifier", None)
+    verifier_backend = kwargs.pop("verifier_backend", None)
+    protect = kwargs.pop("protect", None)
+    tau = kwargs.pop("tau", None)
+    if verifier_path or verifier_backend == "mock":
+        from verifier import VerifiedDetector, make_verifier
+        if protect is None or tau is None:
+            raise ValueError("a verifier needs both protect and tau (chosen on validation data)")
+        backend = verifier_backend or ("trt" if str(verifier_path).endswith(".engine") else "onnx")
+        base = make_detector(kind, **kwargs)
+        ver = make_verifier(backend, weights=verifier_path, engine=verifier_path)
+        return VerifiedDetector(base, ver, c0=kwargs.get("conf", 0.25), protect=protect, tau=tau)
+
     kind = (kind or "mock").lower()
 
     if kind == "trt":
