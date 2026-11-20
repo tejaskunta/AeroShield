@@ -1,0 +1,28 @@
+{
+  "_doc": "Onboard two-stage operating points (YOLOv8s seed 0 + MobileNetV3-Large verifier seed 0). Thresholds were chosen on validation data only (SafeMineAI-main/src/analysis/twostage_rule_a.py, deploy_resolution.py). Recall / FP-per-image are the host replay of this repo's onboard code on the 189-image test split (results/host_replay_twostage/), not device measurements. Pass to live_detect.py as --imgsz/--conf/--verifier/--protect/--tau.",
+  "default": "survey_640",
+  "profiles": {
+    "survey_640": {
+      "detector_onnx": "SafeMineAI-main/models/yolo_s_seed0/last_640.onnx",
+      "engine": "weights/best_640.engine",
+      "imgsz": [640, 640],
+      "conf": 0.02,
+      "verifier_onnx": "SafeMineAI-main/models/stage2_s0/verifier.onnx",
+      "protect": 0.4,
+      "tau": 0.10,
+      "host_replay": {"recall": 0.964, "fp_per_image": 0.577, "file": "results/host_replay_twostage/seed0_640.json"},
+      "note": "Recommended. Same input size the thresholds were selected at."
+    },
+    "fast_512x288": {
+      "detector_onnx": "SafeMineAI-main/models/yolo_s_seed0/last_512x288.onnx",
+      "engine": "weights/best_512x288.engine",
+      "imgsz": [288, 512],
+      "conf": 0.02,
+      "verifier_onnx": "SafeMineAI-main/models/stage2_s0/verifier.onnx",
+      "protect": 0.4,
+      "tau": 0.10,
+      "host_replay": {"recall": 0.933, "fp_per_image": 0.307, "file": "results/host_replay_twostage/seed0_512x288.json"},
+      "note": "36% of the pixels; loses about 3 recall points on the square benchmark images. Re-selecting thresholds at this size does not recover recall (the 0.97 validation target is unreachable even at conf 0.005) and multiplies false alarms (recall 0.929, 1.54 FP/img, results/host_replay_twostage/seed0_512x288_reselected.json), so the 640-selected thresholds are kept."
+    }
+  }
+}
