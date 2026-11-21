@@ -1,0 +1,87 @@
+{
+ "script": "scripts/uplink_soak.py",
+ "runs": [
+  {
+   "n": 5000,
+   "seed": 0,
+   "restarts": 5,
+   "outages": 8,
+   "auth_window_records": 100,
+   "grace_after_landing_s": 30.0,
+   "delivered_by_shutdown": 2575,
+   "retained_on_disk": 2425,
+   "lost": 0,
+   "delivered_after_next_power_on": 4977,
+   "kept_in_rejected_for_operator": 23,
+   "unaccounted_after_next_power_on": 0,
+   "resends_absorbed_by_idempotency": 318,
+   "posts": 7257,
+   "seconds": 103.6,
+   "fault_rates": {
+    "drop": 0.15,
+    "503": 0.05,
+    "lost_ack": 0.05,
+    "hang": 0.002,
+    "hang_s": 3.0
+   }
+  },
+  {
+   "n": 5000,
+   "seed": 1,
+   "restarts": 5,
+   "outages": 8,
+   "auth_window_records": 100,
+   "grace_after_landing_s": 30.0,
+   "delivered_by_shutdown": 2350,
+   "retained_on_disk": 2650,
+   "lost": 0,
+   "delivered_after_next_power_on": 4977,
+   "kept_in_rejected_for_operator": 23,
+   "unaccounted_after_next_power_on": 0,
+   "resends_absorbed_by_idempotency": 356,
+   "posts": 7836,
+   "seconds": 94.2,
+   "fault_rates": {
+    "drop": 0.15,
+    "503": 0.05,
+    "lost_ack": 0.05,
+    "hang": 0.002,
+    "hang_s": 3.0
+   }
+  },
+  {
+   "n": 5000,
+   "seed": 2,
+   "restarts": 5,
+   "outages": 8,
+   "auth_window_records": 100,
+   "grace_after_landing_s": 30.0,
+   "delivered_by_shutdown": 2290,
+   "retained_on_disk": 2710,
+   "lost": 0,
+   "delivered_after_next_power_on": 4975,
+   "kept_in_rejected_for_operator": 25,
+   "unaccounted_after_next_power_on": 0,
+   "resends_absorbed_by_idempotency": 336,
+   "posts": 7496,
+   "seconds": 102.9,
+   "fault_rates": {
+    "drop": 0.15,
+    "503": 0.05,
+    "lost_ack": 0.05,
+    "hang": 0.002,
+    "hang_s": 3.0
+   }
+  }
+ ],
+ "total": {
+  "n": 15000,
+  "delivered_by_shutdown": 7215,
+  "retained_on_disk": 7785,
+  "lost": 0,
+  "delivered_after_next_power_on": 14929,
+  "kept_in_rejected_for_operator": 71,
+  "unaccounted_after_next_power_on": 0,
+  "resends_absorbed_by_idempotency": 1010
+ }
+}

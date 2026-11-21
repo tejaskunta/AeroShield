@@ -1,0 +1,84 @@
+{
+ "script": "scripts/geotag_calibration.py",
+ "camera": {
+  "hfov_deg": 62.2,
+  "w": 1280,
+  "h": 720
+ },
+ "sigmas": {
+  "gps": 2.5,
+  "alt_rel": 0.05,
+  "hdg": 5.0,
+  "cpx": 4.0
+ },
+ "n_per_altitude": 20000,
+ "rows": [
+  {
+   "altitude_m": 3,
+   "gsd_cm_per_px": 0.28276807816249616,
+   "empirical_rms_m": 2.5037393776591554,
+   "predicted_rms_m": 2.502916714977082,
+   "ratio_empirical_over_predicted": 1.000328681604606,
+   "within_1x_predicted": 0.6379,
+   "within_2x_predicted": 0.98075,
+   "predicted_median_m": 2.502429815582741,
+   "empirical_p95_m": 4.3640483727520145
+  },
+  {
+   "altitude_m": 5,
+   "gsd_cm_per_px": 0.471280130270827,
+   "empirical_rms_m": 2.507695523663757,
+   "predicted_rms_m": 2.5081217681919075,
+   "ratio_empirical_over_predicted": 0.9998300542925961,
+   "within_1x_predicted": 0.6354,
+   "within_2x_predicted": 0.98045,
+   "predicted_median_m": 2.506746840831658,
+   "empirical_p95_m": 4.356944578454817
+  },
+  {
+   "altitude_m": 10,
+   "gsd_cm_per_px": 0.942560260541654,
+   "empirical_rms_m": 2.5365199483068266,
+   "predicted_rms_m": 2.5325500123002422,
+   "ratio_empirical_over_predicted": 1.0015675647024946,
+   "within_1x_predicted": 0.63005,
+   "within_2x_predicted": 0.98025,
+   "predicted_median_m": 2.5270612137544477,
+   "empirical_p95_m": 4.357185069022586
+  },
+  {
+   "altitude_m": 20,
+   "gsd_cm_per_px": 1.885120521083308,
+   "empirical_rms_m": 2.6197683543295316,
+   "predicted_rms_m": 2.6270241334159543,
+   "ratio_empirical_over_predicted": 0.9972380234371931,
+   "within_1x_predicted": 0.63255,
+   "within_2x_predicted": 0.98345,
+   "predicted_median_m": 2.606232536135787,
+   "empirical_p95_m": 4.520432994865913
+  },
+  {
+   "altitude_m": 30,
+   "gsd_cm_per_px": 2.827680781624962,
+   "empirical_rms_m": 2.7836632111992965,
+   "predicted_rms_m": 2.7780970440310355,
+   "ratio_empirical_over_predicted": 1.0020035898962638,
+   "within_1x_predicted": 0.63615,
+   "within_2x_predicted": 0.9803,
+   "predicted_median_m": 2.7332744497655383,
+   "empirical_p95_m": 4.851338726148622
+  }
+ ],
+ "rtk_like": {
+  "altitude_m": 10,
+  "gps_error_m": 0.02,
+  "empirical_rms_m": 0.40630992094363094,
+  "predicted_rms_m": 0.4044029875993227,
+  "within_1x_predicted": 0.6532,
+  "within_2x_predicted": 0.9707
+ },
+ "reference_circular_gaussian": {
+  "within_1x_rms": 0.632,
+  "within_2x_rms": 0.982
+ }
+}

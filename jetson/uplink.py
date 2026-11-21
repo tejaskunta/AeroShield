@@ -94,6 +94,7 @@ class BackendUplink(object):
         backoff_base_s: float = 0.5,
         send_images: bool = True,
         verify_tls: bool = True,
+        replay_interval_s: float = 10.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -103,6 +104,9 @@ class BackendUplink(object):
         self.backoff_base_s = backoff_base_s
         self.send_images = send_images
         self.verify_tls = verify_tls
+        # The worker re-sends the spool on its own once the link is back: right after
+        # a successful send, and otherwise at most every replay_interval_s while idle.
+        self.replay_interval_s = replay_interval_s
 
         self.stats = UplinkStats()
 
@@ -110,9 +114,15 @@ class BackendUplink(object):
         self._thread = None      # type: Optional[threading.Thread]
         self._stop = threading.Event()
         self._session = None
+        self._inflight = None    # (record, image) the worker is sending right now
+        self._replay_lock = threading.Lock()
+        self._last_replay = 0.0
 
         if not os.path.isdir(self.spool_dir):
             os.makedirs(self.spool_dir)
+        # True while the spool may hold records (cheaper than listing the folder
+        # after every send; a long outage can leave thousands of files).
+        self._spool_dirty = self.pending_spool_count() > 0
 
     # -- lifecycle ---------------------------------------------------------
     def _requests(self):
@@ -147,6 +157,14 @@ class BackendUplink(object):
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
+
+        # A single send can outlast the join (retries x timeout). The worker is a
+        # daemon, so if the process exits now that record would be neither sent nor
+        # spooled. Spool it: if the send does land, the replay is a no-op on the
+        # backend because client_detection_id is idempotent.
+        inflight = self._inflight
+        if inflight is not None and self._thread is not None and self._thread.is_alive():
+            self._spool(inflight[0], inflight[1])
 
         # Whatever is left never reached the server - put it on disk.
         while True:
@@ -239,18 +257,31 @@ class BackendUplink(object):
         """
         if self._session is None:
             self.start()
+        # One replay at a time (the caller's and the worker's), so a file is never
+        # sent and unlinked by two threads at once.
+        with self._replay_lock:
+            return self._replay_spool_locked(limit)
 
+    def _replay_spool_locked(self, limit: int) -> int:
+        self._last_replay = time.time()
+        self._spool_dirty = False          # _spool() sets it again for new arrivals
         names = sorted(n for n in os.listdir(self.spool_dir) if n.endswith(".json"))
-        if limit > 0:
+        if limit > 0 and len(names) > limit:
             names = names[:limit]
+            self._spool_dirty = True
         if not names:
             return 0
 
         print("[uplink] replaying {0} spooled record(s)".format(len(names)))
         ok = 0
         for name in names:
+            if self._stop.is_set() and threading.current_thread() is self._thread:
+                self._spool_dirty = True
+                break               # shutting down; close() keeps the rest on disk
             json_path = os.path.join(self.spool_dir, name)
             image_path = json_path[:-5] + ".jpg"
+            if not os.path.exists(json_path):
+                continue
 
             try:
                 with open(json_path, "r") as fh:
@@ -282,6 +313,7 @@ class BackendUplink(object):
                 self._quarantine(image_path)
             else:
                 # Transient - leave it spooled and stop; the link is still down.
+                self._spool_dirty = True
                 break
 
         return ok
@@ -298,11 +330,39 @@ class BackendUplink(object):
             try:
                 record, image, gradcam = self._queue.get(timeout=0.25)
             except queue.Empty:
+                # Idle: if records are waiting on disk, try them now and then -
+                # the link may have come back while nothing new was detected.
+                if (self._spool_dirty
+                        and time.time() - self._last_replay >= self.replay_interval_s):
+                    self._try_replay()
                 continue
 
-            sent, fatal = self._send(record, image, gradcam)
-            if not sent and not fatal:
-                self._spool(record, image)
+            self._inflight = (record, image)
+            try:
+                sent, fatal = self._send(record, image, gradcam)
+                if sent:
+                    # The link works: drain anything spooled during the outage now,
+                    # not at the next startup.
+                    if self._spool_dirty:
+                        self._try_replay()
+                elif fatal:
+                    # The server refused it (expired key, unknown mission, ...). That
+                    # needs a human, but the detection must not vanish: keep it in
+                    # spool/rejected/ next to the replay quarantine.
+                    self._spool(record, image, rejected=True)
+                else:
+                    self._spool(record, image)
+            finally:
+                self._inflight = None
+
+    def _try_replay(self) -> None:
+        if self._replay_lock.acquire(False):     # skip if a replay is already running
+            try:
+                self._replay_spool_locked(0)
+            except Exception as exc:             # noqa: BLE001 - never kill the worker
+                print("[uplink] background replay failed: {0}".format(exc), file=sys.stderr)
+            finally:
+                self._replay_lock.release()
 
     def _send(self, record: Dict, image: Optional[bytes],
               gradcam: Optional[bytes] = None) -> Tuple[bool, bool]:
@@ -410,27 +470,35 @@ class BackendUplink(object):
             print("[uplink] gradcam upload for detection {0} failed: {1}"
                   .format(detection_id, exc), file=sys.stderr)
 
-    def _spool(self, record: Dict, image: Optional[bytes]) -> None:
-        """Persist a record we could not send. Named by its idempotency key."""
+    def _spool(self, record: Dict, image: Optional[bytes], rejected: bool = False) -> None:
+        """Persist a record we could not send. Named by its idempotency key.
+
+        rejected=True writes to spool/rejected/ (server said no; not retried).
+        """
         cid = record.get("client_detection_id") or new_client_id()
         record["client_detection_id"] = cid
-        base = os.path.join(self.spool_dir, cid)
+        folder = os.path.join(self.spool_dir, "rejected") if rejected else self.spool_dir
+        base = os.path.join(folder, cid)
 
         try:
+            if not os.path.isdir(folder):
+                os.makedirs(folder)
             # Write to a temp name then rename: a power cut mid-write must not
             # leave a truncated JSON file that replay will quarantine.
             tmp = base + ".json.tmp"
             with open(tmp, "w") as fh:
                 json.dump(record, fh)
-            os.rename(tmp, base + ".json")
+            os.replace(tmp, base + ".json")   # replace: the same id may be spooled twice
 
             if image:
                 tmp_img = base + ".jpg.tmp"
                 with open(tmp_img, "wb") as fh:
                     fh.write(image)
-                os.rename(tmp_img, base + ".jpg")
+                os.replace(tmp_img, base + ".jpg")
 
             self.stats.spooled += 1
+            if not rejected:
+                self._spool_dirty = True
         except Exception as exc:            # noqa: BLE001
             print("[uplink] SPOOL FAILED for {0}: {1} - this detection is lost"
                   .format(cid, exc), file=sys.stderr)

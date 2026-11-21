@@ -1,0 +1,64 @@
+{
+ "script": "scripts/latency_host.py",
+ "kind": "host CPU (laptop), ONNX Runtime; not a device run",
+ "cpu_threads": 4,
+ "onnxruntime": "1.28.0",
+ "frame": "Jan_Jan_Afternoon_0_lwir_1.jpg",
+ "frame_size": [
+  640,
+  512
+ ],
+ "detector_forward": {
+  "640x640": {
+   "median_ms": 60.04704999941168,
+   "p25_ms": 59.13137499919685,
+   "p75_ms": 60.960000002523884,
+   "reps": 200
+  },
+  "512x288": {
+   "median_ms": 22.358250000252156,
+   "p25_ms": 21.819874998982414,
+   "p75_ms": 22.965225001826184,
+   "reps": 200
+  }
+ },
+ "onboard_detector_class_640": {
+  "median_ms": 50.732149997202214,
+  "p25_ms": 50.046125001244945,
+  "p75_ms": 51.78307499954826,
+  "reps": 50
+ },
+ "onboard_detector_class_note": "OnnxDetector (OpenCV DNN backend) incl. pre-processing and NMS",
+ "crop_extraction_2_boxes": {
+  "median_ms": 0.09145000149146654,
+  "p25_ms": 0.08769999840296805,
+  "p75_ms": 0.0957000011112541,
+  "reps": 200
+ },
+ "verifier_forward": {
+  "batch_1": {
+   "median_ms": 1.9896999983757269,
+   "p25_ms": 1.928474999658647,
+   "p75_ms": 2.0473749973461963,
+   "reps": 200
+  },
+  "batch_2": {
+   "median_ms": 3.4628999965207186,
+   "p25_ms": 3.355950004333863,
+   "p75_ms": 3.6170249986753333,
+   "reps": 200
+  },
+  "batch_4": {
+   "median_ms": 6.209600003785454,
+   "p25_ms": 6.080325001676101,
+   "p75_ms": 6.3743249975232175,
+   "reps": 200
+  }
+ },
+ "verifier_added_ms_per_frame": {
+  "crops_per_frame": 1.6825396825396826,
+  "ms": 3.086667458918537,
+  "share_of_detector_640": 0.05140414822957629,
+  "note": "upper bound: frames with no borderline box skip the verifier"
+ }
+}
