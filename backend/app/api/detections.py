@@ -568,16 +568,23 @@ async def get_gradcam(
     return FileResponse(path, media_type=media_type)
 
 
+# Production: deleting evidence needs the admin scope. Development (the local
+# dashboard on a laptop): the dashboard's detections:read key may delete too, so
+# false-positive triage works from the UI without handling an admin key. The drone's
+# ingest key holds neither scope, so it still cannot delete in either environment.
+DELETE_SCOPE = SCOPE_ADMIN if settings.is_production else SCOPE_DETECTIONS_READ
+
+
 @router.delete("/{detection_id}", response_model=Message, summary="Delete a detection")
 async def delete_detection(
     detection_id: int,
     db: AsyncSession = Depends(get_db),
-    _: Principal = Depends(require_scope(SCOPE_ADMIN)),
+    _: Principal = Depends(require_scope(DELETE_SCOPE)),
 ) -> Message:
     """Remove a detection and its frame - false-positive triage.
 
-    Admin-scoped. Deleting evidence from a safety system should require the highest
-    privilege in the system, and the drone's ingest key deliberately cannot do it.
+    Admin-scoped in production (see DELETE_SCOPE); in development the read-scoped
+    dashboard key may delete as well. The drone's ingest key cannot do it anywhere.
     """
     detection = await detection_repository.get(db, detection_id)
     if detection is None:

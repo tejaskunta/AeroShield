@@ -52,7 +52,7 @@ from beacon import TelemetryBeacon, frame_from_fix
 from detector import make_detector
 from geo import METRES_PER_DEG_LAT, CameraModel, bbox_to_latlon
 from gps import make_provider
-from stream import FrameBroadcaster, start_server
+from stream import CaptureSwitch, FrameBroadcaster, start_server
 from uplink import BackendUplink, new_client_id
 
 DEFAULT_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
@@ -262,6 +262,16 @@ def parse_args() -> argparse.Namespace:
                           "instant, which never applies back-pressure; set it to the "
                           "real engine latency (~0.17 rect, ~0.69 for 640) to exercise "
                           "the decoupled pipeline on the CPU with no GPU and no model")
+    det.add_argument("--verifier", default=None,
+                     help="Stage-2 crop verifier (two-stage detect-then-verify): verifier.onnx "
+                          "on a PC, a TensorRT .engine built on the Nano. Stage 1 then runs at "
+                          "--conf (= c0) and borderline boxes are vetoed by the classifier")
+    det.add_argument("--verifier-backend", default=None, choices=["onnx", "trt", "mock"],
+                     help="Default: trt for .engine, onnx otherwise")
+    det.add_argument("--protect", type=float, default=None,
+                     help="Boxes at/above this confidence bypass the verifier (chosen on val; 0.4)")
+    det.add_argument("--tau", type=float, default=None,
+                     help="Verifier probability needed to keep a borderline box (chosen on val)")
     det.add_argument("--gradcam", action="store_true",
                      help="Attach Grad-CAM explainability overlays to detections. "
                           "Laptop + --detector ultralytics + pytorch-grad-cam only; "
@@ -358,6 +368,23 @@ def parse_args() -> argparse.Namespace:
                           "metres, so a fixed object is recorded once rather than once "
                           "per frame it appears in. 0 disables (default 1.5)")
     out.add_argument("--quiet", action="store_true", help="Only print detections and the summary")
+    out.add_argument("--capture", choices=["on", "off"], default="on",
+                     help="Start with recording on or off. Off still streams and draws "
+                          "boxes but logs/uploads nothing until the dashboard's Start "
+                          "capture button (POST /capture on --stream-port) turns it on. "
+                          "Default on, so a flight never silently records nothing")
+    out.add_argument("--record-interval", type=float, default=0.0,
+                     help="While capturing, record detections from at most one frame "
+                          "every N seconds, and skip spatial de-duplication. For a "
+                          "camera that does not move (a laptop webcam, a hover), where "
+                          "de-duplication would keep only the first sighting. "
+                          "0 = off: spatial de-duplication as usual (default)")
+    out.add_argument("--capture-frames-dir", default=None,
+                     help="While capturing, save clean frames from the stream here, "
+                          "one sub-folder per capture session, whether or not "
+                          "anything was detected")
+    out.add_argument("--capture-frame-interval", type=float, default=0.5,
+                     help="Seconds between frames saved by --capture-frames-dir")
 
     return p.parse_args()
 
@@ -432,6 +459,8 @@ def main() -> int:
             engine=args.engine, weights=args.weights, device=args.device,
             imgsz=args.imgsz, conf=args.conf, iou=args.iou, names=args.names,
             every_n=args.mock_every_n, delay_s=args.mock_delay,
+            verifier=args.verifier, verifier_backend=args.verifier_backend,
+            protect=args.protect, tau=args.tau,
         )
     except (RuntimeError, ValueError) as exc:
         print("ERROR: {0}".format(exc), file=sys.stderr)
@@ -512,12 +541,19 @@ def main() -> int:
     # indexed because a single run has on the order of tens of distinct objects,
     # not thousands, and a distance comparison is a handful of arithmetic ops.
     seen_objects = []
+    # Record switch, driven from the dashboard through the stream server.
+    capture = CaptureSwitch(on=(args.capture == "on"))
+    capture_session = [capture.session()]
+    # Wall-clock time of the last recorded detection frame / last saved capture frame.
+    last_record_t = [0.0]
+    last_frame_t = [0.0]
+    frames_saved = [0]
     beacon = None
     broadcaster = None
     stream_server = None
     if args.stream_port:
         broadcaster = FrameBroadcaster()
-        stream_server = start_server(args.stream_port, broadcaster)
+        stream_server = start_server(args.stream_port, broadcaster, capture)
         print("[stream] http://<jetson-ip>:{0}/".format(args.stream_port))
     geotagged_total = 0
     fps_ema = 0.0
@@ -553,7 +589,40 @@ def main() -> int:
         fix = gps.get_fix()
 
         t_enc = time.time()
-        if dets:
+        # Capture off: the boxes are still drawn on the stream by the caller, but
+        # nothing is logged or uploaded. A new capture session forgets the objects
+        # recorded in the previous one, so they can be recorded again.
+        if capture.session() != capture_session[0]:
+            capture_session[0] = capture.session()
+            del seen_objects[:]
+            last_record_t[0] = 0.0
+        capturing = capture.is_on()
+
+        # Raw frames for later review: every --capture-frame-interval while capturing,
+        # detection or not. The CLEAN frame - this runs before any HUD is drawn.
+        now = time.time()
+        if capturing and args.capture_frames_dir and                 now - last_frame_t[0] >= args.capture_frame_interval:
+            last_frame_t[0] = now
+            folder = os.path.join(args.capture_frames_dir,
+                                  "session-{0:03d}".format(capture_session[0]))
+            if not os.path.isdir(folder):
+                os.makedirs(folder)
+            name = "{0}_{1}det.jpg".format(
+                time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) +
+                "-{0:03d}".format(int((now % 1) * 1000)), len(dets))
+            if cv2.imwrite(os.path.join(folder, name), frame):
+                frames_saved[0] += 1
+
+        # Time-throttled recording: one recorded frame per --record-interval while
+        # something is in view, instead of one row per object per session.
+        throttled = args.record_interval > 0
+        if dets and capturing and throttled:
+            if now - last_record_t[0] < args.record_interval:
+                capturing = False
+            else:
+                last_record_t[0] = now
+
+        if dets and capturing:
             # Encode the CLEAN frame now, before the HUD goes on.
             image_bytes = None
             if uplink is not None and not args.no_images:
@@ -605,7 +674,7 @@ def main() -> int:
                 # Only applies to geotagged boxes: without coordinates there is
                 # no notion of "the same place", so an ungeotagged detection is
                 # always kept rather than silently discarded.
-                if args.dedupe_radius_m > 0 and pos is not None:
+                if args.dedupe_radius_m > 0 and pos is not None and not throttled:
                     repeat = False
                     for (seen_lat, seen_lon, seen_class) in seen_objects:
                         if seen_class != d.class_name:
@@ -629,6 +698,8 @@ def main() -> int:
                     "class_name": d.class_name,
                     "class_id": d.class_id,
                     "confidence": round(float(d.confidence), 4),
+                    # stage-2 verifier probability; None without a verifier or for protected boxes
+                    "cls_p": None if d.cls_p is None else round(float(d.cls_p), 4),
                     "bbox_x1": d.x1, "bbox_y1": d.y1, "bbox_x2": d.x2, "bbox_y2": d.y2,
                     "frame_width": frame_w, "frame_height": frame_h,
                     "inference_ms": round(inference_s * 1000.0, 1),
@@ -773,7 +844,7 @@ def main() -> int:
                 shown = frame.copy()
                 gps_text = "no fix" if fix is None else "{0:.6f},{1:.6f} fix{2} sats{3}".format(
                     fix.lat, fix.lon, fix.fix_type, fix.satellites)
-                up_text = "off" if uplink is None else str(uplink.stats)
+                up_text = ("off" if uplink is None else str(uplink.stats)) +                     ("   REC" if capture.is_on() else "   capture OFF")
                 draw_hud(shown, boxes, fps, gps_text, up_text)
 
                 if broadcaster is not None:
@@ -884,7 +955,7 @@ def main() -> int:
                 shown = frame.copy()
                 gps_text = "no fix" if fix is None else "{0:.6f},{1:.6f} fix{2} sats{3}".format(
                     fix.lat, fix.lon, fix.fix_type, fix.satellites)
-                up_text = "off" if uplink is None else str(uplink.stats)
+                up_text = ("off" if uplink is None else str(uplink.stats)) +                     ("   REC" if capture.is_on() else "   capture OFF")
                 draw_hud(shown, active_display_dets, fps_ema, gps_text, up_text)
 
                 if broadcaster is not None:
@@ -975,6 +1046,9 @@ def main() -> int:
         # thing all run.
         print("  suppressed (dedupe): {0}  ({1} object(s) recorded)".format(
             suppressed_total, len(seen_objects)))
+    if args.capture_frames_dir:
+        print("  capture frames     : {0} saved under {1}".format(
+            frames_saved[0], args.capture_frames_dir))
     print("  geotagged          : {0}{1}".format(
         geotagged_total,
         "" if detections_total == 0 else "  ({0:.0f}%)".format(

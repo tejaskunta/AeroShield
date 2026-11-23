@@ -189,39 +189,76 @@ function Get-SweepInterfaces {
     foreach ($cfg in $gw) {
         foreach ($a in @($cfg.IPv4Address)) {
             if ($a.IPAddress -like '169.254.*' -or $a.IPAddress -like '127.*') { continue }
-            [pscustomobject]@{ IPAddress = $a.IPAddress; Alias = $cfg.InterfaceAlias }
+            [pscustomobject]@{ IPAddress = $a.IPAddress; Prefix = [int]$a.PrefixLength; Alias = $cfg.InterfaceAlias }
         }
     }
 }
 
+function ConvertTo-IpInt([string]$ip) {
+    $b = ([System.Net.IPAddress]::Parse($ip)).GetAddressBytes()
+    return ([uint32]$b[0] -shl 24) -bor ([uint32]$b[1] -shl 16) -bor ([uint32]$b[2] -shl 8) -bor [uint32]$b[3]
+}
+function ConvertFrom-IpInt([uint32]$n) {
+    return '{0}.{1}.{2}.{3}' -f (($n -shr 24) -band 255), (($n -shr 16) -band 255), (($n -shr 8) -band 255), ($n -band 255)
+}
+
+# Read the SSH banner (e.g. "SSH-2.0-OpenSSH_7.6p1 Ubuntu-4ubuntu0.7"); '' on failure.
+function Get-SshBanner([string]$ip, [int]$TimeoutMs = 800) {
+    try {
+        $t = New-Object System.Net.Sockets.TcpClient
+        $task = $t.ConnectAsync($ip, 22)
+        if (-not $task.Wait($TimeoutMs)) { $t.Dispose(); return '' }
+        $st = $t.GetStream(); $st.ReadTimeout = $TimeoutMs
+        $buf = New-Object byte[] 96
+        $n = $st.Read($buf, 0, 96)
+        $t.Dispose()
+        return ([System.Text.Encoding]::ASCII.GetString($buf, 0, $n)).Trim()
+    } catch { return '' }
+}
+
 function Find-OpenSsh {
     param([int]$TimeoutMs = 1200)
+    # The interface's REAL subnet, not just its /24: campus WiFi here is a /21
+    # (2,048 addresses), and a drone that took a lease outside the laptop's own /24
+    # was invisible to the old sweep. Capped at /21; connects in batches of 256 with
+    # a shared deadline each, so a /21 takes ~8 batches.
     $hits = @()
     foreach ($iface in @(Get-SweepInterfaces)) {
-        $parts = $iface.IPAddress -split '\.'
-        if ($parts.Count -ne 4) { continue }
-        $prefix = ($parts[0..2] -join '.')
-        $pending = @()
-        foreach ($n in 1..254) {
-            $ip = "$prefix.$n"
-            if ($ip -eq $iface.IPAddress) { continue }
-            $c = New-Object System.Net.Sockets.TcpClient
-            try { $pending += [pscustomobject]@{ Ip = $ip; Client = $c; Task = $c.ConnectAsync($ip, 22) } }
-            catch { $c.Dispose() }
-        }
-        $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
-        foreach ($p in $pending) {
-            $left = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
-            try {
-                if ($p.Task.Wait($left) -and $p.Client.Connected) {
-                    $hits += [pscustomobject]@{ Ip = $p.Ip; Via = $iface.Alias }
-                }
+        $prefix = [Math]::Max(21, [Math]::Min(30, $iface.Prefix))
+        # Arithmetic, not 0xFFFFFFFF: PowerShell reads that literal as a signed -1.
+        $mask = [uint32]([Math]::Pow(2, 32) - [Math]::Pow(2, 32 - $prefix))
+        $self = ConvertTo-IpInt $iface.IPAddress
+        $net = $self -band $mask
+        $count = [uint32]([Math]::Pow(2, 32 - $prefix))
+        $all = for ($k = [uint32]1; $k -lt $count - 1; $k++) { $net + $k }
+        for ($b = 0; $b -lt $all.Count; $b += 256) {
+            $pending = @()
+            foreach ($n in $all[$b..([Math]::Min($all.Count, $b + 256) - 1)]) {
+                if ($n -eq $self) { continue }
+                $ip = ConvertFrom-IpInt $n
+                $c = New-Object System.Net.Sockets.TcpClient
+                try { $pending += [pscustomobject]@{ Ip = $ip; Client = $c; Task = $c.ConnectAsync($ip, 22) } }
+                catch { $c.Dispose() }
             }
-            catch { }
+            $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+            foreach ($p in $pending) {
+                $left = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+                try { if ($p.Task.Wait($left) -and $p.Client.Connected) { $hits += [pscustomobject]@{ Ip = $p.Ip; Via = $iface.Alias } } }
+                catch { }
+            }
+            foreach ($p in $pending) { $p.Client.Dispose() }
         }
-        foreach ($p in $pending) { $p.Client.Dispose() }
     }
-    return $hits
+    # Rank: the drone's known address, then hosts whose banner matches the Jetson's
+    # Ubuntu 18.04 OpenSSH 7.6, then the rest. A campus network has many sshd hosts,
+    # and testing the key against each in turn would take minutes.
+    $known = @('10.11.101.241', '10.11.102.1')
+    $ranked = foreach ($h in $hits) {
+        $banner = Get-SshBanner $h.Ip
+        $score = if ($known -contains $h.Ip) { 0 } elseif ($banner -match 'OpenSSH_7\.6p1 Ubuntu') { 1 } elseif ($banner -match 'Ubuntu') { 2 } else { 3 }
+        [pscustomobject]@{ Ip = $h.Ip; Via = $h.Via; Banner = $banner; Score = $score }
+    }
+    return @($ranked | Sort-Object Score)
 }
 
 # ---------------------------------------------------------------------------
@@ -285,10 +322,11 @@ function Resolve-Jetson {
         }
     }
 
-    Say 'aliases did not answer; sweeping the WiFi subnet for :22'
+    Say 'aliases did not answer; sweeping the WiFi subnet (up to /21) for :22'
     $hits = @(Find-OpenSsh)
     if (-not $hits) { Say 'nothing on the local subnet answers on :22'; return $null }
-    foreach ($h in $hits) {
+    Say ("{0} host(s) answer on :22; trying the likeliest first" -f $hits.Count)
+    foreach ($h in ($hits | Select-Object -First 15)) {
         $t = New-JetsonTarget -Ip $h.Ip
         if ((Test-JetsonTarget $t -ConnectTimeout 5 -Probe).Ok) {
             Say "found at $($h.Ip) via $($h.Via)"

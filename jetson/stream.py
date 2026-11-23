@@ -2,8 +2,13 @@
 
 Serves / (a page with an <img>) and /stream (multipart JPEG). Latest-frame only:
 a slow viewer drops frames instead of building a queue on the Nano.
+
+Also serves /capture, the record switch the dashboard drives (see CaptureSwitch):
+    GET  /capture                      -> {"capturing": true, "session": 3}
+    POST /capture  {"capturing": false} -> same shape, after the change
 """
 
+import json
 import socketserver
 import threading
 import time
@@ -63,10 +68,71 @@ class FrameBroadcaster(object):
             return self._seq, self._jpeg
 
 
-def make_handler(broadcaster):
+class CaptureSwitch(object):
+    """Whether detections are RECORDED (logged + uploaded) or only displayed.
+
+    Off: the stream still shows live boxes, but no row is written anywhere, so an
+    operator can aim the camera without filling the mission with junk. Each off->on
+    transition starts a new capture session; the detector uses `session` to reset
+    its de-duplication memory, so an object recorded in an earlier session can be
+    recorded again.
+    """
+
+    def __init__(self, on=True):
+        self._lock = threading.Lock()
+        self._on = bool(on)
+        self._session = 1 if on else 0
+
+    def is_on(self):
+        with self._lock:
+            return self._on
+
+    def session(self):
+        with self._lock:
+            return self._session
+
+    def set(self, on):
+        with self._lock:
+            on = bool(on)
+            if on and not self._on:
+                self._session += 1
+            self._on = on
+
+    def state(self):
+        with self._lock:
+            return {"capturing": self._on, "session": self._session}
+
+
+def make_handler(broadcaster, capture=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
+
+        def _send_json(self, code, obj):
+            body = json.dumps(obj).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            path = self.path.split("?", 1)[0]
+            if path != "/capture" or capture is None:
+                self.send_error(404)
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                wanted = payload["capturing"]
+                if not isinstance(wanted, bool):
+                    raise ValueError("capturing must be true or false")
+            except (ValueError, KeyError, TypeError) as exc:
+                self._send_json(400, {"detail": "Expected {\"capturing\": true|false}: " + str(exc)})
+                return
+            capture.set(wanted)
+            self._send_json(200, capture.state())
 
         def do_GET(self):
             # Path only — ignore any query string. Browsers append cache-busters
@@ -75,6 +141,12 @@ def make_handler(broadcaster):
             # would answer those with a 404. The query carries nothing the server
             # needs, so the cheapest correct thing is to drop it.
             path = self.path.split("?", 1)[0]
+            if path == "/capture":
+                if capture is None:
+                    self.send_error(404)
+                else:
+                    self._send_json(200, capture.state())
+                return
             if path == "/":
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
@@ -111,9 +183,9 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 
-def start_server(port, broadcaster):
+def start_server(port, broadcaster, capture=None):
     """Run the HTTP server on a daemon thread. Returns the server for shutdown()."""
-    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(broadcaster))
+    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(broadcaster, capture))
     t = threading.Thread(target=server.serve_forever, name="mjpeg-stream")
     t.daemon = True
     t.start()
