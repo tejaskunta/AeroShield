@@ -75,6 +75,12 @@ export class ReviewOverrides {
     this.removed.delete(id)
   }
 
+  /** Forget every decision and deletion — a fresh simulated sortie. */
+  clear(): void {
+    this.map.clear()
+    this.removed.clear()
+  }
+
   /** Whether this session has deleted the row. */
   isRemoved(id: string): boolean {
     return this.removed.has(id)

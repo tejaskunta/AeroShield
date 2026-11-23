@@ -10,6 +10,7 @@ import type {
 import { COPILOT_CORPUS, REPORTS, UNGROUNDED_REPLY } from './mockData'
 import { canPersistReview, toIntId } from './detectionId'
 import { validCoordinate } from './geo'
+import { DEMO_MODE } from './config'
 
 /**
  * The API seam.
@@ -20,7 +21,7 @@ import { validCoordinate } from './geo'
  *   detectUpload    POST /api/detect            (dev-only inference, unchanged)
  *   checkHealth     GET  /health                (unchanged)
  *   saveReview      PATCH /api/detections/{id}/review
- *   deleteDetection DELETE /api/detections/{id}  (needs an admin key)
+ *   deleteDetection DELETE /api/detections/{id}  (dashboard key in development; admin key in production — prompted for once per tab if refused)
  *   askCopilot      POST /api/copilot/query
  *   listReports     GET  /api/reports
  *   generateReport  POST /api/reports
@@ -44,7 +45,8 @@ import { validCoordinate } from './geo'
 
 const BASE = '/api'
 
-const DASHBOARD_KEY = (import.meta.env.VITE_DASHBOARD_KEY ?? '').trim()
+// Demo mode never talks to a backend: with no key every call keeps its fixture path.
+const DASHBOARD_KEY = DEMO_MODE ? '' : (import.meta.env.VITE_DASHBOARD_KEY ?? '').trim()
 
 /** Headers for a call to the backend; no key means no point calling at all. */
 function authHeaders(json = false): Record<string, string> {
@@ -233,26 +235,67 @@ export async function deleteDetection(
   const numericId = DASHBOARD_KEY ? toIntId(id) : null
   if (numericId === null) return { outcome: 'local' }
 
-  try {
-    const r = await fetch(`${BASE}/detections/${numericId}`, {
+  // The baked-in dashboard key is read-only on purpose (it ships in the bundle), so
+  // deletes go out under an admin key the operator types in once per tab. It lives
+  // in sessionStorage only: never in the build, gone when the tab closes.
+  const send = (key: string | null) =>
+    fetch(`${BASE}/detections/${numericId}`, {
       method: 'DELETE',
-      headers: authHeaders(),
+      headers: key ? { 'X-API-Key': key } : authHeaders(),
     })
+
+  try {
+    let key = readAdminKey()
+    let r = await send(key)
+    if (r.status === 401 || r.status === 403) {
+      // No admin key yet, or the stored one was wrong or revoked: ask, then retry once.
+      writeAdminKey(null)
+      key = promptAdminKey(key !== null)
+      if (!key) {
+        return { outcome: 'rejected', message: 'Delete cancelled: it needs an admin key. The row is still there.' }
+      }
+      r = await send(key)
+      if (r.status === 401 || r.status === 403) {
+        return { outcome: 'rejected', message: 'That admin key was refused. The row is still there.' }
+      }
+      writeAdminKey(key)
+    }
     if (r.ok || r.status === 404) {
       // 404 counts as success: the row is not there, which is what was asked for.
       // Treating it as a failure would make a double-click look broken.
       return { outcome: 'persisted' }
     }
-    if (r.status === 401 || r.status === 403) {
-      return {
-        outcome: 'rejected',
-        message: 'Deleting evidence needs an admin key. The dashboard key is read-only.',
-      }
-    }
     return { outcome: 'rejected', message: `The server refused the delete (${r.status}).` }
   } catch {
     return { outcome: 'rejected', message: 'Could not reach the server. The row is still there.' }
   }
+}
+
+const ADMIN_KEY_STORAGE = 'aeroshield:admin-key'
+
+function readAdminKey(): string | null {
+  try {
+    return window.sessionStorage.getItem(ADMIN_KEY_STORAGE)
+  } catch {
+    return null
+  }
+}
+
+function writeAdminKey(key: string | null): void {
+  try {
+    if (key) window.sessionStorage.setItem(ADMIN_KEY_STORAGE, key)
+    else window.sessionStorage.removeItem(ADMIN_KEY_STORAGE)
+  } catch {
+    /* storage blocked: the key just is not remembered */
+  }
+}
+
+function promptAdminKey(retry: boolean): string | null {
+  const msg = retry
+    ? 'The saved admin key was refused. Enter an admin API key to delete detections:'
+    : 'Deleting detections needs an admin API key (the dashboard key is read-only). It is remembered for this tab only.'
+  const v = window.prompt(msg)?.trim()
+  return v ? v : null
 }
 
 // ---------------------------------------------------------------------------

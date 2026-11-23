@@ -43,21 +43,26 @@ interface Seed {
 }
 
 const SEEDS: Seed[] = [
-  { col: 1, row: 0, confidence: 0.94, reviewed: 'confirmed', atS: 4 },
-  { col: 2, row: 1, confidence: 0.88, atS: 7 },
-  { col: 1, row: 1, confidence: 0.66, atS: 11 },
-  { col: 3, row: 1, confidence: 0.71, atS: 15 },
-  { col: 4, row: 2, confidence: 0.83, reviewed: 'confirmed', atS: 19 },
-  { col: 5, row: 2, confidence: 0.52, atS: 23 },
-  { col: 6, row: 2, confidence: 0.41, reviewed: 'dismissed', reason: 'Scrap metal, not ordnance', atS: 28 },
-  { col: 5, row: 3, confidence: 0.79, atS: 34 },
-  { col: 4, row: 3, confidence: 0.34, atS: 41 },
-  { col: 3, row: 3, confidence: 0.91, reviewed: 'flagged', reason: 'Possible cluster, request second pass', atS: 48 },
-  // --- these four arrive live, after load ---
-  { col: 2, row: 4, confidence: 0.68, atS: 74 },
-  { col: 6, row: 4, confidence: 0.86, atS: 79 },
-  { col: 5, row: 5, confidence: 0.28, atS: 84 },
-  { col: 3, row: 5, confidence: 0.77, atS: 89 },
+  // South lanes: a confident find and a weak return beside it.
+  { col: 1, row: 0, confidence: 0.94, atS: 4 },
+  { col: 6, row: 1, confidence: 0.36, atS: 7 },
+  { col: 2, row: 1, confidence: 0.88, atS: 11 },
+  // The C3/C4/D4 cluster.
+  { col: 8, row: 2, confidence: 0.71, atS: 15 },
+  { col: 4, row: 2, confidence: 0.83, atS: 19 },
+  { col: 2, row: 3, confidence: 0.91, atS: 23 },
+  { col: 3, row: 3, confidence: 0.79, atS: 28 },
+  // Mid block.
+  { col: 7, row: 4, confidence: 0.52, atS: 34 },
+  { col: 5, row: 5, confidence: 0.28, atS: 41 },
+  { col: 1, row: 5, confidence: 0.86, atS: 48 },
+  { col: 8, row: 6, confidence: 0.68, atS: 54 },
+  // North lanes.
+  { col: 4, row: 7, confidence: 0.77, atS: 60 },
+  { col: 6, row: 7, confidence: 0.45, atS: 66 },
+  { col: 2, row: 8, confidence: 0.81, atS: 74 },
+  { col: 7, row: 9, confidence: 0.33, atS: 79 },
+  { col: 5, row: 9, confidence: 0.89, atS: 84 },
 ]
 
 /**

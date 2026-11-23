@@ -7,6 +7,9 @@ import { countByReview } from '@/hooks/useDetections'
 import { ReportList, ExportBar } from '@/components/reports/ReportList'
 import { ReportPreview } from '@/components/reports/ReportPreview'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { DEMO_MODE } from '@/lib/config'
+import { formatDuration } from '@/lib/geo'
+import { riskOf } from '@/lib/risk'
 
 /**
  * Mission Reports — the document view.
@@ -59,9 +62,36 @@ export function MissionReports() {
     const effective = register.length > 0 ? register : detections
     const tallies = countByReview(effective)
 
+    // The live sortie's report writes itself from what was flown and decided.
+    const sim = mission?.sim
+    const live = DEMO_MODE && selected.missionId === MISSION.id && sim
+    const remaining = tallies.unreviewed + tallies.flagged
+    const hazards = effective.filter((d) => riskOf(d) === 'hazard').length
+    const n = effective.length
+    const liveFields: Partial<MissionReport> =
+      live && sim
+        ? {
+            status: sim.phase === 'complete' && remaining === 0 && n > 0 ? 'final' : 'draft',
+            generatedAt: sim.landedAt ?? new Date().toISOString(),
+            generatedBy: MISSION.operator,
+            summary:
+              sim.phase === 'standby'
+                ? 'No sortie flown yet. Launch the mission from Mission Control to populate this report.'
+                : [
+                    `${sim.phase === 'complete' ? 'Survey' : 'Interim report: survey in progress'} of the 10 × 10 m block at ${MISSION.site}.`,
+                    `${formatDuration(mission?.progress?.elapsedS ?? 0)} flown, ${mission?.progress?.coveragePct ?? 0}% of the block imaged from the air.`,
+                    `${n} detection${n === 1 ? '' : 's'} logged, ${hazards} rated hazard.`,
+                    `${tallies.confirmed} confirmed and ${tallies.dismissed} dismissed by the operator${tallies.flagged ? `, ${tallies.flagged} flagged for a second pass` : ''};`,
+                    remaining === 0 ? 'every detection has a decision.' : `${remaining} still await review.`,
+                    'All positions are pending ground verification. None released.',
+                  ].join(' '),
+          }
+        : {}
+
     return {
       report: {
         ...selected,
+        ...liveFields,
         coveragePct: mission?.progress?.coveragePct ?? selected.coveragePct,
         areaSurveyedM2: mission?.progress?.areaSurveyedM2 ?? selected.areaSurveyedM2,
         flightTimeS: Math.round(mission?.progress?.elapsedS ?? selected.flightTimeS),

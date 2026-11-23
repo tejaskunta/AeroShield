@@ -103,6 +103,55 @@
     @apply rounded-lg shadow-glass;
   }
 
+  /* Mission status cards. Columns follow the strip's own width, not the viewport:
+     the strip lives in the map pane, which a docked camera column narrows to about
+     half the window, so a viewport breakpoint gave three ~220px cards whose numbers
+     ran past their edges. One column below 600px, Mission + Aircraft side by side
+     with Detections underneath below 960px, all three in a row above that. */
+  .status-wrap {
+    container-type: inline-size;
+  }
+  .status-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  @container (min-width: 600px) {
+    .status-grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    }
+    .status-grid > :nth-child(3) {
+      grid-column: 1 / -1;
+    }
+  }
+  @container (min-width: 960px) {
+    .status-grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1.15fr);
+    }
+    .status-grid > :nth-child(3) {
+      grid-column: auto;
+    }
+  }
+  /* Detections spanning the strip's full width: counts beside the latest list
+     rather than above it, so the strip stays short enough to leave map visible. */
+  .det-card {
+    container-type: inline-size;
+  }
+  .det-list {
+    margin-top: 0.75rem;
+  }
+  @container (min-width: 560px) {
+    .det-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    .det-body > .det-list {
+      margin-top: 0;
+    }
+  }
+
   /* Solid card, for screens without imagery behind them. */
   .card {
     @apply rounded-lg border border-white/[0.06] bg-ink-raised;

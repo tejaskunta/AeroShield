@@ -40,7 +40,7 @@ export function StatusStrip({
   const [open, setOpen] = useState(true)
 
   return (
-    <div className="pointer-events-auto flex flex-col items-start gap-2">
+    <div className="status-wrap pointer-events-auto flex flex-col items-start gap-2">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -51,7 +51,7 @@ export function StatusStrip({
         {open ? 'Hide status' : 'Show status'}
       </button>
       {open && (
-        <div className="grid w-full animate-rise-in grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1.15fr)]">
+        <div className="status-grid w-full animate-rise-in">
           <MissionCard progress={progress} />
           <AircraftCard telemetry={telemetry} />
           <DetectionsCard detections={detections} onPick={onPick} />
@@ -61,9 +61,9 @@ export function StatusStrip({
   )
 }
 
-function Card({ title, aside, children }: { title: string; aside?: React.ReactNode; children: React.ReactNode }) {
+function Card({ title, aside, className = '', children }: { title: string; aside?: React.ReactNode; className?: string; children: React.ReactNode }) {
   return (
-    <section className="glass min-w-0 px-4 py-3.5">
+    <section className={`glass min-w-0 px-4 py-3.5 ${className}`}>
       <header className="mb-3 flex items-center justify-between gap-2">
         <h2 className="text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-paper-faint">{title}</h2>
         {aside}
@@ -75,9 +75,11 @@ function Card({ title, aside, children }: { title: string; aside?: React.ReactNo
 
 function Kv({ k, v, unit }: { k: string; v: React.ReactNode; unit?: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-[3px]">
+    // Wraps rather than overflows: in a narrow card the value drops under its label
+    // instead of breaking mid-value ("100 / m²") or running past the card edge.
+    <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 py-[3px]">
       <span className="text-[0.75rem] text-paper-faint">{k}</span>
-      <span className="font-mono text-[0.8125rem] tabular-nums text-paper">
+      <span className="whitespace-nowrap font-mono text-[0.8125rem] tabular-nums text-paper">
         {v}
         {unit && <span className="ml-1 text-[0.6875rem] text-paper-faint">{unit}</span>}
       </span>
@@ -100,7 +102,7 @@ function MissionCard({ progress }: { progress: MissionProgress | null }) {
   const remaining = total - progress.coveredCells.length
   return (
     <Card title="Mission">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <Ring value={progress.coveragePct / 100} label="Block surveyed" size={80} stroke={6}>
           <div>
             <div className="readout text-[1.5rem] leading-none">
@@ -297,45 +299,47 @@ function DetectionsCard({ detections, onPick }: { detections: Detection[]; onPic
     { k: 'cleared', n: counts.cleared },
   ]
   return (
-    <Card title="Detections" aside={<span className="font-mono text-[0.75rem] tabular-nums text-paper-faint">{detections.length} total</span>}>
-      <div className="grid grid-cols-3 gap-2">
-        {rows.map(({ k, n }) => (
-          <div key={k} className="rounded-md bg-white/[0.03] px-2.5 py-2">
-            <div className="flex items-center gap-1.5 text-[0.6875rem] text-paper-faint">
-              <span className={`size-1.5 rounded-full ${RISK_CLASSES[k].bg}`} aria-hidden />
-              {RISK_LABELS[k]}
+    <Card title="Detections" className="det-card" aside={<span className="font-mono text-[0.75rem] tabular-nums text-paper-faint">{detections.length} total</span>}>
+      <div className="det-body">
+        <div className="grid grid-cols-3 gap-2">
+          {rows.map(({ k, n }) => (
+            <div key={k} className="rounded-md bg-white/[0.03] px-2.5 py-2">
+              <div className="flex items-center gap-1.5 text-[0.6875rem] text-paper-faint">
+                <span className={`size-1.5 rounded-full ${RISK_CLASSES[k].bg}`} aria-hidden />
+                {RISK_LABELS[k]}
+              </div>
+              <div className={`readout mt-0.5 text-[1.375rem] leading-none ${n > 0 ? RISK_CLASSES[k].text : 'text-paper-faint'}`}>{n}</div>
             </div>
-            <div className={`readout mt-0.5 text-[1.375rem] leading-none ${n > 0 ? RISK_CLASSES[k].text : 'text-paper-faint'}`}>{n}</div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3">
-        {latest.length === 0 ? (
-          <p className="text-[0.75rem] text-paper-faint">Nothing found yet. Detections appear here as the aircraft flies.</p>
-        ) : (
-          <ul className="flex flex-col gap-1">
-            {latest.map((d) => {
-              const r = riskOf(d)
-              return (
-                <li key={d.id}>
-                  <button
-                    type="button"
-                    onClick={() => onPick(d)}
-                    className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05]"
-                  >
-                    <span className={`size-2 shrink-0 rounded-full ${RISK_CLASSES[r].bg}`} aria-hidden />
-                    <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-paper">
-                      {CLASS_LABELS[d.class]}
-                      <span className="ml-1.5 text-[0.6875rem] text-paper-faint">{d.gridCell}</span>
-                    </span>
-                    <span className={`font-mono text-[0.75rem] tabular-nums ${RISK_CLASSES[r].text}`}>{formatConfidence(d.confidence)}</span>
-                    <span className="font-mono text-[0.6875rem] tabular-nums text-paper-faint">{formatZulu(d.capturedAt).slice(0, 8)}</span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        )}
+          ))}
+        </div>
+        <div className="det-list">
+          {latest.length === 0 ? (
+            <p className="text-[0.75rem] text-paper-faint">Nothing found yet. Detections appear here as the aircraft flies.</p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {latest.map((d) => {
+                const r = riskOf(d)
+                return (
+                  <li key={d.id}>
+                    <button
+                      type="button"
+                      onClick={() => onPick(d)}
+                      className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05]"
+                    >
+                      <span className={`size-2 shrink-0 rounded-full ${RISK_CLASSES[r].bg}`} aria-hidden />
+                      <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-paper">
+                        {CLASS_LABELS[d.class]}
+                        <span className="ml-1.5 text-[0.6875rem] text-paper-faint">{d.gridCell}</span>
+                      </span>
+                      <span className={`font-mono text-[0.75rem] tabular-nums ${RISK_CLASSES[r].text}`}>{formatConfidence(d.confidence)}</span>
+                      <span className="font-mono text-[0.6875rem] tabular-nums text-paper-faint">{formatZulu(d.capturedAt).slice(0, 8)}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
       </div>
       <p className="mt-2 text-[0.6875rem] text-paper-faint">Rings on the map show how far a position could be out.</p>
     </Card>

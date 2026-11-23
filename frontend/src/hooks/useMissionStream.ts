@@ -295,6 +295,7 @@ export function useMissionStream(onDetection?: (d: Detection) => void): MissionS
       // simulator's own status is a constant that would otherwise mask a dead
       // socket forever.
       link: realLink.current ?? b.link,
+      sim: b.sim,
     }
   })
 

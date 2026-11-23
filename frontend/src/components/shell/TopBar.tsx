@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { FlaskConical, Radio, Search } from 'lucide-react'
 import type { Detection, LinkStatus, StreamState, Telemetry } from '@/types'
 import { MISSION } from '@/lib/mockData'
-import { HAS_LIVE_MISSION, MISSION_NAME } from '@/lib/config'
+import { DEMO_MODE, DEMO_MODE_FORCED, HAS_LIVE_MISSION, MISSION_NAME, setDemoMode } from '@/lib/config'
 import { formatZulu } from '@/lib/geo'
 import { countByRisk } from '@/hooks/useDetections'
 import { provenanceOf } from '@/lib/provenance'
@@ -74,6 +74,7 @@ export function TopBar({
           {counts.hazard > 0 && <Tally tone="hazard" n={counts.hazard} label="hazard" />}
           {counts.caution > 0 && <Tally tone="caution" n={counts.caution} label="unverified" />}
         </div>
+        {!DEMO_MODE_FORCED && <ModeSwitch />}
         <StreamIndicator state={streamState} link={link} />
         <ProvenanceMarker flown={flown} detections={detections} />
         <Clock iso={telemetry?.timestamp ?? null} />
@@ -112,6 +113,33 @@ function Tally({ tone, n, label }: { tone: 'hazard' | 'caution'; n: number; labe
       <span className="font-mono tabular-nums">{n}</span>
       {label}
     </span>
+  )
+}
+
+/**
+ * Live / Sim switch. Live follows the backend, aircraft (or laptop webcam) and real
+ * detector; Sim runs the in-browser mission with the Sim panel, Fly to and Move site.
+ */
+function ModeSwitch() {
+  const opt = (on: boolean, label: string, title: string) => {
+    const active = DEMO_MODE === on
+    return (
+      <button
+        type="button"
+        aria-pressed={active}
+        title={title}
+        onClick={() => !active && setDemoMode(on)}
+        className={`rounded-full px-2.5 py-0.5 text-[0.6875rem] font-semibold transition-colors ${active ? 'bg-signal/20 text-signal' : 'text-paper-faint hover:text-paper'}`}
+      >
+        {label}
+      </button>
+    )
+  }
+  return (
+    <div role="group" aria-label="Data source" className="flex shrink-0 items-center rounded-full border border-white/[0.08] p-0.5">
+      {opt(false, 'Live', 'Live: backend, camera feed and real detections')}
+      {opt(true, 'Sim', 'Sim: simulated mission with the Sim panel, Fly to and Move site')}
+    </div>
   )
 }
 

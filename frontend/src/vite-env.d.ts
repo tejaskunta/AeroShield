@@ -24,6 +24,9 @@ interface ImportMetaEnv {
    */
   readonly VITE_DASHBOARD_KEY?: string
 
+  /** `1` runs the fully simulated demonstration (see `DEMO_MODE` in lib/config.ts). */
+  readonly VITE_DEMO_MODE?: string
+
   /**
    * Backend mission to follow for live telemetry, by call-sign. Must match the
    * drone's `--mission-name` (`make run MISSION=...`).

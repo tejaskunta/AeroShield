@@ -27,6 +27,45 @@ import type { LatLng } from '@/types'
 const env = (import.meta.env ?? {}) as ImportMetaEnv
 
 // ---------------------------------------------------------------------------
+// Demo mode
+// ---------------------------------------------------------------------------
+
+/**
+ * Fully simulated demonstration: no backend, no aircraft, no camera.
+ *
+ * On when built with `VITE_DEMO_MODE=1` (`npm run sim`, which loads `.env.demo`),
+ * or when the page is opened with `?demo=1` (remembered for the tab; `?demo=0`
+ * turns it off). In demo mode every live source is switched off at this one
+ * place, so nothing downstream tries to reach a drone that is not there: the
+ * mission simulator flies the whole sortie and a synthetic camera stands in for
+ * the Jetson feed.
+ */
+function resolveDemoMode(): boolean {
+  if (env.VITE_DEMO_MODE === '1' || env.VITE_DEMO_MODE === 'true') return true
+  if (typeof window === 'undefined') return false
+  try {
+    const q = new URLSearchParams(window.location.search).get('demo')
+    if (q === '1' || q === 'true') window.sessionStorage.setItem('aeroshield:demo', '1')
+    if (q === '0' || q === 'false') window.sessionStorage.removeItem('aeroshield:demo')
+    return window.sessionStorage.getItem('aeroshield:demo') === '1'
+  } catch {
+    return false
+  }
+}
+
+export const DEMO_MODE: boolean = resolveDemoMode()
+
+/** True when the build itself forces demo mode (`npm run sim`), so it cannot be switched off at runtime. */
+export const DEMO_MODE_FORCED: boolean = env.VITE_DEMO_MODE === '1' || env.VITE_DEMO_MODE === 'true'
+
+/** Switch between live and simulated mode. Reloads, because every data source is chosen at startup. */
+export function setDemoMode(on: boolean): void {
+  const url = new URL(window.location.href)
+  url.searchParams.set('demo', on ? '1' : '0')
+  window.location.replace(url.toString())
+}
+
+// ---------------------------------------------------------------------------
 // Live telemetry
 // ---------------------------------------------------------------------------
 
@@ -42,7 +81,7 @@ const env = (import.meta.env ?? {}) as ImportMetaEnv
  * position and the simulator stays the only source of telemetry, which is what
  * keeps the zero-config classroom demo working exactly as before.
  */
-export const MISSION_NAME: string = (env.VITE_MISSION_NAME ?? '').trim()
+export const MISSION_NAME: string = DEMO_MODE ? '' : (env.VITE_MISSION_NAME ?? '').trim()
 
 /** True when a mission is named, i.e. live telemetry can be attempted at all. */
 export const HAS_LIVE_MISSION: boolean = MISSION_NAME.length > 0
@@ -166,8 +205,11 @@ export const OSM_ATTRIBUTION =
  */
 const DEFAULT_STREAM_URL = '/jetson/stream'
 const rawStreamUrl = env.VITE_JETSON_STREAM_URL
-export const JETSON_STREAM_URL: string =
-  rawStreamUrl === undefined ? DEFAULT_STREAM_URL : rawStreamUrl.trim()
+export const JETSON_STREAM_URL: string = DEMO_MODE
+  ? ''
+  : rawStreamUrl === undefined
+    ? DEFAULT_STREAM_URL
+    : rawStreamUrl.trim()
 
 /** True when a feed is configured at all. Drives whether the PiP is mounted. */
 export const HAS_JETSON_STREAM: boolean = JETSON_STREAM_URL.length > 0
@@ -277,7 +319,53 @@ function parseLatLon(raw: string | undefined, fallback: LatLng): LatLng {
   return { lat, lon }
 }
 
-export const SURVEY_ORIGIN: LatLng = parseLatLon(env.VITE_SURVEY_ORIGIN, DEFAULT_SURVEY_ORIGIN)
+const ORIGIN_KEY = 'aeroshield:survey-origin'
+
+/**
+ * An operator-chosen origin, set from the site picker (or `?origin=lat,lon` in the
+ * URL) and remembered in this browser. It wins over `VITE_SURVEY_ORIGIN` so the
+ * demonstration can be moved to any field without a rebuild.
+ */
+function originOverride(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const q = new URLSearchParams(window.location.search).get('origin')
+    if (q) window.localStorage.setItem(ORIGIN_KEY, q)
+    return window.localStorage.getItem(ORIGIN_KEY) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+const ENV_SURVEY_ORIGIN: LatLng = parseLatLon(env.VITE_SURVEY_ORIGIN, DEFAULT_SURVEY_ORIGIN)
+const OVERRIDE = originOverride()
+
+export const SURVEY_ORIGIN: LatLng = OVERRIDE ? parseLatLon(OVERRIDE, ENV_SURVEY_ORIGIN) : ENV_SURVEY_ORIGIN
+
+/** True when the origin came from the site picker rather than configuration. */
+export const SURVEY_ORIGIN_OVERRIDDEN: boolean = OVERRIDE !== undefined
+
+/** The configured origin the site picker resets to. */
+export const CONFIGURED_SURVEY_ORIGIN: LatLng = ENV_SURVEY_ORIGIN
+
+/**
+ * Move the survey block, or pass null to return to the configured origin.
+ *
+ * Reloads the page: the grid, the ground, the imagery and the seeded targets are
+ * all laid out from the origin when the app starts, and a half-moved mission
+ * would be worse than a reload.
+ */
+export function setSurveyOrigin(p: LatLng | null): void {
+  try {
+    if (p) window.localStorage.setItem(ORIGIN_KEY, `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`)
+    else window.localStorage.removeItem(ORIGIN_KEY)
+  } catch {
+    /* storage blocked: nothing to persist */
+  }
+  const url = new URL(window.location.href)
+  url.searchParams.delete('origin')
+  window.location.replace(url.toString())
+}
 
 /** True when the configured origin differs from the built-in default. */
 export const HAS_CUSTOM_SURVEY_ORIGIN: boolean =

@@ -5,6 +5,7 @@ import { RISK_CLASSES, formatConfidence, riskOf } from '@/lib/risk'
 import { DetectionFrame } from '@/components/ui/DetectionFrame'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
+import { DemoEmptyAction } from '@/components/mission/DemoEmptyAction'
 
 /**
  * ContactSheet — the review queue as a photographic contact sheet.
@@ -72,7 +73,7 @@ export function ContactSheet({
               : 'Detections appear here as the drone surveys the block. The mission is still early.'
           }
           action={
-            filtered ? <Button onClick={onClearFilters}>Clear filters</Button> : undefined
+            filtered ? <Button onClick={onClearFilters}>Clear filters</Button> : <DemoEmptyAction />
           }
         />
       </div>

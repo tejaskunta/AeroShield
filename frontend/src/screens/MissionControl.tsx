@@ -1,10 +1,12 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { Detection, LatLng } from '@/types'
 import { useMission } from '@/components/shell/missionContext'
 import { useDetections } from '@/hooks/useDetections'
 import { usePersistedState } from '@/hooks/usePersistedState'
-import { HAS_JETSON_STREAM } from '@/lib/config'
+import { DEMO_MODE, HAS_JETSON_STREAM, setSurveyOrigin } from '@/lib/config'
+import { MISSION } from '@/lib/mockData'
+import { offsetM } from '@/lib/geo'
 import { ImageryAttribution, LiveMap } from '@/components/map/LiveMap'
 import type { Basemap } from '@/components/map/basemaps'
 import { DEFAULT_LAYERS, type LayerState } from '@/components/map/LayerToggles'
@@ -21,6 +23,12 @@ import { fmtM } from '@/components/map/MeasureLayer'
 import { Lightbox } from '@/components/ui/Lightbox'
 import { useCommand } from '@/lib/commands'
 import { DetectionToasts } from '@/components/mission/DetectionToasts'
+import { SimFeed } from '@/components/mission/SimFeed'
+import { DemoControl, MissionDebrief, type DemoPickMode } from '@/components/mission/DemoControl'
+import { simulator } from '@/lib/simulation'
+
+/** A camera picture exists: the Jetson's, or the simulated one in demo mode. */
+const HAS_FEED = HAS_JETSON_STREAM || DEMO_MODE
 
 // The 3D engine (MapLibre + three.js, ~1 MB) loads only when someone opens 3D.
 const LiveMap3D = lazy(() => import('@/components/map3d/LiveMap3D'))
@@ -76,7 +84,8 @@ export function MissionControl() {
   }, [])
 
   const [basemap, setBasemap] = useState<Basemap>('satellite')
-  const [layers, setLayers] = useState<LayerState>(DEFAULT_LAYERS)
+  // The demonstration opens with every mission layer on: grid, coverage and track are the story.
+  const [layers, setLayers] = useState<LayerState>(DEMO_MODE ? { ...DEFAULT_LAYERS, grid: true, coverage: true, track: true } : DEFAULT_LAYERS)
   const [follow, setFollow] = useState<FollowMode>('fit')
   const [refitKey, setRefitKey] = useState(0)
   const [bearing, setBearing] = useState(0)
@@ -115,6 +124,18 @@ export function MissionControl() {
     if (view !== '2d') setMeasuring(false)
   }, [view])
 
+  // Demo pick modes: 'fly' sends the simulated aircraft to each clicked point;
+  // 'site' re-centres the whole survey block (grid, pad, targets) on the click.
+  const [pickMode, setPickMode] = useState<DemoPickMode>(null)
+  useEffect(() => {
+    if (!pickMode) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPickMode(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pickMode])
+
   const onMapClick = useCallback(
     (p: LatLng) => {
       if (picking) {
@@ -122,10 +143,20 @@ export function MissionControl() {
         setPicking(false)
         return
       }
+      if (DEMO_MODE && pickMode === 'fly') {
+        simulator.goTo(p)
+        return
+      }
+      if (DEMO_MODE && pickMode === 'site') {
+        // The origin is the block's SW corner; centre the block on the click.
+        const { cols, rows, cellSizeM } = MISSION.grid
+        setSurveyOrigin(offsetM(p, -(cols * cellSizeM) / 2, -(rows * cellSizeM) / 2))
+        return
+      }
       if (measuring) return
       select(null)
     },
-    [picking, measuring, select],
+    [picking, pickMode, measuring, select],
   )
 
   const pick = useCallback(
@@ -144,7 +175,7 @@ export function MissionControl() {
         switchView(cmd.value === 'toggle' ? (view === '2d' ? '3d' : '2d') : cmd.value)
         break
       case 'layout':
-        if (HAS_JETSON_STREAM) setLayout(cmd.value === 'toggle' ? (layout === 'split' ? 'overlay' : 'split') : cmd.value)
+        if (HAS_FEED) setLayout(cmd.value === 'toggle' ? (layout === 'split' ? 'overlay' : 'split') : cmd.value)
         break
       case 'fit':
         onFollow('fit')
@@ -209,6 +240,21 @@ export function MissionControl() {
     return () => ro.disconnect()
   }, [])
 
+  // The demo panel's height, so detection toasts stack above it instead of under it.
+  const demoRef = useRef<HTMLDivElement | null>(null)
+  const [demoH, setDemoH] = useState(0)
+  const hasDemoPanel = DEMO_MODE && !!mission?.sim
+  useEffect(() => {
+    const el = demoRef.current
+    if (!el || typeof ResizeObserver === 'undefined') {
+      setDemoH(0)
+      return
+    }
+    const ro = new ResizeObserver(() => setDemoH(el.offsetHeight))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [hasDemoPanel])
+
   const cardProps = selected
     ? {
       detection: selected,
@@ -236,21 +282,26 @@ export function MissionControl() {
   }
   const measureProps = { measuring, onMeasure }
 
-  const split = layout === 'split' && HAS_JETSON_STREAM
+  const split = layout === 'split' && HAS_FEED
+  const sim = mission?.sim ?? null
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-ink-deep">
+    // Column below lg: the docked camera styles itself as a full-width band under the
+    // map there (w-full, min-h, border-t), which in a row squeezed the map to ~30px.
+    <div className="flex h-full w-full flex-col overflow-hidden bg-ink-deep lg:flex-row">
       {/* Map pane. In overlay layout it is the whole screen. */}
-      <div className={`relative min-w-0 flex-1 overflow-hidden ${picking ? 'cursor-crosshair' : ''}`}>
+      <div className={`relative min-h-0 min-w-0 flex-1 overflow-hidden ${picking || pickMode ? 'cursor-crosshair' : ''}`}>
         <div className="absolute inset-0">
           {view === '2d' ? (
             <LiveMap {...shared} {...measureProps}>
               {cardProps && <DetectionCallout {...cardProps} bottomInset={stripH + 24} />}
             </LiveMap>
           ) : (
-            <Suspense fallback={<Loading3D />}>
-              <LiveMap3D {...shared} onBearing={setBearing} />
-            </Suspense>
+            <View3DBoundary onFallback={() => switchView('2d')}>
+              <Suspense fallback={<Loading3D />}>
+                <LiveMap3D {...shared} onBearing={setBearing} />
+              </Suspense>
+            </View3DBoundary>
           )}
         </div>
 
@@ -265,11 +316,11 @@ export function MissionControl() {
                 basemap={basemap}
                 onBasemap={setBasemap}
                 layout={layout}
-                onLayout={HAS_JETSON_STREAM ? setLayout : undefined}
+                onLayout={HAS_FEED ? setLayout : undefined}
               />
               {view === '3d' && (
                 <span className="glass px-2.5 py-1 text-[0.6875rem] text-paper-faint">
-                  Right-drag or Ctrl-drag to tilt and rotate
+                  Drag to pan · right-drag to orbit · scroll to zoom
                 </span>
               )}
               {view === '3d' && cardProps && (
@@ -335,21 +386,39 @@ export function MissionControl() {
             </span>
             {view === '3d' && (
               <span className="text-[0.625rem] text-paper-faint">
-                · Buildings © OpenFreeMap, OpenMapTiles, OpenStreetMap · Terrain: Mapzen / AWS
+                · Buildings © OpenStreetMap contributors · Ground detail simulated
               </span>
             )}
           </div>
         </div>
 
-        <DetectionToasts detections={detections} onPick={pick} bottom={stripH + 40} />
+        {DEMO_MODE && sim && (
+          // Bottom-right, just above the status strip and attribution line; grows upward.
+          <div
+            ref={demoRef}
+            className="pointer-events-none absolute right-[4.25rem] z-[540] flex w-[min(580px,calc(100%-5.5rem))] justify-end"
+            style={{ bottom: stripH + 42 }}
+          >
+            <DemoControl sim={sim} pickMode={pickMode} onPickMode={(m) => setPickMode((cur) => (cur === m ? null : m))} />
+          </div>
+        )}
 
-        {HAS_JETSON_STREAM && !split && (
+        <DetectionToasts detections={detections} onPick={pick} bottom={stripH + 40 + (demoH ? demoH + 8 : 0)} />
+
+        {DEMO_MODE && !split && (
+          <SimFeed telemetry={mission?.telemetry ?? null} detections={detections} phase={sim?.phase ?? null} />
+        )}
+        {!DEMO_MODE && HAS_JETSON_STREAM && !split && (
           <LiveFeed key="float" detectorRunning={detectorRunning} floatClassName="right-[4.25rem] top-3 w-[min(400px,34vw)]" />
         )}
+        {DEMO_MODE && sim && <MissionDebrief sim={sim} progress={mission?.progress ?? null} detections={detections} />}
       </div>
 
       {/* Split layout: the camera as a co-equal column beside the map. */}
-      {split && <LiveFeed key="docked" docked detectorRunning={detectorRunning} />}
+      {split && DEMO_MODE && (
+        <SimFeed docked telemetry={mission?.telemetry ?? null} detections={detections} phase={sim?.phase ?? null} />
+      )}
+      {split && !DEMO_MODE && <LiveFeed key="docked" docked detectorRunning={detectorRunning} />}
 
       {viewerIndex >= 0 && (
         <Lightbox
@@ -366,6 +435,27 @@ export function MissionControl() {
       )}
     </div>
   )
+}
+
+/** A 3D failure (no WebGL, a lost context) must never blank the mission screen. */
+class View3DBoundary extends Component<{ onFallback: () => void; children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  render() {
+    if (!this.state.failed) return this.props.children
+    return (
+      <div className="grid h-full place-items-center">
+        <div className="glass flex flex-col items-center gap-2 px-5 py-4 text-center">
+          <span className="text-[0.8125rem] font-medium text-paper">The 3D view could not start on this device.</span>
+          <button type="button" onClick={this.props.onFallback} className="rounded-md bg-signal px-3 py-1.5 text-[0.8125rem] font-semibold text-ink">
+            Switch to 2D
+          </button>
+        </div>
+      </div>
+    )
+  }
 }
 
 function Loading3D() {

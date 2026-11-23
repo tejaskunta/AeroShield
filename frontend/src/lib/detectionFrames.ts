@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import type { Detection } from '@/types'
 import { fetchDetectionImage } from '@/lib/api'
+import { simFrameUrl } from '@/lib/simFrames'
 
 /**
  * The store of detection frame images, as object URLs.
@@ -176,6 +177,8 @@ export function useDetectionImage(
   const id = detection.id
   const real = detection.source === 'backend'
   const k = keyOf(id, variant)
+  // Simulated detections carry a rendered capture frame (see simFrames.ts).
+  const sim = detection.source === 'simulated' ? simFrameUrl(id, variant) : undefined
 
   // Hold this key against eviction for as long as it is being drawn. The fetch
   // is retained from before its bytes land, so the arriving image cannot be
@@ -198,6 +201,8 @@ export function useDetectionImage(
   // returns `undefined` (placeholder) and schedules the fetch. Deferring via
   // `queueMicrotask` also means a render React throws away leaves no fetch
   // behind with no subscriber to receive its result.
+  if (sim) return sim
+
   if (real && snapshot === undefined && variant === 'frame') {
     queueMicrotask(() => request(id, 'frame'))
   }

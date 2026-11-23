@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Minimize2, Radio, RotateCw, X } from 'lucide-react'
+import { Circle, Minimize2, Radio, RotateCw, Square, X } from 'lucide-react'
 import {
   HAS_JETSON_STREAM,
   JETSON_STREAM_PAGE_URL,
@@ -308,6 +308,7 @@ export function LiveFeed({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          <CaptureButton />
           {/*
            * Icon-only, so it inherits its accessible name from `aria-label` and its
            * icon is hidden from the accessibility tree — otherwise the button is
@@ -616,4 +617,93 @@ function statusText(state: FeedState, detectorRunning: boolean): string {
     case 'idle':
       return 'hidden'
   }
+}
+
+// ---------------------------------------------------------------------------
+// Capture — the record switch on the aircraft (jetson/stream.py, /capture)
+// ---------------------------------------------------------------------------
+
+/** `/jetson/stream` -> `/jetson/capture`: the same server, so the same proxy path. */
+const CAPTURE_URL = JETSON_STREAM_URL ? JETSON_STREAM_URL.replace(/\/stream(\?.*)?$/, '/capture') : ''
+
+/**
+ * Whether the aircraft is recording detections. Polled, because the switch lives on
+ * the aircraft and another console (or a restart) can change it. `null` while
+ * unknown or when the pipeline has no /capture endpoint, in which case the button
+ * is hidden rather than offering a control that cannot work.
+ */
+function useCapture(): { capturing: boolean | null; busy: boolean; toggle: () => void } {
+  const [capturing, setCapturing] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!CAPTURE_URL) return
+    let alive = true
+    const poll = async () => {
+      try {
+        const r = await fetch(CAPTURE_URL, { cache: 'no-store' })
+        const j = r.ok ? ((await r.json()) as { capturing?: unknown }) : null
+        if (alive) setCapturing(typeof j?.capturing === 'boolean' ? j.capturing : null)
+      } catch {
+        if (alive) setCapturing(null)
+      }
+    }
+    void poll()
+    const t = window.setInterval(poll, 3000)
+    return () => {
+      alive = false
+      window.clearInterval(t)
+    }
+  }, [])
+
+  const toggle = useCallback(() => {
+    if (capturing === null || busy) return
+    setBusy(true)
+    fetch(CAPTURE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ capturing: !capturing }),
+    })
+      .then(async (r) => {
+        const j = r.ok ? ((await r.json()) as { capturing?: unknown }) : null
+        if (typeof j?.capturing === 'boolean') setCapturing(j.capturing)
+      })
+      .catch(() => {})
+      .finally(() => setBusy(false))
+  }, [capturing, busy])
+
+  return { capturing, busy, toggle }
+}
+
+function CaptureButton() {
+  const { capturing, busy, toggle } = useCapture()
+  if (capturing === null) return null
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={busy}
+      aria-pressed={capturing}
+      title={
+        capturing
+          ? 'Recording: detections from this camera are being added. Click to stop.'
+          : 'Not recording: boxes are shown but nothing is saved. Click to start adding detections.'
+      }
+      className={`-my-1 flex h-6 items-center gap-1 rounded-md px-2 text-[0.6875rem] font-semibold transition-colors disabled:opacity-50 ${
+        capturing ? 'bg-hazard/20 text-hazard-lit ring-1 ring-hazard/50 hover:bg-hazard/30' : 'bg-white/[0.06] text-paper hover:bg-white/[0.1]'
+      }`}
+    >
+      {capturing ? (
+        <>
+          <Square size={9} fill="currentColor" aria-hidden="true" />
+          Stop capture
+        </>
+      ) : (
+        <>
+          <Circle size={9} fill="currentColor" className="text-hazard" aria-hidden="true" />
+          Start capture
+        </>
+      )}
+    </button>
+  )
 }
